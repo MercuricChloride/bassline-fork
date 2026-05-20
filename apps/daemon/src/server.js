@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { serveTcp } from '@bassline/core/serve'
 import { context, conversation } from '@bassline/std'
-import { lobby, localBindings } from './lobby.js'
+import { localBindings } from './lobby/locals.js'
+import lobby from './lobby/server-lobby.js'
 
 const [, , socketPath = '/tmp/bassline.sock'] = process.argv
 

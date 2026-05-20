@@ -30,9 +30,4 @@ const read = lambda(
   })
 )
 
-const bindings = msg({
-  read,
-  write,
-})
-
-export const lobby = msg({ bindings })
+export default msg({ read, write })

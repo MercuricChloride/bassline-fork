@@ -10,6 +10,8 @@ const INLINE_MAX = 60
 
 export const [inspector, onMsg] = propagator()
 
+export default inspector
+
 onMsg(m => console.log(pp(m)))
 
 /**
