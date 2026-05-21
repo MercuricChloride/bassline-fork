@@ -25,6 +25,7 @@ const sharedGlobals = {
   Worker: 'readonly',
   crypto: 'readonly',
   AbortController: 'readonly',
+  location: 'readonly',
 }
 
 const sourceRules = {

@@ -1,0 +1,200 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+header {
+  padding: 8px 16px;
+  background: #222;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: normal;
+  color: #f0f0f0;
+}
+
+#status {
+  color: #888;
+  font-size: 12px;
+}
+
+#status.connected {
+  color: #6f6;
+}
+
+#status.disconnected {
+  color: #f66;
+}
+
+main#panes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.pane {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pane-header {
+  background: #2a2a2a;
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #333;
+}
+
+.pane-title {
+  color: #aaa;
+  font-size: 11px;
+}
+
+.pane-close {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pane-close:hover {
+  color: #f66;
+}
+
+.pane-body {
+  padding: 10px;
+}
+
+.msg {
+  border-left: 2px solid #444;
+  padding-left: 8px;
+  margin-bottom: 4px;
+}
+
+.msg-description {
+  color: #aaa;
+  font-style: italic;
+  white-space: pre-wrap;
+  margin-bottom: 6px;
+}
+
+.msg-entry {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 2px 0;
+}
+
+.msg-entry.block {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.msg-key {
+  color: #88c;
+}
+
+.msg-value {
+  color: #ddd;
+}
+
+.msg-nested {
+  margin-left: 10px;
+  margin-top: 4px;
+}
+
+.cap-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+
+.cap-spelling {
+  color: #6cf;
+  min-width: 70px;
+}
+
+.cap-input {
+  background: #111;
+  border: 1px solid #444;
+  color: #ddd;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: inherit;
+  flex: 1;
+  min-width: 100px;
+}
+
+.cap-input:focus {
+  outline: 1px solid #6cf;
+}
+
+.cap-invoke {
+  background: #36a;
+  border: none;
+  color: white;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  border-radius: 2px;
+}
+
+.cap-invoke:hover {
+  background: #47b;
+}
+
+.cap-invoke.lambda {
+  background: #2a4;
+}
+
+.cap-invoke.lambda:hover {
+  background: #3b5;
+}
+
+.cap-invoke:disabled {
+  background: #444;
+  cursor: not-allowed;
+}
+
+.cap-error {
+  color: #f88;
+  font-size: 11px;
+  width: 100%;
+}
+
+.lambda-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lambda-button .msg-description {
+  margin-bottom: 0;
+  flex: 1 1 200px;
+  min-width: 100px;
+}
