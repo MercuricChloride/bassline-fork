@@ -22,6 +22,7 @@ import { is, msg, failure } from '@bassline/core'
 
 //@todo I need to update semver and it's logic
 //export * from './semver.js'
+export * from './diff.js'
 
 export function scalar(value, aMsg = msg()) {
   if (!is.scalar(value))

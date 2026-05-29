@@ -14,6 +14,7 @@ const quorum = (seconds = 5) => {
     reject('vote failed')
     clearTimeout(timeout)
   }, seconds * 1000)
+
   return () => {
     let voted = false
     return lambda(async () => {

@@ -1,8 +1,5 @@
-export const EOF: unique symbol
-
 type Guard<T> = (value: unknown) => value is T
 export const is: {
-  eof: Guard<typeof EOF>
   null: Guard<null>
   undefined: Guard<undefined>
 

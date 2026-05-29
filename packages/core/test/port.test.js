@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { port, net, EOF, is, propagator } from '../src/bassline.js'
+import { port, net, propagator } from '../src/bassline.js'
 import { collect, filledPort } from './utils.js'
 
 describe('port', () => {
@@ -9,19 +9,19 @@ describe('port', () => {
     expect(await collect(recv)).toEqual(values)
   })
 
-  it('drains buffer before returning EOF', async () => {
+  it('drains buffer before returning', async () => {
     const values = ['a', 'b']
     const [_, recv] = filledPort(values)
     expect(await recv()).toBe(values[0])
     expect(await recv()).toBe(values[1])
-    expect(await recv()).toBe(EOF)
+    expect(await recv()).toBeUndefined()
   })
 
-  it('resolves pending recv with EOF on close', async () => {
+  it('resolves pending recv with undefined on close', async () => {
     const [p, recv] = port()
     const pending = recv()
     p.close()
-    await expect(pending).resolves.toBe(EOF)
+    await expect(pending).resolves.toBeUndefined()
   })
 
   it('drops sends after close', async () => {
@@ -30,12 +30,6 @@ describe('port', () => {
     p.close()
     p.send(2)
     await expect(collect(recv)).resolves.toEqual([1])
-  })
-
-  it('throws when sending EOF', () => {
-    const [p] = port()
-    expect(() => p.send(EOF)).toThrow('Bassline EOF is reserved')
-    p.close()
   })
 })
 
@@ -64,7 +58,7 @@ describe('port sliding buffer', () => {
     p.send(1)
     p.send(2)
     p.close()
-    expect(await recv()).toBe(EOF)
+    expect(await recv()).toBeUndefined()
   })
 
   it('size=0 delivers if someone is waiting', async () => {
@@ -108,7 +102,7 @@ describe('net', () => {
     b.close()
   })
 
-  it('close removes from routing and produces EOF', async () => {
+  it('close removes from routing and produces undefined', async () => {
     const [, join] = net()
     const [a, recva] = join()
     const [b] = join()
@@ -116,22 +110,8 @@ describe('net', () => {
     a.close()
     b.send('after-close')
 
-    // a's recv should return EOF since we closed
-    expect(await recva()).toBe(EOF)
+    expect(await recva()).toBeUndefined()
     b.close()
-  })
-})
-
-describe('isEOF', () => {
-  it('returns true for EOF', () => {
-    expect(is.eof(EOF)).toBe(true)
-  })
-
-  it('returns false for other values', () => {
-    expect(is.eof(null)).toBe(false)
-    expect(is.eof(undefined)).toBe(false)
-    expect(is.eof(42)).toBe(false)
-    expect(is.eof(Symbol())).toBe(false)
   })
 })
 

@@ -10,7 +10,7 @@ const LOAD = 'loadMessage'
  */
 
 /**
- * @typedef {(cap: Send) => string} MintId
+ * @typedef {(cap: Send, msg?: Msg) => string} MintId
  */
 
 /**
@@ -78,7 +78,7 @@ export function mold(aMsg, mintId) {
   /** @type {Record<string, string>} */
   const caps = {}
   for (const spelling of aMsg.capKeys) {
-    caps[String(spelling)] = mintId(aMsg.caps[spelling])
+    caps[String(spelling)] = mintId(aMsg.caps[spelling], aMsg)
   }
   return { [LOAD]: { data, caps } }
 }

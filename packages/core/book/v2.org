@@ -115,10 +115,7 @@ shows one minimal JavaScript realization of that shape.
 *** Predicates
 
 #+BEGIN_SRC js
-  export const EOF = Symbol.for('$$BASSLINE_EOF$$')
-
   export const is = {
-    eof: v => v === EOF,
     null: v => v === null,
     undefined: v => v === undefined,
 
@@ -167,7 +164,7 @@ shows one minimal JavaScript realization of that shape.
 
   function merge(obj, data) {
     if (is.undefined(obj)) return merge({}, data)
-    if (is.undefined(data)) return obj
+    if (is.undefined(data)) return merge(obj, {})
     if (!is.object(data)) throw failure('data must be an object')
     for (const [k, v] of Object.entries(data)) obj[k] = v
     return obj
@@ -615,16 +612,8 @@ act as a sliding buffer, dropping the oldest messages.  Or if we give
 it a capacity of 0, it will not buffer any messages, requiring a
 listener actively be waiting for a message, dropping all others.
 
-The only other thing to note is the EOF symbol. This symbol is sent
-through and used by local port consumers to indicate that the port
-closed.  It is not universal and will serialize over the wire
-meaningfully.  It only exists to make our lives simpler in js.  And it
-is trivial to build your own interpretation of what should signal EOF
-locally.
-
-You cannot pass EOF directly through a port's =send=, nor should you ever have
-to. It should only be created internally inside of a port to notify a
-local consumer we are closed.
+If the port has been closed, recv yields =undefined= indicating
+consumption should be stopped.
 
 #+begin_src js
   export function port(size = Infinity) {
@@ -633,25 +622,25 @@ local consumer we are closed.
     const description = 'I am a port. I support buffered communication.'
     function recv() {
       if (buffer.length > 0) return Promise.resolve(buffer.shift())
-      if (m.closed) return Promise.resolve(EOF)
+      if (m.closed) return Promise.resolve(undefined)
       return new Promise(resolve => waiters.push(resolve))
     }
     const m = new Msg()
     m.defaults({ description })
       .grantCaps({
-        send: msg => {
-          if (is.eof(msg)) throw failure('Bassline EOF is reserved')
+        send: aMsg => {
+          if (is.undefined(aMsg)) return
           // resolve the promise if we have a waiter
-          if (waiters.length > 0) return waiters.shift()(msg)
+          if (waiters.length > 0) return waiters.shift()(aMsg)
           // drop a message if we are over capabity
           if (buffer.length >= size) buffer.shift()
           // add the message to the buffer if we have capacity
-          if (size > 0) buffer.push(msg)
+          if (size > 0) buffer.push(aMsg)
         },
         close: () => m.close(),
       })
       .onClose(() => {
-        for (const w of waiters) w(EOF)
+        for (const w of waiters) w(undefined)
         waiters.length = 0
       })
     return [m, recv]
@@ -742,7 +731,7 @@ Commutative, and Idempotent. This let's any cell behave as a CRDT with caps!
 **** Consume
 This is the most common way to use a port. It takes a =recv= function
 The most common way to use a port, is inside of an endless async loop
-that exits when we recv EOF. We define a helper for this called
+that exits when we recv undefined. We define a helper for this called
 =consume=. It let's us use a recv fn to manage the inputs for a
 propagator, as well as it's lifecycle.
 
@@ -756,10 +745,12 @@ propagator, as well as it's lifecycle.
     prop.merge({ description })
 
     const promise = (async () => {
-      const closed = new Promise(resolve => prop.onClose(() => resolve(EOF)))
+      const closed = new Promise(resolve =>
+        prop.onClose(() => resolve(undefined))
+      )
       while (!prop.closed) {
         const msg = await Promise.race([recv(), closed])
-        if (is.eof(msg)) break
+        if (is.undefined(msg)) break
         prop.invoke('send', msg)
       }
       prop.close()
@@ -903,6 +894,7 @@ is used on the outgoing side to serialize before writing.
 :PROPERTIES:
 :header-args: :tangle ../src/transports/socket.js :comments yes :padline yes
 :END:
+
 A socket is a byte transport. =fromSocket= creates a raw port for byte
 chunks, a message port for parsed messages, and bridges them through
 =frame.read=. Outgoing messages are formatted and written directly to

@@ -154,7 +154,7 @@ test.prop([
 // --- net.close ---
 
 test.prop([fc.array(defined, { minLength: 1, maxLength: 20 })])(
-  'net: join.close produces EOF on all participants',
+  'net: join.close produces undefined on all participants',
   async values => {
     const [n, join] = net()
     const [a, recva] = join()

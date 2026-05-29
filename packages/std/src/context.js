@@ -41,14 +41,26 @@ export const assertMsg = m => {
 export function context() {
   /** @type {Map<string, Send>} */
   const byId = new Map()
-  return { mintId, resolveId, dispatch, clear, entries }
+  return { mintId, revoke, resolveId, dispatch, clear, entries }
 
   /** @type {MintId} */
-  function mintId(capFn) {
+  function mintId(capFn, aMsg) {
     if (!is.fn(capFn)) throw failure('mintId: expected function')
     const id = crypto.randomUUID()
     byId.set(id, capFn)
+    aMsg?.onClose?.(() => {
+      revoke(id)
+    })
     return id
+  }
+
+  /** @param {string} id  */
+  function revoke(id) {
+    if (byId.has(id)) {
+      byId.delete(id)
+      return true
+    }
+    return false
   }
 
   /** @type {ResolveId} */

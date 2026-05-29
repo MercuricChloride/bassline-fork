@@ -16,13 +16,16 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:watch": "pnpm -r test:watch",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint packages/*/src/**/*.js",
     "lint:fix": "eslint packages/*/src/**/*.js --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "pnpm -r clean && rm -rf node_modules",
-    "prepare": "husky"
+    "prepare": "husky",
+    "inspector:start": "pnpm --filter @bassline/web-inspector dev",
+    "daemon:start": "pnpm --filter @bassline/daemon start"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
@@ -35,7 +38,6 @@
   },
   "pnpm": {
     "overrides": {
-      "tar": ">=7.5.11",
       "rollup": ">=4.59.0",
       "underscore": ">=1.13.8",
       "flatted": ">=3.4.0",
@@ -43,17 +45,14 @@
       "markdown-it": ">=14.1.1"
     },
     "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "electron",
-      "esbuild",
-      "msw"
+      "esbuild"
     ]
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@fast-check/vitest": "^0.3.0",
     "@types/node": "^25.5.0",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.15",
     "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",

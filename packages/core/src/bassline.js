@@ -1,8 +1,5 @@
 // [[file:../book/v2.org::*Predicates][Predicates:1]]
-export const EOF = Symbol.for('$$BASSLINE_EOF$$')
-
 export const is = {
-  eof: v => v === EOF,
   null: v => v === null,
   undefined: v => v === undefined,
 
@@ -49,7 +46,7 @@ function remove(obj, keys) {
 
 function merge(obj, data) {
   if (is.undefined(obj)) return merge({}, data)
-  if (is.undefined(data)) return obj
+  if (is.undefined(data)) return merge(obj, {})
   if (!is.object(data)) throw failure('data must be an object')
   for (const [k, v] of Object.entries(data)) obj[k] = v
   return obj
@@ -244,25 +241,25 @@ export function port(size = Infinity) {
   const description = 'I am a port. I support buffered communication.'
   function recv() {
     if (buffer.length > 0) return Promise.resolve(buffer.shift())
-    if (m.closed) return Promise.resolve(EOF)
+    if (m.closed) return Promise.resolve(undefined)
     return new Promise(resolve => waiters.push(resolve))
   }
   const m = new Msg()
   m.defaults({ description })
     .grantCaps({
-      send: msg => {
-        if (is.eof(msg)) throw failure('Bassline EOF is reserved')
+      send: aMsg => {
+        if (is.undefined(aMsg)) return
         // resolve the promise if we have a waiter
-        if (waiters.length > 0) return waiters.shift()(msg)
+        if (waiters.length > 0) return waiters.shift()(aMsg)
         // drop a message if we are over capabity
         if (buffer.length >= size) buffer.shift()
         // add the message to the buffer if we have capacity
-        if (size > 0) buffer.push(msg)
+        if (size > 0) buffer.push(aMsg)
       },
       close: () => m.close(),
     })
     .onClose(() => {
-      for (const w of waiters) w(EOF)
+      for (const w of waiters) w(undefined)
       waiters.length = 0
     })
   return [m, recv]
@@ -319,10 +316,12 @@ Internally I am a propagator driven by a port's recv.`
   prop.merge({ description })
 
   const promise = (async () => {
-    const closed = new Promise(resolve => prop.onClose(() => resolve(EOF)))
+    const closed = new Promise(resolve =>
+      prop.onClose(() => resolve(undefined))
+    )
     while (!prop.closed) {
       const msg = await Promise.race([recv(), closed])
-      if (is.eof(msg)) break
+      if (is.undefined(msg)) break
       prop.invoke('send', msg)
     }
     prop.close()

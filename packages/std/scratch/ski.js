@@ -1,8 +1,21 @@
-import { msg } from '@bassline/core'
-import { lambda, evaluate } from '../src/lambda.js'
+import { msg, is, failure } from '@bassline/core'
+import { lambda, call } from '../src/lambda.js'
 
-const k = lambda(x => _y => x)
-k.merge({ description: 'I am the K combinator. K x y => x' })
+async function evaluate(anExpr) {
+  const expr = await anExpr
+  if (is.msg(expr)) return expr
+  if (!is.array(expr)) throw failure('evalute requires an array / msg for expr')
+  const [head, ...tail] = expr
+  let result = await evaluate(head)
+  for (const m of tail) {
+    result = await call(result, await evaluate(m))
+  }
+  return result
+}
+
+const k = lambda(x => _y => x).merge({
+  description: 'I am the K combinator. K x y => x',
+})
 
 const s = lambda(
   x => y => async z =>
@@ -10,11 +23,9 @@ const s = lambda(
       [x, z],
       [y, z],
     ])
-)
-s.merge({ description: 'I am the S combinator' })
+).merge({ description: 'I am the S combinator' })
 
-const i = await evaluate([s, k, k])
-i.merge({ description: '' })
+const i = (await evaluate([s, k, k])).merge({ description: '' })
 
 let res = await evaluate([i, msg({ scalar: 5 })])
 console.log(res)
