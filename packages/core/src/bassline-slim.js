@@ -10,13 +10,15 @@ export const is = {
   string: v => typeof v === 'string',
   boolean: v => typeof v === 'boolean',
   array: v => Array.isArray(v),
+
   object: v => typeof v === 'object' && !is.null(v) && !is.array(v),
   fn: v => typeof v === 'function',
 
   word: v => is.object(v) && v[WORD],
   msg: v => is.object(v) && v[MSG],
-  bound: v => is.word(v) && is.noun(v.noun),
+  nbound: v => is.word(v) && is.noun(v.noun),
   vbound: v => is.word(v) && is.verb(v.verb),
+  bound: v => is.nbound(v) || is.vbound(v),
 
   nil: v => is.null(v) || is.undefined(v) || is.nan(v),
   scalar: v => is.number(v) || is.string(v) || is.null(v) || is.boolean(v),
@@ -83,7 +85,9 @@ export class Msg {
   }
   get nouns() {
     return Object.fromEntries(
-      this.entries.filter(([_k, v]) => is.bound(v)).map(([k, v]) => [k, v.noun])
+      this.entries
+        .filter(([_k, v]) => is.nbound(v))
+        .map(([k, v]) => [k, v.noun])
     )
   }
   get verbs() {
