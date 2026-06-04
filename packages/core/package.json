@@ -1,6 +1,6 @@
 {
   "name": "@bassline/core",
-  "version": "2.1.0",
+  "version": "2.7.0",
   "description": "Partial Information Programming",
   "type": "module",
   "types": "src/bassline.d.ts",
@@ -8,22 +8,6 @@
     ".": {
       "types": "./src/bassline.d.ts",
       "default": "./src/bassline.js"
-    },
-    "./serve": {
-      "types": "./src/serve/index.d.ts",
-      "default": "./src/serve/index.js"
-    },
-    "./transports": {
-      "types": "./src/transports/index.d.ts",
-      "default": "./src/transports/index.js"
-    },
-    "./transports/node": {
-      "types": "./src/transports/node.d.ts",
-      "default": "./src/transports/node.js"
-    },
-    "./frame": {
-      "types": "./src/frame/index.d.ts",
-      "default": "./src/frame/index.js"
     }
   },
   "scripts": {

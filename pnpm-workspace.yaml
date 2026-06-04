@@ -1,5 +1,8 @@
 packages:
   - apps/daemon
+  - apps/web-inspector
   - packages/core
   - packages/std
   - packages/eth-rpc
+allowBuilds:
+  esbuild: true

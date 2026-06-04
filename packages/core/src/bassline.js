@@ -1,369 +1,117 @@
-// [[file:../book/v2.org::*Predicates][Predicates:1]]
+// [[file:../../../book.org::*Utilities][Utilities:1]]
+export const MSG = Symbol.for('$$BASSLINE_MSG$$')
+export const WORD = Symbol.for('$$BASSLINE_WORD$$')
+
 export const is = {
   null: v => v === null,
   undefined: v => v === undefined,
+  nan: v => Number.isNaN(v),
 
   number: v => typeof v === 'number' && !is.nan(v),
   string: v => typeof v === 'string',
   boolean: v => typeof v === 'boolean',
-  symbol: v => typeof v === 'symbol',
+  array: v => Array.isArray(v),
+
+  object: v => typeof v === 'object' && !is.null(v) && !is.array(v),
   fn: v => typeof v === 'function',
 
-  nan: v => Number.isNaN(v),
-  array: v => Array.isArray(v),
-  arrayOf: pred => v => is.array(v) && v.every(pred),
-  promise: v => v instanceof Promise,
-  msg: v => v instanceof Msg,
+  word: v => is.object(v) && v[WORD],
+  msg: v => is.object(v) && v[MSG],
+  nbound: v => is.word(v) && is.noun(v.noun),
+  vbound: v => is.word(v) && is.verb(v.verb),
+  bound: v => is.nbound(v) || is.vbound(v),
 
   nil: v => is.null(v) || is.undefined(v) || is.nan(v),
   scalar: v => is.number(v) || is.string(v) || is.null(v) || is.boolean(v),
-  object: v => typeof v === 'object' && !is.null(v) && !is.array(v),
-}
-// Predicates:1 ends here
-
-// [[file:../book/v2.org::*Object Manipulation][Object Manipulation:1]]
-function get(obj, keys) {
-  if (is.undefined(obj)) return []
-  if (is.array(keys)) return keys.map(k => obj?.[k]).filter(Boolean)
-  if (is.string(keys)) return obj?.[keys]
-  throw failure('get: keys must be a string or an array of strings')
+  noun: v =>
+    is.scalar(v) || is.object(v) || is.array(v) || is.word(v) || is.msg(v),
+  verb: v => is.fn(v),
 }
 
-function has(obj, keys) {
-  if (is.undefined(obj)) return false
-  if (is.array(keys)) return keys.every(k => has(obj, k))
-  if (is.string(keys)) return Object.hasOwn(obj, keys)
-  throw failure('has: keys must be a string or an array of strings')
-}
+export const word = def => new Word(def)
+export const noun = v => word({ noun: v })
+export const verb = v => word({ verb: v })
+export const msg = dict => new Msg(dict)
+// Utilities:1 ends here
 
-function remove(obj, keys) {
-  if (is.undefined(obj)) return {}
-  if (is.array(keys)) keys.forEach(k => delete obj?.[k])
-  else if (is.string(keys)) delete obj?.[keys]
-  else throw failure('remove: keys must be a string or an array of strings')
-  return obj
-}
-
-function merge(obj, data) {
-  if (is.undefined(obj)) return merge({}, data)
-  if (is.undefined(data)) return merge(obj, {})
-  if (!is.object(data)) throw failure('data must be an object')
-  for (const [k, v] of Object.entries(data)) obj[k] = v
-  return obj
-}
-
-function defaults(obj, data) {
-  if (is.undefined(obj)) return defaults({}, data)
-  if (!is.object(data)) throw failure('data must be an object')
-  for (const [k, v] of Object.entries(data)) {
-    if (is.undefined(obj[k])) obj[k] = v
+// [[file:../../../book.org::*Word Impl][Word Impl:1]]
+export class Word {
+  get [WORD]() {
+    return true
   }
-  return obj
-}
-
-function pick(obj, keys) {
-  if (is.undefined(obj)) return {}
-  if (is.array(keys)) {
-    return Object.fromEntries(keys.map(k => [k, obj[k]]))
-  } else if (is.string(keys)) {
-    return { [keys]: obj[keys] }
-  } else {
-    throw failure('pick: keys must be a string or an array of strings')
+  constructor(definition) {
+    if (is.undefined(definition)) return
+    if (is.fn(definition)) definition(this)
+    else if (
+      is.object(definition) &&
+      ('noun' in definition || 'verb' in definition)
+    ) {
+      this.def(definition)
+    } else throw new Error(`Invalid word definition: ${String(definition)}`)
   }
-}
-
-// Object Manipulation:1 ends here
-
-// [[file:../book/v2.org::*Assertions][Assertions:1]]
-export class AssertionFailure extends Error {}
-/**
- * @param {string} msg
- */
-export function failure(msg) {
-  return new AssertionFailure(msg)
-}
-// Assertions:1 ends here
-
-// [[file:../book/v2.org::*Controller][Controller:1]]
-export class Controller {
-  controller = new AbortController()
-  signal = this.controller.signal
-  close = (reason = 'closed') => {
-    if (!this.closed) {
-      this.controller.abort(reason)
+  def(definition = {}) {
+    if (!is.object(definition))
+      throw new Error(`Invalid word definition: ${String(definition)}`)
+    if ('noun' in definition) {
+      const noun = definition.noun
+      if (!is.noun(noun)) throw new Error(`Invalid noun: ${String(noun)}`)
+      this.noun = noun
+    }
+    if ('verb' in definition) {
+      const verb = definition.verb
+      if (!is.verb(verb)) throw new Error(`Invalid verb: ${String(verb)}`)
+      this.verb = verb
     }
     return this
   }
-  onClose(fn, aSignal) {
-    if (this.closed) void fn()
-    else
-      this.signal.addEventListener('abort', fn, { once: true, signal: aSignal })
-    return this
+}
+// Word Impl:1 ends here
+
+// [[file:../../../book.org::*Msg Impl][Msg Impl:1]]
+export class Msg {
+  get [MSG]() {
+    return true
   }
-  closeGroup(...controllers) {
-    this.closedBy(...controllers)
-    this.closes(...controllers)
-    return this
+  words = Object.create(null)
+  constructor(dict = {}) {
+    this.defineWords(dict)
   }
-  closedBy(...controllers) {
-    controllers.forEach(c => c.closes(this))
-    return this
+  word(aKey) {
+    if (!this.words[aKey]) this.words[aKey] = word()
+    return this.words[aKey]
   }
-  closes(...controllers) {
-    for (const c of controllers) {
-      this.onClose(() => c.close(), c?.signal)
+  define(aKey, aDef) {
+    if (is.word(aDef)) {
+      this.words[aKey] = aDef
+    } else if (is.object(aDef) && ('noun' in aDef || 'verb' in aDef)) {
+      this.word(aKey).def(aDef)
+    } else {
+      throw new Error(`Invalid message word for ${aKey}`)
     }
     return this
   }
-  get closed() {
-    return this.signal.aborted
-  }
-}
-// Controller:1 ends here
-
-// [[file:../book/v2.org::*Concretely][Concretely:1]]
-export function msg(data = {}) {
-  return new Msg().merge(data)
-}
-
-export class Msg extends Controller {
-  data = {}
-  caps = {}
-  constructor() {
-    super()
-    this.onClose(() => {
-      this.delete(this.keys)
-      this.revokeCaps(this.capKeys)
-    })
-  }
-
-  get keys() {
-    return Object.keys(this.data)
-  }
-
-  get capKeys() {
-    return Object.keys(this.caps)
-  }
-
-  // pure access
-  get(keys) {
-    return get(this.data, keys)
-  }
-
-  has(keys) {
-    return has(this.data, keys)
-  }
-
-  pick(keys) {
-    return pick(this.data, keys)
-  }
-
-  // mutating methods
-  delete(keys) {
-    remove(this.data, keys)
+  defineWords(dict) {
+    if (!is.object(dict))
+      throw new Error(`Invalid message definition: ${String(dict)}`)
+    for (const [k, v] of Object.entries(dict)) this.define(k, v)
     return this
   }
-
-  defaults(defaultsObj) {
-    defaults(this.data, defaultsObj)
-    return this
+  get entries() {
+    return Object.entries(this.words)
   }
-
-  merge(data) {
-    merge(this.data, data)
-    return this
-  }
-
-  // pure cap methods
-  capableOf(keys) {
-    return has(this.caps, keys)
-  }
-
-  invoke(spelling, arg = new Msg()) {
-    this.caps?.[spelling]?.(arg)
-    return this
-  }
-
-  send(msg) {
-    return this.invoke('send', msg)
-  }
-
-  // mutating cap methods
-  revokeCaps(keys) {
-    remove(this.caps, keys)
-    return this
-  }
-
-  defaultCaps(defaultsObj) {
-    if (!Object.values(defaultsObj).every(is.fn)) {
-      throw failure('defaultCaps: requires all values to be a fn')
-    }
-    defaults(this.caps, defaultsObj)
-    return this
-  }
-
-  grantCaps(caps) {
-    if (!Object.values(caps).every(is.fn)) {
-      throw failure('grantCaps: requires all values to be a fn')
-    }
-    merge(this.caps, caps)
-    return this
-  }
-
-  // message manipulation
-  copy(data = {}) {
-    return new Msg().defaults(this.data).defaultCaps(this.caps).merge(data)
-  }
-
-  do(fn, ...args) {
-    return fn(this, ...args)
-  }
-
-  map(fn, ...args) {
-    return fn(this.copy(), ...args)
-  }
-
-  with(fn, ...args) {
-    return fn(...args, this)
-  }
-
-  // lifecycle
-  child() {
-    return new Msg().closedBy(this)
-  }
-}
-// Concretely:1 ends here
-
-// [[file:../book/v2.org::*Port implementation][Port implementation:1]]
-export function port(size = Infinity) {
-  const buffer = [],
-    waiters = []
-  const description = 'I am a port. I support buffered communication.'
-  function recv() {
-    if (buffer.length > 0) return Promise.resolve(buffer.shift())
-    if (m.closed) return Promise.resolve(undefined)
-    return new Promise(resolve => waiters.push(resolve))
-  }
-  const m = new Msg()
-  m.defaults({ description })
-    .grantCaps({
-      send: aMsg => {
-        if (is.undefined(aMsg)) return
-        // resolve the promise if we have a waiter
-        if (waiters.length > 0) return waiters.shift()(aMsg)
-        // drop a message if we are over capabity
-        if (buffer.length >= size) buffer.shift()
-        // add the message to the buffer if we have capacity
-        if (size > 0) buffer.push(aMsg)
-      },
-      close: () => m.close(),
-    })
-    .onClose(() => {
-      for (const w of waiters) w(undefined)
-      waiters.length = 0
-    })
-  return [m, recv]
-}
-// Port implementation:1 ends here
-
-// [[file:../book/v2.org::*Propagator][Propagator:1]]
-export function propagator(fn = (v, p) => p(v), m = msg()) {
-  const description = 'I am a propagator. I am a reactive inference machine.'
-  const targets = new Set()
-  const propagate = value => targets.forEach(t => t(value))
-  const to = (...dests) => {
-    dests.forEach(d => targets.add(d))
-    return () => dests.forEach(d => targets.delete(d))
-  }
-
-  m.defaults({ description })
-    .grantCaps({
-      send: val => {
-        Promise.resolve(fn(val, propagate)).catch(e => {
-          throw e
-        })
-      },
-      close: m.close,
-    })
-    .onClose(() => targets.clear())
-
-  return [m, to]
-}
-// Propagator:1 ends here
-
-// [[file:../book/v2.org::*Cell][Cell:1]]
-export function cell(merge, init) {
-  const description = 'I am a cell. I am a propagator with state'
-  let current = init
-  const [m, to] = propagator((incoming, propagate) => {
-    merge(current, incoming, value => {
-      current = value
-      propagate(value)
-    })
-  })
-  m.merge({ description })
-  return [m, { to, value: () => current }]
-}
-// Cell:1 ends here
-
-// [[file:../book/v2.org::*Consume][Consume:1]]
-export function consume(recv, callback) {
-  const description = `\
-I am a consumed port.
-Internally I am a propagator driven by a port's recv.`
-
-  const [prop, to] = propagator(callback)
-  prop.merge({ description })
-
-  const promise = (async () => {
-    const closed = new Promise(resolve =>
-      prop.onClose(() => resolve(undefined))
+  get nouns() {
+    return Object.fromEntries(
+      this.entries
+        .filter(([_k, v]) => is.nbound(v))
+        .map(([k, v]) => [k, v.noun])
     )
-    while (!prop.closed) {
-      const msg = await Promise.race([recv(), closed])
-      if (is.undefined(msg)) break
-      prop.invoke('send', msg)
-    }
-    prop.close()
-  })()
-
-  return [prop, { to, promise }]
-}
-// Consume:1 ends here
-
-// [[file:../book/v2.org::*Net][Net:1]]
-export function net() {
-  const description = `\
-I am a net.
-I implement seamless multi-party communication.`
-  const ports = new Set()
-  const netm = new Msg()
-
-  netm.defaults({ description }).grantCaps({
-    send: msg => ports.forEach(p => p.send(msg)),
-    close: netm.close,
-  })
-
-  const join = size => {
-    const [fromNet, recv] = port(size)
-    const toNet = fromNet.copy().grantCaps({
-      send: msg => {
-        for (const p of ports) {
-          if (p === fromNet) continue
-          p.send(msg)
-        }
-      },
-    })
-
-    ports.add(fromNet)
-    fromNet
-      .closedBy(netm)
-      .closeGroup(toNet)
-      .onClose(() => ports.delete(fromNet))
-
-    return [toNet, recv]
   }
-
-  return [netm, join]
+  get verbs() {
+    return Object.fromEntries(
+      this.entries
+        .filter(([_k, v]) => is.vbound(v))
+        .map(([k, v]) => [k, v.verb])
+    )
+  }
 }
-// Net:1 ends here
+// Msg Impl:1 ends here

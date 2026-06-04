@@ -1,4 +1,4 @@
-// [[file:../../book/v2.org::*WebWorker][WebWorker:1]]
+// [[file:../../../../book.org::*WebWorker][WebWorker:1]]
 import { msg, port } from '../bassline.js'
 
 const description = 'I am a message port.'

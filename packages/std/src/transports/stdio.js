@@ -1,0 +1,27 @@
+// [[file:../../../../book.org::*Stdio][Stdio:1]]
+// import readline from 'node:readline'
+// import { port } from '../comms.js'
+// import { msg } from '@bassline/core'
+// import defaultFrame from '../frame/jsonl.js'
+
+// export function fromStdio(createFrame = defaultFrame) {
+//   const rl = readline.createInterface({ input: process.stdin })
+
+//   const [reader, onRead] = frame.reader()
+//   const [msgs, recv] = port()
+
+//   onRead(v => msgs.send(v))
+
+//   const outgoing = msg()
+//     .merge({ description })
+//     .grantCaps({
+//       send: m => process.stdout.write(frame.format(m)),
+//       close: () => outgoing.close(),
+//     })
+//     .closes(msgs, rl, reader)
+
+//   rl.on('line', line => reader.send(msg().merge({ scalar: line + '\n' })))
+//   rl.on('close', () => outgoing.close())
+//   return [outgoing, recv]
+// }
+// Stdio:1 ends here

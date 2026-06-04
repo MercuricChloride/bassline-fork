@@ -1,27 +1,60 @@
-import { fromWebSocket } from '@bassline/core/transports'
-import { dialogue } from '@bassline/std'
-import sharedLobby from './lobby/shared.js'
-import './lobby/index.js'
+import { Bassline, comms } from '@bassline/std'
+import { installGraph } from './graph.js'
+import { cy } from './shared.js'
 
-const statusEl = document.querySelector('#status')
+const bl = new Bassline().use(comms)
+const inspect = installGraph(bl, cy)
 
-const wsUrl = `ws://${location.hostname}:7077`
-const ws = new WebSocket(wsUrl)
+inspect.seed = () => seed(bl, inspect)
 
-ws.addEventListener('open', () => {
-  statusEl.textContent = 'connected'
-  statusEl.classList.add('connected')
+globalThis.bl = bl
+globalThis.cy = cy
+globalThis.inspect = inspect
 
-  const [conn] = dialogue(fromWebSocket(ws))
-  conn.send(sharedLobby)
-})
+seed(bl, inspect)
 
-ws.addEventListener('close', () => {
-  statusEl.textContent = 'disconnected'
-  statusEl.classList.remove('connected')
-  statusEl.classList.add('disconnected')
-})
+function seed(bl, inspect) {
+  const { verb, msg, noun, word } = bl
+  const { propagator, port } = bl.fns
+  cy.batch(() => {
+    const ack = verb(m => {
+      console.log('ack', m)
+    })
+    const nested = msg({
+      label: bl.noun('nested message'),
+      ack,
+    })
+    const entry = word({
+      noun: nested,
+      verb: m => {
+        console.log('entry word heard', m)
+      },
+    })
+    const root = msg({
+      title: noun('runtime seed'),
+      entry,
+      count: noun(3),
+    })
 
-ws.addEventListener('error', e => {
-  console.error('ws error', e)
-})
+    const inbox = port(8)
+    const outbox = propagator((incoming, send) => {
+      console.log('propagating', incoming)
+      send(incoming)
+    })
+    const sink = verb(m => {
+      console.log('sink', m)
+    })
+
+    outbox.target(sink)
+
+    bl.keep('root-message', root)
+    bl.keep('nested-message', nested)
+    bl.keep('entry-word', entry)
+    bl.keep('inbox', inbox)
+    bl.keep('inbox-word', inbox.toWord())
+    bl.keep('outbox', outbox)
+    bl.keep('outbox-word', outbox.toWord())
+    bl.keep('sink-word', sink)
+  })
+  inspect.refresh()
+}

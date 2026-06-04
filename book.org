@@ -2,7 +2,7 @@
 #+subtitle: I have no send but I must scream
 #+author: Goose
 #+OPTIONS: toc:2 html-style:nil html-postamble:nil ^:nil
-#+HTML_HEAD: <link rel="stylesheet" href="./packages/core/book/style.css"/>
+#+HTML_HEAD: <link rel="stylesheet" href="./book/style.css"/>
 
 * Introduction
 This literate document contains the source code for the core of [[https://bassline.dev][Bassline]] v3.
@@ -150,14 +150,13 @@ Bassline terms.
     verb: v => is.fn(v),
   }
 
-  export function word(definition) { return new Word(definition) }
-  export function noun(value) { return new Word({ noun: value }) }
-  export function verb(value) { return new Word({ verb: value })}
-  export function msg(dict) { return new Msg(dict) }
+  export const word = def => new Word(def)
+  export const noun = v => word({ noun: v })
+  export const verb = v => word({ verb: v })
+  export const msg = dict => new Msg(dict)
 #+END_SRC
 
 ** Words
-*** Abstractly
 
 A =word= is a container for two things:
 
@@ -173,37 +172,55 @@ A =word= is a container for two things:
    word. It must be given a message and lets us communicate
    communication affordances alongside data.
 
-*** Concretely
-
-A word implementation is pretty simple. It's just an object with a
+The word implementation is pretty simple. It's just an object with a
 noun & verb property. The =noun= can be any bassline value, and the =verb=
 can be unary procedure that takes a message.
 
 In JS we use the symbol =WORD= to detect when something is a WORD so
 custom implementations can be built and recognized.
 
+*** Word Impl
+
 #+BEGIN_SRC js
   export class Word {
-    get [WORD]() { return true }
-    constructor(definition = {}) {
-      if (is.fn(definition)) definition(this)
-      else if (is.object(definition)) this.def(definition)
-      else throw new Error(`Invalid word definition: ${definition}`)
+    get [WORD]() {
+      return true
     }
-    def({ noun, verb } = {}) {
-      if (noun !== undefined) this.noun = noun
-      if (verb !== undefined) this.verb = verb
+    constructor(definition) {
+      if (is.undefined(definition)) return
+      if (is.fn(definition)) definition(this)
+      else if (
+        is.object(definition) &&
+        ('noun' in definition || 'verb' in definition)
+      ) {
+        this.def(definition)
+      } else throw new Error(`Invalid word definition: ${String(definition)}`)
+    }
+    def(definition = {}) {
+      if (!is.object(definition))
+        throw new Error(`Invalid word definition: ${String(definition)}`)
+      if ('noun' in definition) {
+        const noun = definition.noun
+        if (!is.noun(noun)) throw new Error(`Invalid noun: ${String(noun)}`)
+        this.noun = noun
+      }
+      if ('verb' in definition) {
+        const verb = definition.verb
+        if (!is.verb(verb)) throw new Error(`Invalid verb: ${String(verb)}`)
+        this.verb = verb
+      }
       return this
     }
   }
 #+END_SRC
 
 ** Messages
-*** Abstractly
 
 A =message= is a dictionary from a spelling to a =word=.
 
 All keys of a =message= must be strings, and all values must be =words=.
+
+*** What a message is
 
 A message is:
 - Data
@@ -259,30 +276,45 @@ As such any "metadata" kind of things belong in the message directly
 like any other data. The "meta-ness" of the data is the choice of the
 receiver of the message.
 
-*** Concretely
+*** Msg Impl
 
 #+BEGIN_SRC js
   export class Msg {
-    get [MSG]() { return true }
+    get [MSG]() {
+      return true
+    }
     words = Object.create(null)
-    constructor(dict = {}) { this.defineWords(dict) }
+    constructor(dict = {}) {
+      this.defineWords(dict)
+    }
     word(aKey) {
       if (!this.words[aKey]) this.words[aKey] = word()
       return this.words[aKey]
     }
     define(aKey, aDef) {
-      if (is.word(aDef)) { this.words[aKey] = aDef }
-      else { this.word(aKey).def(aDef) }
+      if (is.word(aDef)) {
+        this.words[aKey] = aDef
+      } else if (is.object(aDef) && ('noun' in aDef || 'verb' in aDef)) {
+        this.word(aKey).def(aDef)
+      } else {
+        throw new Error(`Invalid message word for ${aKey}`)
+      }
       return this
     }
     defineWords(dict) {
+      if (!is.object(dict))
+        throw new Error(`Invalid message definition: ${String(dict)}`)
       for (const [k, v] of Object.entries(dict)) this.define(k, v)
       return this
     }
-    get entries() { return Object.entries(this.words) }
+    get entries() {
+      return Object.entries(this.words)
+    }
     get nouns() {
       return Object.fromEntries(
-        this.entries.filter(([_k, v]) => is.nbound(v)).map(([k, v]) => [k, v.noun])
+        this.entries
+          .filter(([_k, v]) => is.nbound(v))
+          .map(([k, v]) => [k, v.noun])
       )
     }
     get verbs() {
@@ -295,20 +327,12 @@ receiver of the message.
   }
 #+END_SRC
 
-
-* Std Lib
-
-Now that we have words & messages built out, we can start defining some
-useful machinery.
-
-** Communication Constructs
+* Communication Constructs
 :PROPERTIES:
-:header-args: :tangle ./packages/std/comms.js :comments yes :padline yes
+:header-args: :tangle ./packages/std/src/comms.js :comments yes :padline yes
 :END:
 
-*** Abstractly
-
-Communication in Bassline bootstraps from a single primitive: =send=.
+All communication in Bassline bootstraps from a single primitive: =send=.
 
 =send= is an opaque procedure that takes a single message argument. This
 is what a word can carry as it's =verb=.
@@ -328,7 +352,7 @@ your own local affordances. The only thing we can do in a distributed
 setting, is communicate ways of communicating through an existing
 medium.
 
-*** Concretely
+** Concretely
 
 The communication constructs in Bassline are implemented as normal
 runtime objects that support being projected into a word or a message.
@@ -340,7 +364,7 @@ communication surface. It's just some data alongside a way to speak to
 Should there be more interesting components than just a =send=, then you
 can also project it into the message.
 
-**** Port
+*** Port
 
 A port is a minimal surface that implements buffered communication.
 
@@ -352,14 +376,15 @@ but is leaky to include. This is because knowing how to "send" to
 something, doesn't mean we know it's alive, or that they can
 communicate with us.
 
-Senders are not notified when they =send= to a closed port. This ensures neither side requires knowledge
-of the other's state / status without the other side explicitly
-sharing this, maintaining the sovereignty of the caps.
+Senders are not notified when they =send= to a closed port. This ensures
+neither side requires knowledge of the other's state / status without
+the other side explicitly sharing this, maintaining the sovereignty of
+the caps.
 
 You should still communicate when you die though but we can't force
 you. "#messaging-in-my-grave"
 
-***** Lifecycle Controller
+**** Lifecycle Controller
 
 Internally a port does need to track lifecycle, since ports are often
 what we shove in front of actual transports and they are naturally
@@ -378,11 +403,18 @@ well.
 
   export class Controller {
     controller = new AbortController()
-    get signal() { return this.controller.signal }
-    get closed() { return this.signal.aborted }
-    assertOpen() { if (this.closed) throw new UseAfterClose(this) }
-    close(reason = 'closed') { if (!this.closed) this.controller.abort(reason) }
-
+    get signal() {
+      return this.controller.signal
+    }
+    get closed() {
+      return this.signal.aborted
+    }
+    assertOpen() {
+      if (this.closed) throw new UseAfterClose(this)
+    }
+    close(reason = 'closed') {
+      if (!this.closed) this.controller.abort(reason)
+    }
     onClose(fn, { signal } = {}) {
       if (this.closed) fn()
       else this.signal.addEventListener('abort', fn, { once: true, signal })
@@ -397,7 +429,7 @@ well.
   }
 #+END_SRC
 
-***** Port implementation
+**** Port implementation
 
 The port implementation is rather simple.
 
@@ -411,20 +443,25 @@ If the port has been closed, recv yields =undefined= indicating
 consumption should be stopped.
 
 #+begin_src js
-  export class Port {
+  export class Port extends Controller {
     buffer = []
     waiters = []
-    ctl = new Controller()
-    get isBounded() { return this.size !== Infinity }
-    get anyWaiting() { return this.waiters.length > 0 }
-    get overflowing() { return this.buffer.length >= this.size }
-    get shouldBuffer() { return this.size > 0 }
-    get closed() { return this.ctl.closed }
-    close(reason) { this.ctl.close(reason) }
+    get isBounded() {
+      return this.size !== Infinity
+    }
+    get anyWaiting() {
+      return this.waiters.length > 0
+    }
+    get overflowing() {
+      return this.buffer.length >= this.size
+    }
+    get shouldBuffer() {
+      return this.size > 0
+    }
     constructor(size = Infinity) {
       super()
       this.size = size
-      this.ctl.onClose(() => {
+      this.onClose(() => {
         for (const waiter of this.waiters) waiter(undefined)
         this.waiters.length = 0
       })
@@ -442,9 +479,9 @@ consumption should be stopped.
     }
     async consume(aWord) {
       while (true) {
-        const msg = await this.recv()
-        if (is.undefined(msg)) break
-        aWord.verb(msg)
+        const aMsg = await this.recv()
+        if (is.undefined(aMsg)) break
+        aWord.verb(aMsg)
       }
     }
     toWord() {
@@ -459,7 +496,7 @@ consumption should be stopped.
   }
 #+end_src
 
-**** Propagator
+*** Propagator
 
 A propagator let's us define something that can selectively propagate
 interesting messages to a set of =words=.
@@ -484,9 +521,7 @@ setup your propagators to correctly attenuate.
 
 #+begin_src js
   export class Propagator {
-    constructor(
-      action = (aMsg, send) => send(aMsg)
-    ) {
+    constructor(action = (aMsg, send) => send(aMsg)) {
       this.targets = new Set()
       this.action = action
     }
@@ -500,15 +535,21 @@ setup your propagators to correctly attenuate.
         for (const aWord of words) this.targets.delete(aWord)
       }
     }
-    emit(aMsg) { for (const w of this.targets) w.verb(aMsg) }
-    send(aMsg) { this.action(aMsg, v => this.emit(v)) }
-    toWord() { return verb(aMsg => this.send(aMsg)) }
+    emit(aMsg) {
+      for (const w of this.targets) w.verb(aMsg)
+    }
+    send(aMsg) {
+      this.action(aMsg, v => this.emit(v))
+    }
+    toWord() {
+      return verb(aMsg => this.send(aMsg))
+    }
   }
 #+end_src
 
-**** TODO Purgatory
+*** TODO Purgatory
 These things i'm probably going to remove or change.
-***** TODO Cell
+**** TODO Cell
 
 Goose note: this is old and uses the older api, i'm debating how I
 want to go about building this specifically, since there are some
@@ -557,7 +598,7 @@ Commutative, and Idempotent. This let's any cell behave as a CRDT with caps!
   }
 #+end_src
 
-***** TODO Net
+**** TODO Net
 
 Goose note: I'm probably going to remove this, it's honestly not really
 that interesting.
@@ -575,7 +616,7 @@ the same caps as a port.
 This structure is a decent showcase that "participant" is a very loose
 term in Bassline.
 
-#+begin_src js :tangle false
+#+begin_src js :tangle no
   export function net() {
     const description = `\
   I am a net.
@@ -612,7 +653,7 @@ term in Bassline.
   }
 #+end_src
 
-** Transports
+* Transports
 As above, it helps to separate the abstract role of a transport from
 the concrete transport used in this book.
 
@@ -620,7 +661,7 @@ I need to update this prose below, because the wire conversion stuff
 is a good opportunity to highlight the notion of lowering and lifting
 messages.
 
-*** TODO Abstractly
+** TODO Abstractly
 
 A transport adapts some external medium into local communication
 capabilities. This matters because the programming model should not
@@ -629,7 +670,7 @@ boundary, or a device boundary. Local and non-local communication
 differ in mechanics, but they should not require different conceptual
 tools.
 
-*** Concretely
+** Concretely
 
 Every transport produces a port as we defined above. Internally however
 they handle the marshalling and unmarshalling of the data coming off
@@ -648,7 +689,7 @@ need a framing layer to delimit and parse messages. Message transports
 (WebSocket, WebWorker/MessagePort) carry discrete messages natively
 and skip framing entirely.
 
-**** Framing
+*** Framing
 :PROPERTIES:
 :header-args: :tangle ./packages/std/src/frame/jsonl.js :comments yes :padline yes
 :END:
@@ -671,19 +712,23 @@ is used on the outgoing side to serialize before writing.
 
   export class JSONLFrame {
     buffer = ''
-    constructor(aTarget) { this.target = aTarget }
+    constructor(aTarget) {
+      this.target = aTarget
+    }
     readChunk(aString) {
       if (!is.string(aString)) return
-      buffer += aString
+      this.buffer += aString
       let nl
-      while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl)
-        buffer = buffer.slice(nl + 1)
+      while ((nl = this.buffer.indexOf('\n')) !== -1) {
+        const line = this.buffer.slice(0, nl)
+        this.buffer = this.buffer.slice(nl + 1)
         if (!line) continue
         try {
           const raw = JSON.parse(line)
           this.target.verb(msg(raw))
-        } catch (e) { this.onError(e) }
+        } catch (e) {
+          this.onError(e)
+        }
       }
     }
     onError(e) {
@@ -695,10 +740,16 @@ is used on the outgoing side to serialize before writing.
       return JSON.stringify(aMsg) + '\n'
     }
   }
-  export default function(aTarget) { return new JSONLFrame(aTarget) }
+  export function frame(aTarget) {
+    return new JSONLFrame(aTarget)
+  }
+  export function format(aMsg) {
+    return JSONLFrame.format(aMsg)
+  }
+  export default { frame, format }
 #+end_src
 
-**** Socket
+*** Socket
 :PROPERTIES:
 :header-args: :tangle ./packages/std/src/transports/socket.js :comments yes :padline yes
 :END:
@@ -710,8 +761,8 @@ the socket.
 
 #+begin_src js
   import net from 'node:net'
-  import { msg, verb } from "@bassline/core"
-  import { port } from '../comms.js'
+  import { verb } from "@bassline/core"
+  import { Port } from '../comms.js'
   import defaultFrame from '../frame/jsonl.js'
 
   export function fromSocket(socket, createFrame = defaultFrame) {
@@ -729,11 +780,11 @@ the socket.
   }
 
   export function connect(options = {}, createFrame = defaultFrame) {
-    return fromSocket(net.createConnection(options), frame)
+    return fromSocket(net.createConnection(options), createFrame)
   }
 #+end_src
 
-**** Serving (TCP)
+*** Serving (TCP)
 :PROPERTIES:
 :header-args: :tangle ./packages/std/src/serve/tcp.js :comments yes :padline yes
 :END:
@@ -744,35 +795,30 @@ connections. Each connection is itself a port, produced by
 #+begin_src js
   import nodeNet from 'node:net'
   import { fromSocket } from '../transports/socket.js'
-  import { msg } from '../bassline.js'
   import defaultFrame from '../frame/jsonl.js'
 
-  const description = `\
-  I am a server.
-  I handle incoming connections as ports.`
-
-  export function serve(onConnect, options = {}, frame = defaultFrame) {
-    const m = msg().merge({ description, options })
-
+  export function serve(onConnect, options = {}, createFrame = defaultFrame) {
+    const clients = new Set()
     const server = nodeNet.createServer(socket => {
-      const [client, recv] = fromSocket(socket, frame)
-      client.closedBy(m)
-      onConnect([client, recv])
+      const [incoming, outgoing] = fromSocket(socket, createFrame)
+      clients.add(incoming)
+      incoming.ctl.onClose(() => clients.delete(incoming))
+      onConnect([incoming, outgoing])
     })
 
-    m
-      .grantCaps({ close: m.close })
-      .closes(server)
+    const close = () => {
+      for (const c of [...clients]) c.ctl.close()
+    }
+
+    server.on('close', close)
+    server.on('error', close)
 
     server.listen(options)
-    server.on('close', m.close)
-    server.on('error', m.close)
-
-    return [m, server]
+    return clients
   }
 #+end_src
 
-**** Serving (WebSocket)
+*** Serving (WebSocket)
 :PROPERTIES:
 :header-args: :tangle ./packages/std/src/serve/ws.js :comments yes :padline yes
 :END:
@@ -782,34 +828,29 @@ caller brings their own =WebSocketServer= — no =ws= dependency in
 core.
 
 #+begin_src js
-  import { fromWebSocket } from '../transports/websocket.js'
-  import { msg } from '../bassline.js'
+  // import { fromWebSocket } from '../transports/websocket.js'
+  // import { msg } from '../bassline.js'
 
-  const description = `\
-  I am a web socket server.
-  I behave similar to a normal server,
-  but over web sockets. Go figure!`
+  // export function serve(wss, onConnect) {
+  //   const m = msg()
+  //     .merge({ description })
+  //     .closes(wss)
 
-  export function serve(wss, onConnect) {
-    const m = msg()
-      .merge({ description })
-      .closes(wss)
+  //   wss.on('connection', ws => {
+  //     const [client, recv] = fromWebSocket(ws)
+  //     client.closedBy(m)
+  //     onConnect([client, recv])
+  //   })
 
-    wss.on('connection', ws => {
-      const [client, recv] = fromWebSocket(ws)
-      client.closedBy(m)
-      onConnect([client, recv])
-    })
+  //   m.grantCaps({ close: m.close })
+  //   wss.on('close', m.close)
+  //   wss.on('error', m.close)
 
-    m.grantCaps({ close: m.close })
-    wss.on('close', m.close)
-    wss.on('error', m.close)
-
-    return [m, wss]
-  }
+  //   return [m, wss]
+  // }
 #+end_src
 
-**** WebSocket
+*** WebSocket
 
 A WebSocket is a message transport. Each =ws.send()= is one discrete
 message, so no framing is needed. This works in the browser with
@@ -817,37 +858,30 @@ native =WebSocket=, in Node.js with the =ws= package, and for
 =RTCDataChannel= since it has the same event interface.
 
 #+begin_src js :tangle ./packages/std/src/transports/websocket.js :comments yes :padline yes
-  import { port, msg } from '../bassline.js'
+  import { verb, msg } from '@bassline/core'
+  import { Port } from '../comms.js'
 
-  const description = `I am a web socket.`
-
+  //TODO: FIX PROPERLY!
   export function fromWebSocket(ws) {
-    const outgoing = msg()
-      .merge({ description })
-    const [msgs, recv] = port()
+    const outgoing = verb(m => ws.write(m))
+    const incoming = new Port()
     ws.addEventListener('message', e => {
       try {
-        msgs.send(msg().merge(JSON.parse(e.data)))
+        incoming.send(msg(JSON.parse(e.data)))
       } catch (e) {
         console.error('failed to parse: ', e)
       }
     })
 
-    ws.addEventListener('close', outgoing.close)
-    ws.addEventListener('error', outgoing.close)
+    ws.addEventListener('close', incoming.close)
+    ws.addEventListener('error', incoming.close)
+    incoming.ctl.onClose(() => ws.close())
 
-    outgoing
-      .closes(msgs, ws)
-      .grantCaps({
-        send: m => ws.send(JSON.stringify(m.data)),
-        close: outgoing.close,
-      })
-
-    return [outgoing, recv]
+    return [incoming, outgoing]
   }
 #+end_src
 
-**** WebWorker
+*** WebWorker
 
 A =MessagePort= is a message transport that uses structured
 clone. Objects cross the boundary without serialization. Works with
@@ -871,38 +905,37 @@ clone. Objects cross the boundary without serialization. Works with
   }
 #+end_src
 
-**** Stdio
+*** Stdio
 
 Stdio is a byte transport, like TCP, and uses framing internally to
 produce a port of messages.
 
 #+begin_src js :tangle ./packages/std/src/transports/stdio.js :comments yes :padline yes
-  import readline from 'node:readline'
-  import { port, msg } from '../bassline.js'
-  import defaultFrame from '../frame/jsonl.js'
+  // import readline from 'node:readline'
+  // import { port } from '../comms.js'
+  // import { msg } from '@bassline/core'
+  // import defaultFrame from '../frame/jsonl.js'
 
-  const description = 'I am a stdio port'
+  // export function fromStdio(createFrame = defaultFrame) {
+  //   const rl = readline.createInterface({ input: process.stdin })
 
-  export function fromStdio(frame = defaultFrame) {
-    const rl = readline.createInterface({ input: process.stdin })
+  //   const [reader, onRead] = frame.reader()
+  //   const [msgs, recv] = port()
 
-    const [reader, onRead] = frame.reader()
-    const [msgs, recv] = port()
+  //   onRead(v => msgs.send(v))
 
-    onRead(v => msgs.send(v))
+  //   const outgoing = msg()
+  //     .merge({ description })
+  //     .grantCaps({
+  //       send: m => process.stdout.write(frame.format(m)),
+  //       close: () => outgoing.close(),
+  //     })
+  //     .closes(msgs, rl, reader)
 
-    const outgoing = msg()
-      .merge({ description })
-      .grantCaps({
-        send: m => process.stdout.write(frame.format(m)),
-        close: () => outgoing.close()
-      })
-      .closes(msgs, rl, reader)
-
-    rl.on('line', line => reader.send(msg().merge({ scalar: line + '\n' })))
-    rl.on('close', () => outgoing.close())
-    return [outgoing, recv]
-  }
+  //   rl.on('line', line => reader.send(msg().merge({ scalar: line + '\n' })))
+  //   rl.on('close', () => outgoing.close())
+  //   return [outgoing, recv]
+  // }
 #+end_src
 
 #+BEGIN_EXPORT html

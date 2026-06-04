@@ -12,7 +12,7 @@
     "node": ">=18.0.0",
     "pnpm": ">=8.0.0"
   },
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@11.5.1",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
@@ -34,18 +34,6 @@
     ],
     "*.{json,md,yml,yaml}": [
       "prettier --write"
-    ]
-  },
-  "pnpm": {
-    "overrides": {
-      "rollup": ">=4.59.0",
-      "underscore": ">=1.13.8",
-      "flatted": ">=3.4.0",
-      "lodash": ">=4.17.23",
-      "markdown-it": ">=14.1.1"
-    },
-    "onlyBuiltDependencies": [
-      "esbuild"
     ]
   },
   "devDependencies": {
