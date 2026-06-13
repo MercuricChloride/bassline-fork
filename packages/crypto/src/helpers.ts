@@ -26,12 +26,18 @@ export const hashSpend = (inputs: UTXO[], outputs: Coin[]) => {
 export const coinId = (signature: string, output: Coin, index: number) =>
   bytesToHex(sha256(enc.encode(signature + JSON.stringify(output) + index)))
 
-export const sign = (hash: Uint8Array, privKey: Uint8Array) => bytesToHex(secp256k1.sign(hash, privKey))
+export const sign = (hash: Uint8Array, privKey: Uint8Array) =>
+  bytesToHex(secp256k1.sign(hash, privKey))
 
 export const verify = (sig: string, hash: Uint8Array, pubKey: string) =>
   secp256k1.verify(hexToBytes(sig), hash, hexToBytes(pubKey))
 
-export const createSpend = (privKey: Uint8Array, pubKey: Uint8Array, inputs: UTXO[], outputs: Coin[]) => {
+export const createSpend = (
+  privKey: Uint8Array,
+  pubKey: Uint8Array,
+  inputs: UTXO[],
+  outputs: Coin[]
+) => {
   const hash = hashSpend(inputs, outputs)
   return {
     inputs,
@@ -41,20 +47,31 @@ export const createSpend = (privKey: Uint8Array, pubKey: Uint8Array, inputs: UTX
   }
 }
 
-export function wallet(store: Map<string, UTXO>, sendTx?: Send<Spend>, kp = generateKeyPair()) {
+export function wallet(
+  store: Map<string, UTXO>,
+  sendTx?: Send<Spend>,
+  kp = generateKeyPair()
+) {
   const address = hash(kp.pubKey)
   const w = {
     address,
     get: (id: string) => store.get(id),
     has: (id: string) => store.has(id),
-    forOwner: (pkh = address) => [...store.values()].filter(u => u.pubKeyHash === pkh),
-    balance: (pkh = address) => w.forOwner(pkh).reduce((s, i) => s + i.value, 0),
+    forOwner: (pkh = address) =>
+      [...store.values()].filter(u => u.pubKeyHash === pkh),
+    balance: (pkh = address) =>
+      w.forOwner(pkh).reduce((s, i) => s + i.value, 0),
     get size() {
       return store.size
     },
     all: () => [...store.values()],
     sendTx: (spend: Unsigned<Spend>, target = sendTx) => {
-      const signed = createSpend(kp.privKey, kp.pubKey, spend.inputs, spend.outputs)
+      const signed = createSpend(
+        kp.privKey,
+        kp.pubKey,
+        spend.inputs,
+        spend.outputs
+      )
       if (target) {
         target(signed)
       } else {

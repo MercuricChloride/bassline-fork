@@ -1,26 +1,39 @@
 export const MSG: unique symbol
 export const WORD: unique symbol
+export const BASSLINE: unique symbol
 
-export type Guard<T> = (value: unknown) => value is T
+export type Guard<T = any> = (value: unknown) => value is T
 export type Predicate = (value: unknown) => boolean
+
 export type Scalar = number | string | boolean | null
-export type Verb<M extends IMsg = IMsg> = (message: M) => unknown
-export type Noun = Scalar | Record<string, unknown> | unknown[] | Word | IMsg
-export type WordDefinition<N extends Noun = Noun, V extends Verb = Verb> =
-  | { noun: N; verb?: V }
-  | { noun?: N; verb: V }
-export type WordInitializer = (word: Word) => void
-export type MsgDefinition = Record<string, Word | WordDefinition>
+export type Noun = any
+export type Verb = (message: Msg) => any
 
-export type NounBoundWord<N extends Noun = Noun> = Word<N, Verb> & {
+export interface Word<N = any, V = any> {
+  readonly [WORD]: true
   noun: N
+  verb?: V
 }
-export type VerbBoundWord<V extends Verb = Verb> = Word<Noun, V> & {
-  verb: V
-}
-export type BoundWord = NounBoundWord | VerbBoundWord
 
-export const is: {
+export interface Msg {
+  readonly [MSG]: true
+  [key: string]: any
+  [Symbol.iterator](): IterableIterator<[string, Word]>
+}
+
+export interface WordProto {
+  readonly [WORD]: true
+}
+
+export interface MsgProto {
+  readonly [MSG]: true
+  [Symbol.iterator](): IterableIterator<[string, Word]>
+}
+
+export const wordProto: WordProto
+export const msgProto: MsgProto
+
+export interface Recognition {
   null: Guard<null>
   undefined: Guard<undefined>
   nan: Predicate
@@ -28,16 +41,17 @@ export const is: {
   number: Guard<number>
   string: Guard<string>
   boolean: Guard<boolean>
-  array: Guard<unknown[]>
+  array: Guard<any[]>
 
-  object: Guard<Record<string, unknown>>
+  object: Guard<Record<string, any>>
   fn: Guard<Function>
 
+  bassline: Guard<Bassline>
   word: Guard<Word>
-  msg: Guard<IMsg>
-  nbound: Guard<NounBoundWord>
-  vbound: Guard<VerbBoundWord>
-  bound: Guard<BoundWord>
+  msg: Guard<Msg>
+  nbound: Guard<Word>
+  vbound: Guard<Word>
+  bound: Guard<Word>
 
   nil: Predicate
   scalar: Guard<Scalar>
@@ -45,55 +59,26 @@ export const is: {
   verb: Guard<Verb>
 }
 
-export function word(): Word
-export function word<N extends Noun, V extends Verb>(
-  definition: WordDefinition<N, V>
-): Word<N, V>
-export function word(definition: WordInitializer): Word
+export const is: Recognition
 
-export function noun<N extends Noun>(value: N): Word<N, Verb>
-export function verb<V extends Verb>(value: V): Word<Noun, V>
-export function msg(): Msg
-export function msg(dict: undefined): Msg
-export function msg(dict: MsgDefinition): Msg
+export interface Bassline {
+  readonly [BASSLINE]: true
+  readonly is: Recognition
 
-export class Word<N extends Noun = Noun, V extends Verb = Verb> {
-  readonly [WORD]: true
-  noun?: N
-  verb?: V
+  readonly fresh: this
+  readonly reference: this
 
-  constructor(definition?: WordDefinition<N, V> | WordInitializer)
+  derive<T = any>(fn: (bassline: this) => T): T
+  extend<T extends object = any>(fn: (bassline: this) => T): this & T
 
-  def(): this
-  def<N2 extends Noun, V2 extends Verb>(
-    definition: WordDefinition<N2, V2>
-  ): this
+  word<N = any, V = any>(noun: N, verb?: V): Word<N, V>
+  verb<V extends Verb = Verb>(verb: V): Word<null, V>
+  msg<T = any>(dict?: T): Msg
 }
 
-export interface IMsg {
-  readonly [MSG]: true
-  words: Record<string, Word>
-
-  word(key: string): Word
-  define(key: string, definition: Word | WordDefinition): this
-  defineWords(dict: MsgDefinition): this
-
-  readonly entries: Array<[string, Word]>
-  readonly nouns: Record<string, Noun>
-  readonly verbs: Record<string, Verb>
+export interface BasslineRoot extends Omit<Bassline, 'fresh' | 'extend'> {
+  readonly fresh: Bassline
 }
 
-export class Msg implements IMsg {
-  readonly [MSG]: true
-  words: Record<string, Word>
-
-  constructor(dict?: MsgDefinition)
-
-  word(key: string): Word
-  define(key: string, definition: Word | WordDefinition): this
-  defineWords(dict: MsgDefinition): this
-
-  readonly entries: Array<[string, Word]>
-  readonly nouns: Record<string, Noun>
-  readonly verbs: Record<string, Verb>
-}
+export const bassline: BasslineRoot
+export default bassline

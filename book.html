@@ -1,0 +1,1280 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+<!-- 2026-06-03 Wed 23:11 -->
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bassline V3</title>
+<meta name="author" content="Goose" />
+<meta name="generator" content="Org Mode" />
+<link rel="stylesheet" href="./book/style.css"/>
+</head>
+<body>
+<div id="content" class="content">
+<h1 class="title">Bassline V3
+<br />
+<span class="subtitle">I have no send but I must scream</span>
+</h1>
+<div id="table-of-contents" role="doc-toc">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="#org35bd202">1. Introduction</a>
+<ul>
+<li><a href="#org92c4d69">1.1. TLDR</a></li>
+<li><a href="#org5b95d6e">1.2. The Boogeyman</a></li>
+<li><a href="#org3583f64">1.3. Related Works &amp; Important Differences</a></li>
+</ul>
+</li>
+<li><a href="#org4f63784">2. The Kernel</a>
+<ul>
+<li><a href="#org0dccbae">2.1. Utilities</a></li>
+<li><a href="#orge841dfb">2.2. Words</a></li>
+<li><a href="#org06d72f9">2.3. Messages</a></li>
+</ul>
+</li>
+<li><a href="#org06feb8f">3. Std Lib</a>
+<ul>
+<li><a href="#org6155e4b">3.1. Communication Constructs</a></li>
+<li><a href="#org310aa76">3.2. Transports</a></li>
+<li><a href="#orgee8c302">3.3. Recognition</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="outline-container-org35bd202" class="outline-2">
+<h2 id="org35bd202"><span class="section-number-2">1.</span> Introduction</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+This literate document contains the source code for the core of <a href="https://bassline.dev">Bassline</a> v3.
+</p>
+
+<p>
+It is designed to be hacked on and modified, so we encourage people to
+read this!
+</p>
+</div>
+<div id="outline-container-org92c4d69" class="outline-3">
+<h3 id="org92c4d69"><span class="section-number-3">1.1.</span> TLDR</h3>
+<div class="outline-text-3" id="text-1-1">
+<p>
+Bassline is built to make distributed programming dramatically simpler,
+easier, and more flexible.
+</p>
+
+<p>
+Specifically we are most interested in how this simplifies
+decentralized distributed programming. An area that outside of
+blockchains or very specific protocols is relatively starved.
+</p>
+
+<p>
+Bassline offers a programming / epistemic model that allows arbitrary
+programs &amp; devices to collaborate and interact in an insanely small
+package. It demands almost nothing from participants, is trivial to
+support, and thrives in truly hetergenous settings.
+</p>
+</div>
+</div>
+<div id="outline-container-org5b95d6e" class="outline-3">
+<h3 id="org5b95d6e"><span class="section-number-3">1.2.</span> The Boogeyman</h3>
+<div class="outline-text-3" id="text-1-2">
+
+<div id="org9937748" class="figure">
+<p><img src="book/evangel.jpeg" alt="evangel.jpeg" width="500px" align="center" />
+</p>
+</div>
+
+<p>
+Distributed programming has the same reputation as a boogeyman. It's
+something that you check for under your bed at night. And it's
+decentralized cousin is described similarly to the devil or an eldritch
+horror.
+</p>
+
+<p>
+The church of k8s and the related devops sects preach the dangers of
+this "beast". They offer salvation through system images,
+microservices, monoliths, and more specifications. Yet none of these
+fully solve the problem.
+</p>
+
+<p>
+We don't believe distributed programming is a boogeyman, we think it's
+just misunderstood. The biggest misunderstanding, we believe, is the
+extreme cost uncontrolled proliferation of non-local ontology.
+</p>
+
+<p>
+In local programming we commonly build programs in terms of "things"
+and what they mean. It is an act of building a local ontology to
+express the program we want. But the issue is that when switching to a
+distributed setting, there are no "things". A distributed program is
+just a program running on a single machine that talks with the outside
+world via local affordances. There is no "message broker", there is
+locally received messages that I locally assign to be coming from a
+message broker.
+</p>
+
+<p>
+Bassline doesn't fight this, in fact we lean into it fully. We
+acknowledge that outside of our local programs, we can't know anything
+concrete, we can only observe messages. There is natural information
+asymmetry between "what I know currently" and "everything else".
+</p>
+
+<p>
+So rather than build from "things", we build from communcation, with
+the commitment being we do not build from things that aren't also
+available in the most extreme p2p setting you can imagine. The result
+is a system that is decentralized &amp; distributed by construction, yet
+totally ontologically sovereign.
+</p>
+</div>
+</div>
+<div id="outline-container-org3583f64" class="outline-3">
+<h3 id="org3583f64"><span class="section-number-3">1.3.</span> Related Works &amp; Important Differences</h3>
+<div class="outline-text-3" id="text-1-3">
+<p>
+This isn't the first system to focus on communication. But we believe
+we expand on some of the ideas in subtle but important ways.
+</p>
+
+<p>
+Things like the actor model, ocap systems, etc are much less
+"thing-oriented" than other systems. But they still make some global
+ontological commitments for the kind of shape the system has.
+</p>
+
+<p>
+The tricky thing is that these commitments to the system shape mandate
+their supporting constructs since the worldview &amp; model requires them.
+</p>
+</div>
+<div id="outline-container-org52e553a" class="outline-4">
+<h4 id="org52e553a"><span class="section-number-4">1.3.1.</span> <span class="todo TODO">TODO</span> Expand on the issues of blessed addressing &amp; identity</h4>
+<div class="outline-text-4" id="text-1-3-1">
+<ul class="org-ul">
+<li>Identity is a local judgement</li>
+<li>Addressing requires specific topologies &amp; protocols</li>
+<li>Bassline doesn't preclude addressing or identity, we just don't
+build it in the foundation, since it doesn't hold in all settings.</li>
+<li>This means that in Bassline you can use whatever you want / need,
+because we don't bless any kind of communication / connection.</li>
+</ul>
+</div>
+</div>
+<div id="outline-container-org65d56e7" class="outline-4">
+<h4 id="org65d56e7"><span class="section-number-4">1.3.2.</span> <span class="todo TODO">TODO</span> Expand on the issues of symmetric communication</h4>
+<div class="outline-text-4" id="text-1-3-2">
+<ul class="org-ul">
+<li>The ability to receive information doesn't imply the ability to respond</li>
+<li>The ability to respond to something doesn't imply the ability to be receive</li>
+<li>These become more powerful when you have anonymous communication and
+no standard identity</li>
+</ul>
+</div>
+</div>
+<div id="outline-container-org98c1ee0" class="outline-4">
+<h4 id="org98c1ee0"><span class="section-number-4">1.3.3.</span> <span class="todo TODO">TODO</span> Expand on the tyranny of names</h4>
+<div class="outline-text-4" id="text-1-3-3">
+<ul class="org-ul">
+<li>anonymous messages and caps gives us implicit / tacit apis</li>
+<li>Removes the concept of an "endpoint" because it's not there</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-org4f63784" class="outline-2">
+<h2 id="org4f63784"><span class="section-number-2">2.</span> The Kernel</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+The kernel is extremely small. It's a narrow waist of 2 constructs
+that all our local programs can easily project into.
+</p>
+
+<p>
+The messages, which are containers that allow <code>words</code> to be named. As
+well as <code>words</code>, which are containers that give us a way of carrying
+data + an opaque referent we can send messages.
+</p>
+
+<p>
+If you were building out a fresh implementation of Bassline in another
+language, you would only have to implement these constructs, then just
+define projections to and from these forms.
+</p>
+
+<p>
+For each concept we introduce we will separate the abstract idea from
+the concrete implementation used in this book. The abstract layer
+explains what shape of thing we are modeling. The concrete layer shows
+one minimal JavaScript realization of that shape.
+</p>
+</div>
+<div id="outline-container-org0dccbae" class="outline-3">
+<h3 id="org0dccbae"><span class="section-number-3">2.1.</span> Utilities</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+We keep it minimal for the utilities. We export a few factories for
+words, nouns, and verbs. We also include a recognition vocabulary for
+Bassline terms.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">export const MSG = Symbol.for('$$BASSLINE_MSG$$')
+export const WORD = Symbol.for('$$BASSLINE_WORD$$')
+
+export const is = {
+  null: v =&gt; v === null,
+  undefined: v =&gt; v === undefined,
+  nan: v =&gt; Number.isNaN(v),
+
+  number: v =&gt; typeof v === 'number' &amp;&amp; !is.nan(v),
+  string: v =&gt; typeof v === 'string',
+  boolean: v =&gt; typeof v === 'boolean',
+  array: v =&gt; Array.isArray(v),
+
+  object: v =&gt; typeof v === 'object' &amp;&amp; !is.null(v) &amp;&amp; !is.array(v),
+  fn: v =&gt; typeof v === 'function',
+
+  word: v =&gt; is.object(v) &amp;&amp; v[WORD],
+  msg: v =&gt; is.object(v) &amp;&amp; v[MSG],
+  nbound: v =&gt; is.word(v) &amp;&amp; is.noun(v.noun),
+  vbound: v =&gt; is.word(v) &amp;&amp; is.verb(v.verb),
+  bound: v =&gt; is.nbound(v) || is.vbound(v),
+
+  nil: v =&gt; is.null(v) || is.undefined(v) || is.nan(v),
+  scalar: v =&gt; is.number(v) || is.string(v) || is.null(v) || is.boolean(v),
+  noun: v =&gt;
+    is.scalar(v) || is.object(v) || is.array(v) || is.word(v) || is.msg(v),
+  verb: v =&gt; is.fn(v),
+}
+
+export const word = def =&gt; new Word(def)
+export const noun = v =&gt; word({ noun: v })
+export const verb = v =&gt; word({ verb: v })
+export const msg = dict =&gt; new Msg(dict)
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-orge841dfb" class="outline-3">
+<h3 id="orge841dfb"><span class="section-number-3">2.2.</span> Words</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+A <code>word</code> is a container for two things:
+</p>
+
+<ol class="org-ol">
+<li><p>
+An early bound <code>noun</code>
+</p>
+
+<p>
+A word's noun represents data commited upon creation. It can be
+either undefined, null, number, string, array, record, a word, or a
+message.
+</p></li>
+
+<li><p>
+A late bound <code>verb</code>
+</p>
+
+<p>
+A word's verb is a uni-directional communication affordance on a
+word. It must be given a message and lets us communicate
+communication affordances alongside data.
+</p></li>
+</ol>
+
+<p>
+The word implementation is pretty simple. It's just an object with a
+noun &amp; verb property. The <code>noun</code> can be any bassline value, and the <code>verb</code>
+can be unary procedure that takes a message.
+</p>
+
+<p>
+In JS we use the symbol <code>WORD</code> to detect when something is a WORD so
+custom implementations can be built and recognized.
+</p>
+</div>
+<div id="outline-container-org02e377f" class="outline-4">
+<h4 id="org02e377f"><span class="section-number-4">2.2.1.</span> Word Impl</h4>
+<div class="outline-text-4" id="text-2-2-1">
+<div class="org-src-container">
+<pre class="src src-js">export class Word {
+  get [WORD]() {
+    return true
+  }
+  constructor(definition) {
+    if (is.undefined(definition)) return
+    if (is.fn(definition)) definition(this)
+    else if (
+      is.object(definition) &amp;&amp;
+      ('noun' in definition || 'verb' in definition)
+    ) {
+      this.def(definition)
+    } else throw new Error(`Invalid word definition: ${String(definition)}`)
+  }
+  def(definition = {}) {
+    if (!is.object(definition))
+      throw new Error(`Invalid word definition: ${String(definition)}`)
+    if ('noun' in definition) {
+      const noun = definition.noun
+      if (!is.noun(noun)) throw new Error(`Invalid noun: ${String(noun)}`)
+      this.noun = noun
+    }
+    if ('verb' in definition) {
+      const verb = definition.verb
+      if (!is.verb(verb)) throw new Error(`Invalid verb: ${String(verb)}`)
+      this.verb = verb
+    }
+    return this
+  }
+}
+</pre>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-org06d72f9" class="outline-3">
+<h3 id="org06d72f9"><span class="section-number-3">2.3.</span> Messages</h3>
+<div class="outline-text-3" id="text-2-3">
+<p>
+A <code>message</code> is a dictionary from a spelling to a <code>word</code>.
+</p>
+
+<p>
+All keys of a <code>message</code> must be strings, and all values must be <code>words</code>.
+</p>
+</div>
+<div id="outline-container-orgfcc6291" class="outline-4">
+<h4 id="orgfcc6291"><span class="section-number-4">2.3.1.</span> What a message is</h4>
+<div class="outline-text-4" id="text-2-3-1">
+<p>
+A message is:
+</p>
+<ul class="org-ul">
+<li>Data</li>
+<li>Anonymous</li>
+<li>Sovereign</li>
+<li>Portable and easy to share</li>
+<li>Free of "meta-data"</li>
+<li>Free of a priveledged meaning</li>
+</ul>
+
+<p>
+Let's expand on these a bit
+</p>
+</div>
+<ol class="org-ol">
+<li><a id="org047e6b0"></a>They are data<br />
+<div class="outline-text-5" id="text-2-3-1-1">
+<p>
+Messages are fundamentally data. They are values, and are easily
+shared over the wire, stored, etc.
+</p>
+
+<p>
+They do not have a declared schema other than being dictionaries of
+words.
+</p>
+
+<p>
+Since they are data you are free to be replicated and shared as you
+wish.
+</p>
+</div>
+</li>
+<li><a id="org223e20f"></a>They are globally anonymous<br />
+<div class="outline-text-5" id="text-2-3-1-2">
+<p>
+There is no global way of addressing a message or a word. So we never
+say: "this message" in a universal manner.
+</p>
+
+<p>
+A message can be bound to a name or address locally, giving us a way
+to refer to it. But that is a property of the binding, not of the
+message.
+</p>
+
+<p>
+You also might have a way of identifying a message such as an id or a
+hash. But this not fundamental to a message, it's just an
+interpretation of it's words.
+</p>
+</div>
+</li>
+<li><a id="org86986cf"></a>Messages are sovereign<br />
+<div class="outline-text-5" id="text-2-3-1-3">
+<p>
+<b>This is an important point, so listen up!</b>
+</p>
+
+<p>
+Messages are ontologically sovereign. Meaning they have no special
+meaning other than the meaning you choose to assign to it.
+</p>
+
+<p>
+As such, when receiving a message that message is YOURS. It's
+"meaning" and what it entails is completely decided by you. A message
+can contain information to make this process easier, but a message
+doesn't have an absolutely true interpretation.
+</p>
+
+<p>
+This is why there is no "metadata" for a message. Because metadata
+blesses a canonical form of what is the "content" and what is "about
+the message". This violates the ontological sovereignty of a message.
+</p>
+
+<p>
+As such any "metadata" kind of things belong in the message directly
+like any other data. The "meta-ness" of the data is the choice of the
+receiver of the message.
+</p>
+</div>
+</li>
+</ol>
+</div>
+<div id="outline-container-orgaf01fcc" class="outline-4">
+<h4 id="orgaf01fcc"><span class="section-number-4">2.3.2.</span> Msg Impl</h4>
+<div class="outline-text-4" id="text-2-3-2">
+<div class="org-src-container">
+<pre class="src src-js">export class Msg {
+  get [MSG]() {
+    return true
+  }
+  words = Object.create(null)
+  constructor(dict = {}) {
+    this.defineWords(dict)
+  }
+  word(aKey) {
+    if (!this.words[aKey]) this.words[aKey] = word()
+    return this.words[aKey]
+  }
+  define(aKey, aDef) {
+    if (is.word(aDef)) {
+      this.words[aKey] = aDef
+    } else if (is.object(aDef) &amp;&amp; ('noun' in aDef || 'verb' in aDef)) {
+      this.word(aKey).def(aDef)
+    } else {
+      throw new Error(`Invalid message word for ${aKey}`)
+    }
+    return this
+  }
+  defineWords(dict) {
+    if (!is.object(dict))
+      throw new Error(`Invalid message definition: ${String(dict)}`)
+    for (const [k, v] of Object.entries(dict)) this.define(k, v)
+    return this
+  }
+  get entries() {
+    return Object.entries(this.words)
+  }
+  get nouns() {
+    return Object.fromEntries(
+      this.entries
+        .filter(([_k, v]) =&gt; is.nbound(v))
+        .map(([k, v]) =&gt; [k, v.noun])
+    )
+  }
+  get verbs() {
+    return Object.fromEntries(
+      this.entries
+        .filter(([_k, v]) =&gt; is.vbound(v))
+        .map(([k, v]) =&gt; [k, v.verb])
+    )
+  }
+}
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-org06feb8f" class="outline-2">
+<h2 id="org06feb8f"><span class="section-number-2">3.</span> Std Lib</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+Now that we have words &amp; messages built out, we can start defining some
+useful machinery.
+</p>
+</div>
+<div id="outline-container-org6155e4b" class="outline-3">
+<h3 id="org6155e4b"><span class="section-number-3">3.1.</span> Communication Constructs</h3>
+<div class="outline-text-3" id="text-3-1">
+<p>
+All communication in Bassline bootstraps from a single primitive: <code>send</code>.
+</p>
+
+<p>
+<code>send</code> is an opaque procedure that takes a single message argument. This
+is what a word can carry as it's <code>verb</code>.
+</p>
+
+<p>
+So long as <code>send</code> is opaque, it allows our programs to work in arbitrary
+environments since they won't depend on what they are talking with,
+addressing schemes, or the concrete existence of any participant.
+</p>
+
+<p>
+An important thing to note is in order for something to be a <code>send</code>, it
+must be an opaque way of speaking out. Because this is the most we can
+commit to in a distributed setting without leaking commitments that
+don't hold.
+</p>
+
+<p>
+As such, something like <code>recv</code> cannot be a <code>send</code>. I cannot give you a way
+of receiving a message because receiving a message is always through
+your own local affordances. The only thing we can do in a distributed
+setting, is communicate ways of communicating through an existing
+medium.
+</p>
+</div>
+<div id="outline-container-org731f239" class="outline-4">
+<h4 id="org731f239"><span class="section-number-4">3.1.1.</span> Concretely</h4>
+<div class="outline-text-4" id="text-3-1-1">
+<p>
+The communication constructs in Bassline are implemented as normal
+runtime objects that support being projected into a word or a message.
+</p>
+
+<p>
+The reason we say either or, is because a word represents the smallest
+communication surface. It's just some data alongside a way to speak to
+"it".
+</p>
+
+<p>
+Should there be more interesting components than just a <code>send</code>, then you
+can also project it into the message.
+</p>
+</div>
+<ol class="org-ol">
+<li><a id="org238a92f"></a>Port<br />
+<div class="outline-text-5" id="text-3-1-1-1">
+<p>
+A port is a minimal surface that implements buffered communication.
+</p>
+
+<p>
+It implements <code>send</code> and can be projected as a message.
+</p>
+
+<p>
+It's important to note that there is no builtin lifecycle propagation
+or buffering with these ports. It's trivial to include as a dialect,
+but is leaky to include. This is because knowing how to "send" to
+something, doesn't mean we know it's alive, or that they can
+communicate with us.
+</p>
+
+<p>
+Senders are not notified when they <code>send</code> to a closed port. This ensures
+neither side requires knowledge of the other's state / status without
+the other side explicitly sharing this, maintaining the sovereignty of
+the caps.
+</p>
+
+<p>
+You should still communicate when you die though but we can't force
+you. "#messaging-in-my-grave"
+</p>
+</div>
+<ol class="org-ol">
+<li><a id="orga778494"></a>Lifecycle Controller<br />
+<div class="outline-text-6" id="text-3-1-1-1-1">
+<p>
+Internally a port does need to track lifecycle, since ports are often
+what we shove in front of actual transports and they are naturally
+async. This class implements this from an AbortController.
+</p>
+
+<p>
+The controller itself is capable of being represented as a word as
+well.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">export class UseAfterClose extends Error {
+  constructor(aController) {
+    super('attempted to use a controller after it has been closed')
+    this.controller = aController
+  }
+}
+
+export class Controller {
+  controller = new AbortController()
+  get signal() {
+    return this.controller.signal
+  }
+  get closed() {
+    return this.signal.aborted
+  }
+  assertOpen() {
+    if (this.closed) throw new UseAfterClose(this)
+  }
+  close(reason = 'closed') {
+    if (!this.closed) this.controller.abort(reason)
+  }
+  onClose(fn, { signal } = {}) {
+    if (this.closed) fn()
+    else this.signal.addEventListener('abort', fn, { once: true, signal })
+    return this
+  }
+  asWord() {
+    return word({
+      noun: this.closed,
+      verb: () =&gt; this.close(),
+    })
+  }
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="org4a99315"></a>Port implementation<br />
+<div class="outline-text-6" id="text-3-1-1-1-2">
+<p>
+The port implementation is rather simple.
+</p>
+
+<p>
+It maintains a buffer for messages, and a queue of promises to
+resolve. We can give the buffer a fixed capacity, in which it will
+act as a sliding buffer, dropping the oldest messages.  Or if we give
+it a capacity of 0, it will not buffer any messages, requiring a
+listener actively be waiting for a message, dropping all others.
+</p>
+
+<p>
+If the port has been closed, recv yields <code>undefined</code> indicating
+consumption should be stopped.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">export class Port extends Controller {
+  buffer = []
+  waiters = []
+  get isBounded() {
+    return this.size !== Infinity
+  }
+  get anyWaiting() {
+    return this.waiters.length &gt; 0
+  }
+  get overflowing() {
+    return this.buffer.length &gt;= this.size
+  }
+  get shouldBuffer() {
+    return this.size &gt; 0
+  }
+  constructor(size = Infinity) {
+    super()
+    this.size = size
+    this.onClose(() =&gt; {
+      for (const waiter of this.waiters) waiter(undefined)
+      this.waiters.length = 0
+    })
+  }
+  async recv() {
+    if (this.buffer.length &gt; 0) return this.buffer.shift()
+    if (this.closed) return undefined
+    return new Promise(resolve =&gt; this.waiters.push(resolve))
+  }
+  send(aMsg) {
+    if (is.undefined(aMsg) || this.closed) return
+    if (this.anyWaiting) return this.waiters.shift()(aMsg)
+    if (this.overflowing) this.buffer.shift()
+    if (this.shouldBuffer) this.buffer.push(aMsg)
+  }
+  async consume(aWord) {
+    while (true) {
+      const aMsg = await this.recv()
+      if (is.undefined(aMsg)) break
+      aWord.verb(aMsg)
+    }
+  }
+  toWord() {
+    return word({
+      noun: {
+        size: this.isBounded ? this.size : null,
+        bounded: this.isBounded,
+      },
+      verb: aMsg =&gt; this.send(aMsg),
+    })
+  }
+}
+</pre>
+</div>
+</div>
+</li>
+</ol>
+</li>
+<li><a id="org67e0e0a"></a>Propagator<br />
+<div class="outline-text-5" id="text-3-1-1-2">
+<p>
+A propagator let's us define something that can selectively propagate
+interesting messages to a set of <code>words</code>.
+</p>
+
+<p>
+When constructing a propagator, you provide a propagation function,
+this takes 2 arguments: <code>aMsg</code> and <code>send</code>. <code>send</code> will propagate out to all
+targets, allowing us to propagate multiple times per invocation.
+</p>
+
+<p>
+If you don't provide a propagator, it will behave as a relay point,
+and will just pass messages through to the targets.
+</p>
+
+<p>
+You can also use a propagator like a reactive procedure by just not
+calling propagate in the body, and using it as a way of running a
+function.
+</p>
+
+<p>
+When we project a propagator to a word, it is behaviorally identical
+to port. But unlike <code>port</code>, a propagator doesn't buffer. It eagerly does
+work.
+</p>
+
+<p>
+Cycles are supported and encouraged, just make sure you correctly
+setup your propagators to correctly attenuate.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">export class Propagator {
+  constructor(action = (aMsg, send) =&gt; send(aMsg)) {
+    this.targets = new Set()
+    this.action = action
+  }
+  target(...words) {
+    for (const aWord of words) {
+      if (!is.word(aWord)) throw new Error(`expected word: ${aWord}`)
+      if (!is.vbound(aWord)) throw new Error(`expected vbound word: ${aWord}`)
+      this.targets.add(aWord)
+    }
+    return () =&gt; {
+      for (const aWord of words) this.targets.delete(aWord)
+    }
+  }
+  emit(aMsg) {
+    for (const w of this.targets) w.verb(aMsg)
+  }
+  send(aMsg) {
+    this.action(aMsg, v =&gt; this.emit(v))
+  }
+  toWord() {
+    return verb(aMsg =&gt; this.send(aMsg))
+  }
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="orge4247be"></a><span class="todo TODO">TODO</span> Purgatory<br />
+<div class="outline-text-5" id="text-3-1-1-3">
+<p>
+These things i'm probably going to remove or change.
+</p>
+</div>
+<ol class="org-ol">
+<li><a id="org1321727"></a><span class="todo TODO">TODO</span> Cell<br />
+<div class="outline-text-6" id="text-3-1-1-3-1">
+<p>
+Goose note: this is old and uses the older api, i'm debating how I
+want to go about building this specifically, since there are some
+designs that might be better.
+</p>
+
+<p>
+This is almost identical to <code>propagator</code>. The only difference is the
+function is a bit different, and it closes over some private state.
+</p>
+
+<p>
+The <code>merge</code> function takes 3 arguments:
+</p>
+
+<ol class="org-ol">
+<li><code>current</code>
+The current value of the state</li>
+<li><code>incoming</code>
+The received message</li>
+<li><code>update</code>
+A function that updates state and propagates the new value.</li>
+</ol>
+
+<p>
+When building cells, it's best to ensure they are Associative,
+Commutative, and Idempotent. This let's any cell behave as a CRDT with caps!
+</p>
+
+<p>
+<b>NOTE: Probably want to make the state a message, but it's a wip</b>
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">export class Cell extends Propagator {
+  state = new Set()
+  action = (current, incoming, update)
+  send(aMsg) {
+    this.action(this.state, aMsg, v =&gt; {
+      this.state = v
+      this.emit(v)
+    })
+  }
+}
+
+export function cell(merge, init) {
+  const description = 'I am a cell. I am a propagator with state'
+  let current = init
+  const [m, to] = propagator((incoming, propagate) =&gt; {
+    merge(current, incoming, value =&gt; {
+      current = value
+      propagate(value)
+    })
+  })
+  m.merge({ description })
+  return [m, { to, value: () =&gt; current }]
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="org88a2e62"></a><span class="todo TODO">TODO</span> Net<br />
+<div class="outline-text-6" id="text-3-1-1-3-2">
+<p>
+Goose note: I'm probably going to remove this, it's honestly not really
+that interesting.
+</p>
+
+<p>
+Current ports look like "point-to-point" communication, however in
+Bassline we don't talk to "something", we observe information from our
+perspective, and invoke caps through opaque handles. We can exploit
+this fact to build a <code>net</code>.
+</p>
+
+<p>
+A <code>net</code> is a local structure that gives us ports backed by any number of
+things.  Meaning that we build a compound communication interface
+without the consumers or producers ever knowing directly, since it has
+the same caps as a port.
+</p>
+
+<p>
+This structure is a decent showcase that "participant" is a very loose
+term in Bassline.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">export function net() {
+  const description = `\
+I am a net.
+I implement seamless multi-party communication.`
+  const ports = new Set()
+  const netm = new Msg()
+
+  netm.defaults({ description }).grantCaps({
+    send: msg =&gt; ports.forEach(p =&gt; p.send(msg)),
+    close: netm.close,
+  })
+
+  const join = size =&gt; {
+    const [fromNet, recv] = port(size)
+    const toNet = fromNet.copy().grantCaps({
+      send: msg =&gt; {
+        for (const p of ports) {
+          if (p === fromNet) continue
+          p.send(msg)
+        }
+      },
+    })
+
+    ports.add(fromNet)
+    fromNet
+      .closedBy(netm)
+      .closeGroup(toNet)
+      .onClose(() =&gt; ports.delete(fromNet))
+
+    return [toNet, recv]
+  }
+
+  return [netm, join]
+}
+</pre>
+</div>
+</div>
+</li>
+</ol>
+</li>
+</ol>
+</div>
+</div>
+<div id="outline-container-org310aa76" class="outline-3">
+<h3 id="org310aa76"><span class="section-number-3">3.2.</span> Transports</h3>
+<div class="outline-text-3" id="text-3-2">
+<p>
+As above, it helps to separate the abstract role of a transport from
+the concrete transport used in this book.
+</p>
+
+<p>
+I need to update this prose below, because the wire conversion stuff
+is a good opportunity to highlight the notion of lowering and lifting
+messages.
+</p>
+</div>
+<div id="outline-container-org6d5e18b" class="outline-4">
+<h4 id="org6d5e18b"><span class="section-number-4">3.2.1.</span> <span class="todo TODO">TODO</span> Abstractly</h4>
+<div class="outline-text-4" id="text-3-2-1">
+<p>
+A transport adapts some external medium into local communication
+capabilities. This matters because the programming model should not
+change just because information crossed a process boundary, a machine
+boundary, or a device boundary. Local and non-local communication
+differ in mechanics, but they should not require different conceptual
+tools.
+</p>
+</div>
+</div>
+<div id="outline-container-org4d79387" class="outline-4">
+<h4 id="org4d79387"><span class="section-number-4">3.2.2.</span> Concretely</h4>
+<div class="outline-text-4" id="text-3-2-2">
+<p>
+Every transport produces a port as we defined above. Internally however
+they handle the marshalling and unmarshalling of the data coming off
+the wire.
+</p>
+
+<p>
+The transports do not deal with storing of the word's verbs, instead
+before something goes over the wire or comes off the wire, you should
+use a reification construct to lower the message into interpretable
+data.
+</p>
+
+<p>
+The only difference between any of these is the medium underneath and
+whether that medium carries raw bytes or discrete messages.
+</p>
+
+<p>
+Byte transports (TCP sockets, stdio, serial) carry raw chunks. They
+need a framing layer to delimit and parse messages. Message transports
+(WebSocket, WebWorker/MessagePort) carry discrete messages natively
+and skip framing entirely.
+</p>
+</div>
+<ol class="org-ol">
+<li><a id="org7d991d0"></a>Framing<br />
+<div class="outline-text-5" id="text-3-2-2-1">
+<p>
+Framing is separated from any specific transport.
+</p>
+
+<p>
+The frame will parse those strings into a buffer, forwarding messages
+using the vbound <code>word</code> we provide upon construction.
+</p>
+
+<p>
+On error it will <code>console.error</code> and throw the error. Though this can be
+replaced later.
+</p>
+
+<p>
+One input chunk may produce zero or many messages.
+</p>
+
+<p>
+<code>format</code> is a stateless function that serializes a message as a JSON line. This
+is used on the outgoing side to serialize before writing.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import { is, msg } from '../bassline.js'
+
+export class JSONLFrame {
+  buffer = ''
+  constructor(aTarget) { this.target = aTarget }
+  readChunk(aString) {
+    if (!is.string(aString)) return
+    buffer += aString
+    let nl
+    while ((nl = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, nl)
+      buffer = buffer.slice(nl + 1)
+      if (!line) continue
+      try {
+        const raw = JSON.parse(line)
+        this.target.verb(msg(raw))
+      } catch (e) { this.onError(e) }
+    }
+  }
+  onError(e) {
+    console.error('Frame parse error: ', e)
+    throw e
+  }
+  static format(aMsg) {
+    //TODO: Make this work properly
+    return JSON.stringify(aMsg) + '\n'
+  }
+}
+export function frame(aTarget) { return new JSONLFrame(aTarget) }
+export function format(aMsg) { return JSONLFrame.format(aMsg) }
+export default { frame, format }
+</pre>
+</div>
+</div>
+</li>
+<li><a id="org14dc557"></a>Socket<br />
+<div class="outline-text-5" id="text-3-2-2-2">
+<p>
+A socket is a byte transport. <code>fromSocket</code> creates a raw port for byte
+chunks, a message port for parsed messages, and bridges them through
+<code>frame.read</code>. Outgoing messages are formatted and written directly to
+the socket.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import net from 'node:net'
+import { verb } from "@bassline/core"
+import { Port } from '../comms.js'
+import defaultFrame from '../frame/jsonl.js'
+
+export function fromSocket(socket, createFrame = defaultFrame) {
+  const outgoing = verb(m =&gt; socket.write(frame.format(m)))
+  const incoming = new Port()
+  const frame = createFrame(incoming.toWord())
+
+  incoming.ctl.onClose(() =&gt; socket.destroy())
+  socket.on('data', chunk =&gt; frame.readChunk(chunk.toString()))
+  socket.on('close', outgoing.close)
+  socket.on('end', outgoing.close)
+  socket.on('error', outgoing.close)
+
+  return [incoming, outgoing]
+}
+
+export function connect(options = {}, createFrame = defaultFrame) {
+  return fromSocket(net.createConnection(options), createFrame)
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="org1fbce1c"></a>Serving (TCP)<br />
+<div class="outline-text-5" id="text-3-2-2-3">
+<p>
+A TCP server listens on a socket and produces a port of
+connections. Each connection is itself a port, produced by
+<code>fromSocket</code>.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import nodeNet from 'node:net'
+import { fromSocket } from '../transports/socket.js'
+import defaultFrame from '../frame/jsonl.js'
+
+export function serve(onConnect, options = {}, createFrame = defaultFrame) {
+  const clients = new Set()
+  const server = nodeNet.createServer(socket =&gt; {
+    const [incoming, outgoing] = fromSocket(socket, createFrame)
+    clients.add(incoming)
+    incoming.ctl.onClose(() =&gt; clients.delete(incoming))
+    onConnect([incoming, outgoing])
+  })
+
+  const close = () =&gt; {
+    for (const c of [...clients]) c.ctl.close()
+  }
+
+  server.on('close', close)
+  server.on('error', close)
+
+  server.listen(options)
+  return clients
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="orge2ef18e"></a>Serving (WebSocket)<br />
+<div class="outline-text-5" id="text-3-2-2-4">
+<p>
+A WebSocket server wraps an existing <code>WebSocketServer</code> instance and
+produces a port of connections, matching the TCP serve API shape. The
+caller brings their own <code>WebSocketServer</code> — no <code>ws</code> dependency in
+core.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import { fromWebSocket } from '../transports/websocket.js'
+import { msg } from '../bassline.js'
+
+const description = `\
+I am a web socket server.
+I behave similar to a normal server,
+but over web sockets. Go figure!`
+
+export function serve(wss, onConnect) {
+  const m = msg()
+    .merge({ description })
+    .closes(wss)
+
+  wss.on('connection', ws =&gt; {
+    const [client, recv] = fromWebSocket(ws)
+    client.closedBy(m)
+    onConnect([client, recv])
+  })
+
+  m.grantCaps({ close: m.close })
+  wss.on('close', m.close)
+  wss.on('error', m.close)
+
+  return [m, wss]
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="org6356cbd"></a>WebSocket<br />
+<div class="outline-text-5" id="text-3-2-2-5">
+<p>
+A WebSocket is a message transport. Each <code>ws.send()</code> is one discrete
+message, so no framing is needed. This works in the browser with
+native <code>WebSocket</code>, in Node.js with the <code>ws</code> package, and for
+<code>RTCDataChannel</code> since it has the same event interface.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import { verb } from '@bassline/core'
+import { Port } from '../comms.js'
+
+export function fromWebSocket(ws) {
+  const outgoing = verb(m =&gt; socket.write(m))
+  const incoming = new Port()
+  ws.addEventListener('message', e =&gt; {
+    try {
+      msgs.send(msg(JSON.parse(e.data)))
+    } catch (e) {
+      console.error('failed to parse: ', e)
+    }
+  })
+
+  ws.addEventListener('close', incoming.close)
+  ws.addEventListener('error', incoming.close)
+  incoming.ctl.onClose(() =&gt; ws.close())
+
+  return [incoming, outgoing]
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="orgc998dad"></a>WebWorker<br />
+<div class="outline-text-5" id="text-3-2-2-6">
+<p>
+A <code>MessagePort</code> is a message transport that uses structured
+clone. Objects cross the boundary without serialization. Works with
+<code>Worker</code>, <code>MessagePort</code>, <code>SharedWorker.port</code>, and <code>BroadcastChannel</code>.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import { msg, port } from '../bassline.js'
+
+const description = 'I am a message port.'
+export function fromPort(messagePort) {
+  const outgoing = msg().merge({ description })
+  const [msgs, recv] = port()
+  messagePort.onmessage = e =&gt; msgs.send(msg().merge(e.data))
+  messagePort.onmessageerror = outgoing.close
+
+  outgoing.closes(msgs, messagePort).grantCaps({
+    send: m =&gt; messagePort.postMessage(m.data),
+    close: outgoing.close,
+  })
+  return [outgoing, recv]
+}
+</pre>
+</div>
+</div>
+</li>
+<li><a id="org9e3d69a"></a>Stdio<br />
+<div class="outline-text-5" id="text-3-2-2-7">
+<p>
+Stdio is a byte transport, like TCP, and uses framing internally to
+produce a port of messages.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-js">import readline from 'node:readline'
+import { port, msg } from '../bassline.js'
+import defaultFrame from '../frame/jsonl.js'
+
+const description = 'I am a stdio port'
+
+export function fromStdio(frame = defaultFrame) {
+  const rl = readline.createInterface({ input: process.stdin })
+
+  const [reader, onRead] = frame.reader()
+  const [msgs, recv] = port()
+
+  onRead(v =&gt; msgs.send(v))
+
+  const outgoing = msg()
+    .merge({ description })
+    .grantCaps({
+      send: m =&gt; process.stdout.write(frame.format(m)),
+      close: () =&gt; outgoing.close()
+    })
+    .closes(msgs, rl, reader)
+
+  rl.on('line', line =&gt; reader.send(msg().merge({ scalar: line + '\n' })))
+  rl.on('close', () =&gt; outgoing.close())
+  return [outgoing, recv]
+}
+</pre>
+</div>
+
+<footer class="book-footer">
+  <div class="footer-links">
+    <a href="https://bassline.dev">bassline.dev</a>
+    <span class="separator">&middot;</span>
+    <a href="https://github.com/Bassline-Org/bassline">GitHub</a>
+  </div>
+  <p class="footer-license">AGPLv3</p>
+</footer>
+</div>
+</li>
+</ol>
+</div>
+</div>
+<div id="outline-container-orgee8c302" class="outline-3">
+<h3 id="orgee8c302"><span class="section-number-3">3.3.</span> Recognition</h3>
+<div class="outline-text-3" id="text-3-3">
+<div class="org-src-container">
+<pre class="src src-js">
+</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

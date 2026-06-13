@@ -9,6 +9,7 @@
   "type": "module",
   "dependencies": {
     "@bassline/core": "workspace:*",
-    "@bassline/std": "workspace:*"
+    "@bassline/std": "workspace:*",
+    "ws": "^8.20.0"
   }
 }
