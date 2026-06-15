@@ -156,7 +156,9 @@ export class BasslineInt extends BasslineValue {
 export class BasslineFloat extends BasslineValue {
   constructor(value) {
     if (typeof value !== 'number') throw new TypeError('float expects a Number')
-    super(value)
+    // Canonicalize NaN to the quiet pattern at construction (§Doubles), so any
+    // NaN payload collapses and in-memory equality never diverges from CE bytes.
+    super(Number.isNaN(value) ? NaN : value)
   }
 
   accept(aVisitor) {
@@ -256,12 +258,22 @@ export class BasslineRecord extends BasslineValue {
     super({ head, fields })
   }
 
+  set head(value) {
+    if (!isValue(value))
+      throw new TypeError('record head must be a Bassline value')
+    this.value.head = value
+  }
   get head() {
     return this.value.head
   }
 
   get fields() {
     return this.value.fields
+  }
+  set fields(value) {
+    if (!Array.isArray(value) || !value.every(isValue))
+      throw new TypeError('record fields must be an array of Bassline values')
+    this.value.fields = value
   }
 
   accept(aVisitor) {

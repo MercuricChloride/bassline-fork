@@ -1,18 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { parse } from '../src/parser.js'
+import { parse } from '../src/text/parser.js'
 import * as D from '../src/data.js'
 
-/** Parse a source expected to hold exactly one value, and return it. */
-const val = (src) => {
+/**
+ * Parse a source expected to hold exactly one value, and return it.
+ * @param src
+ */
+const val = src => {
   const vs = parse(src)
   expect(vs).toHaveLength(1)
   return vs[0]
 }
 
 describe('documents', () => {
-  it('parses zero or more whitespace-separated values', () => {
+  it('parses zero or more whitespace-separated values into an array', () => {
     expect(parse('')).toEqual([])
-    const vs = parse("42 'hi' foo")
+    const vs = parse('42 "hi" foo')
     expect(vs).toHaveLength(3)
     expect(D.eq(vs[0], D.int(42n))).toBe(true)
     expect(D.eq(vs[1], D.str('hi'))).toBe(true)
@@ -22,18 +25,19 @@ describe('documents', () => {
 
 describe('atoms', () => {
   it('parses each atom kind', () => {
-    expect(D.eq(val('null'), D.nul())).toBe(true)
+    expect(D.eq(val('nil'), D.nil())).toBe(true)
     expect(D.eq(val('true'), D.bool(true))).toBe(true)
     expect(D.eq(val('-7'), D.int(-7n))).toBe(true)
     expect(D.eq(val('1.5'), D.float(1.5))).toBe(true)
-    expect(D.eq(val("'hi'"), D.str('hi'))).toBe(true)
+    expect(D.eq(val('"hi"'), D.str('hi'))).toBe(true) // double quotes: a string
+    expect(D.eq(val("'sym'"), D.sym('sym'))).toBe(true) // single quotes: a symbol
     expect(D.eq(val('foo'), D.sym('foo'))).toBe(true)
     expect(D.eq(val('#[DEAD]'), D.bytes(Uint8Array.of(0xde, 0xad)))).toBe(true)
   })
 
-  it('distinguishes a quoted reserved symbol from the reserved word', () => {
-    expect(val('|null|')).toBeInstanceOf(D.BasslineSymbol)
-    expect(val('null')).toBeInstanceOf(D.BasslineNull)
+  it('distinguishes a quoted symbol from the reserved word', () => {
+    expect(val("'nil'")).toBeInstanceOf(D.BasslineSymbol)
+    expect(val('nil')).toBeInstanceOf(D.BasslineNil)
   })
 })
 
@@ -45,40 +49,62 @@ describe('frames', () => {
   })
 
   it('parses a record', () => {
-    expect(D.eq(val('<point 1 2>'), D.record(D.sym('point'), [D.int(1n), D.int(2n)]))).toBe(true)
+    expect(
+      D.eq(val('<point 1 2>'), D.record(D.sym('point'), [D.int(1n), D.int(2n)]))
+    ).toBe(true)
   })
 
   it('parses a dictionary, splitting on the colon', () => {
-    const want = D.dict([[D.sym('a'), D.int(1n)], [D.sym('b'), D.int(2n)]])
+    const want = D.dict([
+      [D.sym('a'), D.int(1n)],
+      [D.sym('b'), D.int(2n)],
+    ])
     expect(D.eq(val('{a: 1 b: 2}'), want)).toBe(true)
     expect(D.eq(val('{a:1 b:2}'), want)).toBe(true)
   })
 
   it('parses nesting', () => {
-    const v = val("[1 [2] {a: 'x'}]")
+    const v = val('[1 [2] {a: "x"}]')
     expect(v).toBeInstanceOf(D.BasslineList)
-    expect(D.eq(v, D.list([D.int(1n), D.list([D.int(2n)]), D.dict([[D.sym('a'), D.str('x')]])]))).toBe(
-      true,
-    )
+    expect(
+      D.eq(
+        v,
+        D.list([
+          D.int(1n),
+          D.list([D.int(2n)]),
+          D.dict([[D.sym('a'), D.str('x')]]),
+        ])
+      )
+    ).toBe(true)
   })
 })
 
-describe('the mark', () => {
-  it('parses a marked value', () => {
+describe('actionable', () => {
+  it('parses an actionable value', () => {
     const v = val('`foo')
-    expect(D.isMarked(v)).toBe(true)
-    expect(D.eq(v, D.mark(D.sym('foo')))).toBe(true)
+    expect(D.isActionable(v)).toBe(true)
+    expect(D.eq(v, D.sym('foo').toActionable())).toBe(true)
   })
 
-  it('parses a marked frame', () => {
-    expect(D.eq(val('`[1 2]'), D.mark(D.list([D.int(1n), D.int(2n)])))).toBe(true)
+  it('parses an actionable frame', () => {
+    expect(
+      D.eq(val('`[1 2]'), D.list([D.int(1n), D.int(2n)]).toActionable())
+    ).toBe(true)
   })
 
-  it('allows structurally nested marks', () => {
-    expect(D.eq(val('`[`a]'), D.mark(D.list([D.mark(D.sym('a'))])))).toBe(true)
+  it('allows structurally nested actionables', () => {
+    expect(
+      D.eq(val('`[`a]'), D.list([D.sym('a').toActionable()]).toActionable())
+    ).toBe(true)
   })
 
-  it('rejects two marks in a row', () => {
+  it('accepts an actionable dict key (the Data firewall is gone)', () => {
+    expect(
+      D.eq(val('{`a: 1}'), D.dict([[D.sym('a').toActionable(), D.int(1n)]]))
+    ).toBe(true)
+  })
+
+  it('rejects two prefixes in a row', () => {
     expect(() => parse('``foo')).toThrow()
   })
 })
@@ -102,24 +128,29 @@ describe('errors', () => {
     expect(() => parse('{a 1}')).toThrow()
   })
 
-  it('propagates duplicate-key and duplicate-member errors from the model', () => {
+  it('rejects duplicate dict keys and set members as a parse error', () => {
     expect(() => parse('{a: 1 a: 2}')).toThrow()
     expect(() => parse('#{1 1}')).toThrow()
-  })
-
-  it('propagates the marked-key error from the model', () => {
-    expect(() => parse('{`a: 1}')).toThrow()
   })
 })
 
 describe('round-trip with canonical encoding', () => {
   it('parse then encode reproduces hand-built values', () => {
-    const v = val("<entry 'k' #{1 2 3}>")
+    const v = val('<entry "k" #{1 2 3}>')
     const want = D.record(D.sym('entry'), [
       D.str('k'),
       D.set([D.int(1n), D.int(2n), D.int(3n)]),
     ])
     expect(D.eq(v, want)).toBe(true)
     expect(D.eq(D.decode(D.encode(v)), v)).toBe(true)
+  })
+})
+
+describe('input validation', () => {
+  it('rejects a non-string source at the boundary', () => {
+    // e.g. passing already-parsed values back into parse()
+    for (const bad of [42, null, undefined, [D.int(1n)]]) {
+      expect(() => parse(bad)).toThrow(TypeError)
+    }
   })
 })

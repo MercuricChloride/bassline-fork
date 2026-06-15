@@ -358,23 +358,22 @@ input into tokens and then we have a small grammar over those tokens.
 ** Tokens
 
 Whitespace =[ \t\n\r\,]+= separates tokens and carries no other meaning.
-A *delimiter* is whitespace or one of =[ ] { } < > ( ) : # ' | `=.
+A *delimiter* is whitespace or one of =[ ] { } < > ( ) : # ' " `=.
 After skipping whitespace, the first character selects the token:
 
 - =[ ] { } < > ( ) := and =#{= are structural; =`= is to prefix a value actionable.
 - =#[= … =]= is a bytestring: hex digit pairs, inner whitespace ignored
   (=#[DE AD BE EF]=, =#[]=).
-- =" ... "= is a string and =' ... '= is a quoted symbol.
-  Both may hold any utf8 character aside from the closing quote and
-- ='= … ='= is a string; =|= … =|= is a quoted symbol. Both hold any
-  scalar but the closing quote and =\= or the escapes =\' \\ \n \t \r=
+- =" ... "= is a string and =' ... '= is a quoted symbol. Both hold any
+  scalar but the closing quote and =\=; the escapes are =\" \\ \n \t \r=
+  in a string and =\' \\ \n \t \r= in a symbol.
 - A digit, or a =+= / =-= immediately followed by a digit, begins a
   number.
 - Anything else begins a bare symbol: a maximal run of non-delimiter
   characters.
 
 So every character that is not whitespace or a delimiter — including
-=, ; + - * / . = ! ?= — is an ordinary symbol character. Two
+=; + - * / . = ! ? |= — is an ordinary symbol character. Two
 consequences worth stating: a symbol that must contain a delimiter is
 written quoted ='a:b' 'has space'= and because =:= is its
 own token it always splits a symbol from what follows, so =foo: bar= and
@@ -402,7 +401,7 @@ tokens.
 
   Atom     := Bytes | String | Number | Symbol
   Bytes    := "#[" HexByte* "]"
-  String   := "'" (char | escape)* "'"
+  String   := '"' (char | escape)* '"'
   Symbol   := bare | "'" (char | escape)* "'"
   Number   := sign? digit+                                          ; Integer
             | sign? digit+ ("." digit+)? (("e"|"E") sign? digit+)?  ; Double, must hold "." or "e"
@@ -414,14 +413,14 @@ tokens.
 - *Reserved spellings.* A /bare/ symbol equal to =nil=, =true=,
   =false=, =NaN=, =Infinity=, or =-Infinity= denotes that value (the
   last 4 are doubles); any other bare run is a symbol. Quote to
-  recover the symbol: =|null|=. Quoted symbols are never reclassified.
+  recover the symbol: ='null'=. Quoted symbols are never reclassified.
 - *Number form.* A token is a number only when it opens with a digit,
   or a sign on a digit; so =-=, =->=, and =.5= are symbols while =-5=
   and =0.5= are numbers. Integer versus double is the presence of =.=
   or =e=/=E=, so =1 ≠ 1.0= and =-0.0= is writable. A number must be
   followed by a delimiter, whitespace, or end of input: a number against
-  a symbol character (=1-2=, =42px=, =1.=, or =1,2= since =,= is a
-  symbol character) is a syntax error, not two tokens.
+  a symbol character (=1-2=, =42px=, or =1.=) is a syntax error, not two
+  tokens.
 - *Actionable* =`= is a single optional prefix for any value, making it
   actionable.
 - =(= and =)= are reserved with no meaning today, kept free for a
