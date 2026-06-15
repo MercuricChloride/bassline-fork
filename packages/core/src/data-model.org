@@ -1,10 +1,32 @@
 #+title: Bassline Data Model
 
-* Design Goals
+* Overview
 
-This document describes the canonical data model for Bassline, as well
-as the canonical encoding of these forms, such that values can acquire
-identity.
+This document describes the canonical data model for Bassline as well
+as the rationale driving these decisions.
+
+The goal of Bassline is to offer a way of building programs that can
+meaningfully coordinate and evolve without requiring a central
+authority, shared vocabulary, or shared semantics. Compared to
+traditional distributed systems, this presents a unique set of
+challenges that must be overcome. The primary problem being: "How can
+two parties establish semantic common ground without a central
+authority or schema."
+
+The data model defines a gramatical foundation of: atomic values, how
+they can be arranged to express framing, as well as an explicit way to
+share values that should be used as local programs capable of
+affording richer interactions.
+
+The distinct difference is that all of these live as "positive"
+contributions of information and never presume something is live.
+
+Additionally, by making these properties of data and not part of the
+contents, it lets the contents of the data focused on expressing
+"dialects", or semantically rich vocabulary without inappropriate
+mixing the two directly.
+
+* Design Goals
 
 All Bassline programs communicate and operate using this model as a
 "lingua franca".
@@ -14,12 +36,12 @@ is small, portable, and requires zero shared vocabulary between users.
 
 That distinction is important, because this doesn't describe what
 Bassline programs mean, instead it defines a small, permanently closed
-set of structural kinds, the grammar, upon which all meaning lives in
-arrangements of these grammatical objects that we refer to as *dialects*.
+set of atoms and structural kinds that can host families of meaning we
+refer to as dialects.
 
-The data values are inspired by the [[https://preserves.dev/preserves.html][Preserves]] data model, with the
-primary differences being: "the mark", explicit null, no embedded
-values, and a lack of annotation values.
+The data values are inspired by Rebol, EDN, and [[https://preserves.dev/preserves.html][Preserves]].
+
+The primary difference lies in the usage of "actionable" values.
 
 The data model is syntax free, so any syntax you can provide that
 supports what we describe is fair game, with one exception: identity
@@ -38,21 +60,6 @@ be able to work with data with zero shared words.
 
 ** What this grants us
 
-*** TODO The kind set is closed permanently
-
-#+BEGIN_comment
-UPON AN OFFICIAL CUT, THIS ISN'T DONE YET!
-#+END_comment
-
-The number of fundamental grammatical forms present in a language is
-nearly always static. However new meanings show up every day with
-use. As such we should prioritize a solid structural foundation, that
-adopts these meanings without forcing structural changes.
-
-The membership is settled: seven atoms, four frames, and the
-mark. The set closes for good at the official cut. Until then, tag
-assignments and details are provisional.
-
 *** TODO Data types expressible as values
 
 New data types are expressible without changes to the foundation. IE
@@ -61,34 +68,26 @@ of data, or new arrangements of data, but are best expressed as custom dialects.
 
 * The Value Space
 
-A *value* is an *atom* or a *frame*, and any *value* may additionally carry
-*the mark*.
+A *value* is either an *atom*, *frame*.
 
-The taxonomy is split by what a value says about its constituent parts:
+An *atom* is a value that has no constituents.
 
-| stance | kinds                         | relation to constituents                                   |
-|--------+-------------------------------+------------------------------------------------------------|
-| none   | atoms                         | no constituents                                            |
-| framed | list, dictionary, record, set | Frames constituents as a new term                          |
-| fenced | any value + the mark          | Fences constituents as a program, not its literal contents |
+A *frame* is a value that forms a new value by arranging it's
+consituents.
 
+Any value may be *actionable*, shifting it's meaning from "something" to
+"something to do".
 
 All values form proper trees. Cycles cannot be expressed and MUST be
-rejected at every boundary. Structural sharing / interning MAY exist in
-memory or in non-canonical encodings so long as it is semantically
-unobservable.
-
-Frames denote a context for the meaning of their constituents as a new
-term. However framing terminates at marks. When a marked value is
-framed, it doesn't denote the full meaning of the term, only its
-presence and an envelope.
+rejected at process boundaries.
 
 * Atoms
 
+Each of these atoms are distinct types.
+
 ** Null
 
-An explicitly asserted absence, and NOT the default value for
-something.
+An explicitly asserted absence, and NOT a default value for something.
 
 The model distinguishes between three epistemic states:
 
@@ -102,12 +101,7 @@ The model distinguishes between three epistemic states:
 
 3. Silence
 
-   A value isn't present, denotes "nothing"
-
-For this purpose the values, ={k: null}= and ={}=, are different
-values on purpose. Implementations and intermediaries MUST NOT
-conflate them: don't drop null entries, don't fill in absent
-keys. Whether a consumer treats them differently is its own judgment.
+   A value isn't present, and is thus doesn't have a denotation.
 
 ** Booleans
 
@@ -115,14 +109,18 @@ keys. Whether a consumer treats them differently is its own judgment.
 
 ** Integers
 
-Arbitrary-precision signed integers. Value equality. Never coerced to
-or from doubles: =1 ≠ 1.0=.
+Arbitrary-precision signed integers with value equality.
 
 ** Doubles
 
 IEEE-754 64 bit floating point numbers.
 
-This is a well supported standard and is frozen in place.
+This is a well supported standard that's frozen in place.
+
+*** TODO Finalize specific edge cases and formats
+
+One thing that hasn't been finalized is expression of "weird" float
+values, this is tentative.
 
 NaN is canonicalized to the quiet pattern =0x7FF8000000000000= at
 construction time, not at encode time, so in-memory equality and
@@ -134,520 +132,242 @@ Equality is bitwise over the canonicalized representation.
 
 Other forms of numeric values are expressible, but as
 dialects. For example one may represent rational numbers as =<rat
-42 54>=. But ultimately these are semantics of number systems, not
-number representation, so those belong in dialects.
+42 54>=.
 
-** Strings
+** Text
 
-Unicode text without normalization.
-
-Well-formed UTF-8 only. Overlong encodings and surrogate code points
-MUST be rejected at every decode boundary.
-
-The kernel never normalizes. Normalization depends on a versioned
-Unicode table, so two implementations can disagree about equality
-depending on which table they ship. Composed and decomposed "é" are
-different strings here. Readers and writers who care can normalize
-themselves.
-
-Comparison is by code point sequence, which coincides exactly with
-lexicographic byte order of well-formed UTF-8.
+UTF-8 encoded text without any normalization.
 
 ** Symbols
 
-Similar to strings, but denotes a spelling. The content of the symbol
-isn't interesting. By making this its own data type, we prevent
-things from needing to implement recognition over stringly typed
-values.
-
-A symbol is never equal to the same-spelled string. Same encoding
-rules and comparison, distinct type.
+Similar to strings, but denotes a symbol rather than contents of
+something. By making this its own data type, it prevents things from
+needing to implement recognition over stringly typed values.
 
 ** Bytestrings
 
-A native octet sequence, gives us a binary datatype.
+A native hex sequence, gives us a binary datatype.
+
 
 * Frames
 
 While these frames can technically be used to represent each other,
-they each exist for a distinct purpose.
+they each exist for a distinct purpose and are considered distinct
+types.
 
-** Lists
+** Lists (Ordered Framing)
 
-A sequence of values organized by position only.
+A sequence of values organized by position.
 
-** Dictionaries
-
-An unordered set of associations from a KEY to VAL.
-
-The KEY must be DATA: no mark anywhere within it.
-
-VAL can be marked, however this makes the dictionary not DATA as a
-whole. Lookups still work, since lookup only compares KEYS.
-
-Duplicate KEYS are a parse error, we do not define a canonical merge.
-
-The canonical form of a dictionary is sorted by the CE bytes of its KEYS.
-
-We define orderedness now because order shouldn't matter for
-dictionaries and we don't want anyone to depend on it. And if you do
-want ordering, you want an alist or something instead.
-
-** Records
-
-=<head field...>=
+** Records (Ordered Labeled framing)
 
 A Record is a list-like value.
 
 It has a HEAD which is a VALUE, and a list of FIELD VALUES, possibly
-empty.
+empty. The HEAD denotes the topic the fields are discussing.
 
-The HEAD MAY be any VALUE.  The HEAD denotes "what frames this?".  A
-"degenerate" head such as null or marked values are dialect concerns,
-whether or not it makes sense is not the data model's concern.
+** Dictionaries (Unordered Associative Framing)
 
-The FIELDS are always a list, and may be empty. There isn't a
-distinction between optional or empty FIELDS.
+An "unordered" set of association from a KEY to a VAL.
 
-** Sets
+Both KEY and VAL are VALUES.
 
-An unordered collection of unique values.
+Duplicate KEY's in a dictionary is a parse error.
 
-Members must be DATA, for the same reason dictionary KEYS must be:
-membership is a comparison. Deduplicating marked members by their
-bytes would turn byte coincidence into a semantic claim, and the
-model forbids that.
+The canonical form of a dictionary is sorted according to the CE bytes
+of it's KEYS. The first element being the shortest key, and the last
+being the longest.
 
-A consequence: an unmarked set is always DATA.
+We define canonical "orderedness" now because order logically
+shouldn't matter for dictionaries and we don't want anyone to depend
+on it when they shouldn't.
 
-Duplicate members are a parse error.
+** Sets (Unordered Unique framing)
 
-The canonical form of a set is sorted by the CE bytes of its members.
+An unordered collection of unique values. Duplicate values is a parse
+error.
 
-** Reference without a reference type
+The canonical form of a set is sorted according to the CE bytes of
+it's members. The first element being the shorted value, and the last
+being the longest.
 
-The model has no reference kind. Since values are trees compared by
-structure, "reference" splits into three styles, all dialects:
+* Actionable Values
 
-1. *By inclusion.* Just include the value itself (head position is
-   natural). A copy is indistinguishable from "the same thing", so a
-   copy works as a reference.
-2. *By digest.* A name for a value without carrying its body, IE
-   =<sha256 #[...]>= over its CE bytes. The model only contributes CE
-   determinism here. Hash choice, truncation, and collision
-   assumptions are dialect concerns, so the choice of hash can change
-   over time without touching the model.
-3. *By bearer.* A marked form (e.g. the =via= family) which can denote
-   to the receiver a live affordance. Identity at this rung is up to
-   the interpreting side. And like any bearer form, anyone holding
-   the bytes can present them, so confidentiality is a transport
-   concern.
+As we described in the start, any VALUE may be ACTIONABLE. An
+actionable value allows us to denote something which should be
+interpreted, and it's contents are not semantically interesting on
+their own, but exist for an evaluator to use.
 
-* The Mark
+An actionable value is never equal to it's non-actionable counterpart
+as it has a different =actionable= bit in it's descriptor, and therefore it's
+canonical encoding is different.
 
-** What it is
+A consequence of this is that any actionable value, may be convered to
+it's non-actionable counterpart by just flipping that single bit.
 
-The mark is a *type flag*, not a node kind and not a record tag. Any
-value, atomic or compound, may carry it. A marked value is denoted
-(for example) as =mark(v)=.
+The following sections give more info about actionable values:
 
-In a value it is one bit. In the canonical encoding it is a prefix
-byte. =mark= as an operation is just how a program sets that bit.
+** Why a descriptor flag and not a record head?
 
-** Semantics: negative constituency
+The most natural-looking simplification of this design is to spell out
+actionable values with a dialect construct such as a record:
+=<actionable foo>=.
 
-All of our previous values allow us to denote something that is usable
-immediately to the receiver based on its structure.
+This is intentional as it makes checking if something is data or a
+program is easily determined regardless of context.
 
-The mark, however, affords us a way of expressing something that
-requires explicit interpretation from a receiver before being
-semantically interesting. In short it gives us a way of denoting:
-"This value must be interpreted locally to know what it means."
+But an added benefit is that it makes speaking and instructing two
+different gramatical forms that the sender can use and the receiver
+can differentiate. Giving us an explicit instruction form for
+messages.
 
-If a marked value, =mark(v)=, is within a frame, this conveys a
-semantically different structure than the value =v= within the frame.
+It also greatly reduces the risk for XSS or similar attacks. As
+evaluation has a distinct gramatical form, meaning that a custom
+dialect cannot maliciously evaluate without being easily recognized as
+an actionable term.
 
-One is purely positive information, whereas the other is positive
-information that we use to locally evaluate something.
+** Actionable evaluation is outside of values
 
-The mark *negates the constituency relation* between a value and any
-container:
+Evaluation is not part of the data model, we simply have a way of
+expressing values that "want" evaluation but are still values. Any
+evaluation of an actionable value is totally disjoint from the value
+space and exits it.
 
-- The enclosing value's semantics includes the marked constituent's
-  *presence and form*, but never reaches its *meaning*. The envelope
-  is part of the content, the letter inside is not. Framing
-  terminates at the mark, on every path.
-- The marked form denotes a *standalone form*: something that is not
-  semantically part of this value yet, able to be offered for
-  evaluation in some evaluator's world.
+* Equality
 
-** Evaluation is terminal
-
-Evaluation is totally disjoint from the data plane and exits it:
-
-- Results NEVER re-enter the value. A relay forwards a complete
-  value. A receiver who never evaluates just holds a marked value. A
-  receiver who does evaluate changes its own *world*, not the message.
-- There is no substitution semantics. So there is no evaluation
-  order, no partially-evaluated values, no error propagation through
-  trees, and no splicing question, since no context exists to splice
-  into.
-- Evaluation errors are events in the evaluator's world, surfaced by
-  local condition machinery. A value cannot fail.
-- Tree content arises from construction only. Nothing in a value was
-  ever "produced by the value's own evaluation".
-- The kernel ships NO evaluate/interpret operation. Evaluation is
-  just what local programs do when consuming values.
-
-** Relocatability
-
-This realistically is more of a suggestion since we cannot enforce
-this, but it's good practice.
-
-The meaning of =mark(v)= is a function of =v= and the evaluation site
-*only*, never of the enclosing tree. Marked forms can be extracted
-and stored without losing meaning. A corollary: cross-form
-coordination (a =<ref k>= in one payload resolving against a =<def k
-v>= in another) is a dialect convention carrying no kernel promise.
-Well-behaved dialects are self-contained per payload.
-
-** Idempotency
-
-Marking is idempotent: =mark(mark(v)) = mark(v)=. Given that the
-mark is a flag and not a node kind, this is forced: the fence negates
-participation in a container, and between two directly stacked marks
-there is no container, so the inner fence fences against nothing.
-The flag-versus-kind choice is the real decision, defended below.
-
-Structural nesting remains meaningful: a marked value whose *form
-contains* marked constituents (=mark(<defer [mark(f)]>)=) is ordinary,
-because there the inner fence has real structure to fence against.
-Evaluators wanting staging levels express them in their dialect
-(=<stage n form>=), never by stacking.
-
-** Operations
-
-The operations for marks:
-
-- =mark(v)=
-  if marked? return =v=, else return a marked twin of =v=.
-- =open(v)=
-  if marked? return the =form= of =v=, else it's an error
-- =marked?(v)= → boolean.
-
-=mark=/=open= are total on their domains, structural, effect-free
-inverses. =open= moves a use into mention-space and MUST NOT involve
-any evaluator. The form returned by =open= may itself be non-Data,
-since it may contain marked constituents deeper in.
-
-** Hygiene rules
-
-- =equal?= never auto-opens (§6).
-- Pattern matchers treat marked values as opaque unless the pattern
-  explicitly acknowledges the mark ("marked value whose form matches
-  P" is a legal pattern; silently matching through marks is not).
-- Display and inspection are mention and MAY render forms.
-- *Exclusivity invariant:* affordances are born only from evaluation
-  of marked forms. Substrate-level machinery (dialogue layers
-  reconstituting references, etc.) keys ONLY on marks; it never
-  evaluates unmarked data. When an application explicitly feeds
-  unmarked data to its own evaluator, that is the application's
-  deliberate act.
-- Marks enter a process at exactly two auditable sites: explicit
-  =mark()= calls, and decode boundaries. Untrusted input is
-  quarantined by a single =data?= check right after decode.
-
-** Why a type flag and not a record head
-
-The most natural-looking simplification of this design is to spell the
-mark as a dialect construct. IE as a record head =<mark foo>=.
-
-We don't do this on purpose, because with a single bit the
-data/program boundary stays decidable: =data?= is one check, not a
-search for a magic word. The rest of the reasons are recorded here so
-we don't relitigate them.
-
-- *Minting versus spelling.* A type flag makes interpretation requests
-  something only programs can mint (=mark()= calls and decode
-  boundaries — both auditable). A record head makes them something
-  data can spell — every construction, merge, and deserialization
-  becomes an unaudited minting site.
-- *Collision and undecidability.* With a magic word, the kernel cannot
-  distinguish an intended mark from a coincidental spelling; some
-  vocabulary will use the word innocently, indistinguishably, forever.
-  Reserved words in unreserved namespaces are a named bug class:
-  prototype pollution (=__proto__=).
-- *This experiment already ran*, with the same word: HTML spelled its
-  evaluation mark as the vocabulary item =<script>=, and the cost is
-  the XSS industry. Sanitizing HTML is the problem of implementing
-  =data?= over a vocabulary-keyed mark, which is near-impossible
-  (mutation XSS is parser disagreement about whether something spells
-  the word). Trusted Types is the DOM retrofitting =mark()=-as-API
-  decades later.
-- *A frame cannot declare itself not-a-frame.* Framing flows through
-  records by definition. Terminating it with something like =<script
-  xyz>= requires the kernel to know a word, and opens semantic leaks.
-
-- *The Lisp exception, located.*
-
-  =(quote x)= as a vocabulary item works fine with a singular
-  evaluator. Rebol does it interestingly with most things being data by
-  default, meaning it flips the "polarity" of lisp in this regard.
-
-  But the main difference here is that when we share some data, we can
-  always tell whether something is ready for us to use as is, or should
-  be a program we locally run.
-
-  A =lang= layer may freely use quote-words. The substrate serves
-  strangers with no shared dialect, so the data/program boundary has
-  to sit below every dialect.
-
-Null and the mark are grammar for the same reason. Null asserts
-absence at the leaf, the mark asserts program-ness on any
-value. Silence cannot say "I'm telling you nothing", and a frame
-cannot say "I'm not framing this" in a context-free manner.
-
-* Data, Equality, Order
-
-** The Data refinement
-
-=data?(v)= ⇔ no mark occurs anywhere in =v=, transitively:
-
-#+begin_example
-data?(v) = ¬marked?(v) ∧ ∀ c ∈ constituents(v). data?(c)
-#+end_example
-
-Implementations cache this as one bit per node at construction; the
-check is O(1) everywhere it is needed. =data?= is exposed as a kernel
-predicate — it is also the firewall predicate ("this input contains no
-interpretation requests").
-
-** Equality
-
-Two predicates.
-
-=eq?(a, b)= ⇔ =CE(a) = CE(b)=. A purely syntactic comparison of the
-data inside, total over all values, marked or not. This is the right
-way to deep-compare mark-bearing values, IE for transcripts, caches,
-and dedupe.
-
-=equal?(a, b)= compares semantic content. Total on DATA, where it
-coincides with =eq?=. Off DATA it is *undefined*, not false:
-=equal?= MUST throw if either argument fails =data?=.
-
-So two marked values are never =equal?= (the question throws), but
-they may be =eq?=. Being =eq?= says they are the same bytes, not
-that they mean the same thing: what a marked form means is not
-something the data plane knows. Programs that want to compare marked
-values by form =open= first, which makes "we chose form as our key"
-an explicit decision in the program.
-
-Notes on =equal?=:
-
-- The domain check comes before any traversal: no short-circuiting
-  on structure first, otherwise whether a comparison throws would
-  depend on contents and traversal order.
-- We don't define marked values as never-equal: that is the NaN
-  design, and it silently breaks reflexivity and anything keyed by
-  equality.
-- Also rejected: "compare around the marks" (same shape, marks in
-  the same positions, payloads ignored or compared). Collapsing
-  distinct requests is wrong.
-
-** Order
-
-- Total on Data; undefined off it. (Preserves' order is total over
-  all values; ours is its restriction to Data. The partiality comes
-  from the mark.)
-- Structure: type rank first, then intra-type. Type rank order equals
-  CE tag-byte order (§7.2), so the cross-type comparison is a byte
-  comparison.
-- Null ranks first: absence sorts before everything. Marked values are
-  unranked.
-- Cross-type numerics are rank-separated: every double sorts on one
-  side of every integer regardless of magnitude. This is an
-  *organizational* order for canonical-form determinism, not a
-  semantic order; numeric sorts use numeric comparators.
-- Intra-type:
-  - booleans: false < true
-  - integers: numeric
-  - doubles: IEEE totalOrder over canonicalized bits (sign-flip trick:
-    if sign bit set, invert all 64 bits; else set the sign bit; then
-    unsigned compare)
-  - strings, symbols: code point order = UTF-8 byte order
-  - bytestrings: lexicographic, shorter-prefix-first
-  - lists: elementwise, then length (prefix sorts first)
-  - dictionaries: as key-sorted association lists, lexicographic over
-    (key, value) pairs, then count (prefix sorts first)
-  - records: head, then fields as a list
-  - sets: as sorted member lists, elementwise, then count (prefix
-    sorts first)
+Canonical equality is defined by bitwise equality of two values
+canonical encoded forms.
 
 * Canonical Encoding (CE)
 
+The canonical encoding is defined for all values.
+
 ** Requirements
 
-- *Total*, including marked values. Encoding and equality are
-  different questions. Mark-bearing messages still need deterministic
-  bytes for signing, logging, and replay, none of which require
-  =equal?=.
-- *=eq?= does not imply =equal?=.* On DATA they coincide; off DATA
-  =eq?= still answers while =equal?= throws. Storage layers MAY
-  dedupe identical CE byte strings without making any semantic claim.
-- Unique decode: prefix-free, deterministic, no trailing garbage.
-- Strict canonicity at decode. Decoders MUST reject:
+A good implemention of this specification must implement:
+
+- Encoding for all values
+
+- Equality for all values
+
+- A valid decoder must reject:
   - non-minimal varints
+
   - non-minimal integer encodings
-  - ill-formed UTF-8, overlong encodings, surrogates
-  - dictionary entries not in strictly ascending key-CE order
-    (strictness also enforces uniqueness, one check for both)
-  - set members not in strictly ascending CE order (same trick)
-  - non-Data dictionary keys and set members (a mark anywhere within
-    them)
-  - any double encoding of NaN other than =0x7FF8000000000000=
-  - a mark prefix immediately followed by another mark prefix
-    (idempotency at the byte level; same family as overlong UTF-8)
-  - cycles or sharing in any syntax that can express them
-- Order-preserving CE (encoded byte order matching value order) is an
-  explicit non-goal.
-- *Domain separation lives at signature sites, not inside CE.* Keep
-  the encoding pure; signers prepend context strings.
 
-** Tag table (single source of truth)
+  - ill-formed UTF-8
 
-Provisional byte assignments. Rank order = tag order for 0x00–0x0B.
-The mark prefix participates in encoding but not in rank.
+  - Dictionaries without strictly ascending key CE order
 
-| tag  | kind        | payload encoding                                    |
-|------+-------------+-----------------------------------------------------|
-| 0x00 | null        | —                                                   |
-| 0x01 | false       | —                                                   |
-| 0x02 | true        | —                                                   |
-| 0x03 | integer     | varint byte-length, minimal two's-complement BE     |
-| 0x04 | double      | 8 bytes big-endian (NaN already canonical)          |
-| 0x05 | string      | varint byte-length, UTF-8 bytes                     |
-| 0x06 | symbol      | varint byte-length, UTF-8 bytes                     |
-| 0x07 | bytestring  | varint byte-length, raw bytes                       |
-| 0x08 | list        | varint count, element CEs                           |
-| 0x09 | dictionary  | varint count, (key CE, value CE) pairs, key-sorted  |
-| 0x0A | record      | head CE, varint field count, field CEs              |
-| 0x0B | set         | varint count, member CEs in ascending CE order      |
-| 0x0C | mark prefix | CE of the form; next byte MUST NOT be 0x0C          |
+  - Sets with duplicate membership
 
-Varints: unsigned LEB128 (7 bits per byte, high bit = continuation),
-minimal form required.
+- A valid encoder must maintain it's output doesn't violate the above
+  rules
 
-Integers: shortest two's-complement big-endian byte sequence. Zero is
-the single byte =0x00=. A zero-length payload is rejected. For
-payloads of two or more bytes: reject a leading =0x00= unless the
-next byte's high bit is set, and reject a leading =0xFF= unless the
-next byte's high bit is clear.
+** General Encoded Form
 
-Compound framing uses *counts*, not byte lengths. Counts are simple
-and stream-encodable. Subtree skipping is not needed at the CE layer:
-large structures decompose via digest indirection (rung 2 of the
-reference ladder), and bytestrings, the actual bulk carriers, are
-length-prefixed and skippable already. This choice cannot change
-after the cut without breaking identity.
+All encoded values begin with a 8 bit descriptor.
 
-** Test vectors
+| actionable flag (1 bit) | type tag (7 bit) |
 
-| value                  | CE (hex)                            |
-|------------------------+-------------------------------------|
-| null                   | =00=                                |
-| true                   | =02=                                |
-| 0                      | =03 01 00=                          |
-| 1                      | =03 01 01=                          |
-| -1                     | =03 01 FF=                          |
-| 128                    | =03 02 00 80=                       |
-| 255                    | =03 02 00 FF=                       |
-| 1.0                    | =04 3F F0 00 00 00 00 00 00=        |
-| "hi"                   | =05 02 68 69=                       |
-| foo (symbol)           | =06 03 66 6F 6F=                    |
-| #[FF]                  | =07 01 FF=                          |
-| [1]                    | =08 01 03 01 01=                    |
-| {a: 1} (symbol key)    | =09 01 06 01 61 03 01 01=           |
-| {a: 1, b: 2}           | =09 02 06 01 61 03 01 01 06 01 62 03 01 02= |
-| #{1 2}                 | =0B 02 03 01 01 03 01 02=           |
-| <foo 1>                | =0A 06 03 66 6F 6F 01 03 01 01=     |
-| mark(x) (symbol form)  | =0C 06 01 78=                       |
+The first bit is used to denote a value as actionable, and the last 7
+bits are reserved for the type tag.
 
-Implementations MUST reproduce these byte-for-byte.
+We really only need 5 bits for this, as we only have 12 different
+values. But it's fine for now.
 
-Decoders MUST reject these:
+** Type Tags
 
-| bytes                                        | why                                       |
-|----------------------------------------------+-------------------------------------------|
-| =03 00=                                      | zero-length integer payload               |
-| =03 02 00 01=                                | non-minimal integer (1 with leading zero) |
-| =05 80 00=                                   | non-minimal varint length                 |
-| =05 02 C0 80=                                | overlong UTF-8                            |
-| =05 03 ED A0 80=                             | surrogate code point (U+D800)             |
-| =04 7F F0 00 00 00 00 00 01=                 | non-canonical NaN                         |
-| =09 02 06 01 62 03 01 02 06 01 61 03 01 01=  | dictionary keys out of order              |
-| =09 02 06 01 61 03 01 01 06 01 61 03 01 02=  | duplicate dictionary key                  |
-| =09 01 0C 06 01 61 03 01 01=                 | non-Data dictionary key (marked)          |
-| =0B 02 03 01 02 03 01 01=                    | set members out of order                  |
-| =0B 02 03 01 01 03 01 01=                    | duplicate set member                      |
-| =0B 01 0C 00=                                | non-Data set member (marked)              |
-| =0C 0C 06 01 78=                             | double mark prefix                        |
-| =00 00=                                      | trailing garbage                          |
+*** 0x0 Error
 
-* Implementation Notes (JS reference implementation)
+A type tag of =0x0= indicates an encoding error and should never occur
+in well encoded values. This should cause the decoder should crash.
 
-- The reference implementation backs integers with BigInt always,
-  including small ones. If integers ride =Number=, precision silently
-  dies above 2^53 and =1= conflates with =1.0=. Doubles ride
-  =Number=. Internal representation is free in general (fixnum fast
-  paths are fine) so long as the difference is unobservable, since CE
-  is the identity.
-- Embedding JS natives: a JS =Number= always constructs a double,
-  even when integral. A =BigInt= constructs an integer. A JS string
-  constructs a string; symbols are constructed explicitly, since JS
-  has no native spelling for them.
-- Canonicalize NaN at construction (=Number.isNaN= → store the quiet
-  pattern). Detect negative zero with =Object.is(x, -0)=.
-- Nodes are immutable and frozen. Each node caches: its =data?= bit
-  (computed at construction from the mark flag and children's bits),
-  and optionally its CE bytes or CE length.
-- Hash-consing/interning by CE bytes is permitted: semantics is
-  trees, memory may share. Interned Data gets O(1) equality via
-  pointer compare.
-- Value-keyed maps: key by CE byte strings.
-- The complete conforming core reduces to: encode canonically, compare
-  bytes. The semantic order is optional tooling; an implementation
-  needs zero comparison logic beyond memcmp to deliver =eq?=,
-  =equal?=, and canonical form.
-- Decode is where the full rejection battery (§7.1) runs. Untrusted
-  input is quarantined with one =data?= check.
-- Kernel API surface, complete: constructors; accessors; =data?=,
-  =marked?=; =eq?=; =equal?= and order on Data; CE encode/decode;
-  =mark=, =open=. There is no evaluate.
+The purpose of this is to not have null be a default value for missing
+input.
+
+*** 0x1 NULL
+
+=0x01= indicates a null value and doesn't have a payload
+
+*** 0x2 FALSE
+
+=0x2= indicates the boolean value =FALSE= and doesn't have a payload.
+
+*** 0x3 TRUE
+
+=0x3= indicates the boolean value =TRUE= and doesn't have a payload.
+
+*** 0x4 INTEGER
+
+=0x4= indicates an integer value and does have a payload.
+
+After the descriptor should be a minimal form unsigned LEB128 varint =N=
+describing how many bytes long the integer payload is.
+
+The integer value itself should be encoded as the shortest
+two's complement big endian integer with length =N=.
+
+*** 0x5 double
+
+=0x5= indicates a 8 byte two's complement big endian float. It should
+read the next 8 bytes directly.
+
+*** 0x6 string
+
+=0x6= indicates a string. It should include a length varint, followed by
+the payload of UTF-8 encoded bytes
+
+*** 0x7 symbol
+
+=0x7= is a symbol and should handle identical to string
+
+*** 0x8 bytestring
+
+=0x8= indicates a bytestring, and should have a length varint, followed
+by a payload of raw bytes.
+
+*** 0x9 list
+
+=0x9= indicates a list, and should have a byte length varint, followed
+by a payload of it's encoded elements.
+
+*** 0xa dictionary
+
+=0xa= indicates a list, and should have a byte length varint, followed
+by a payload alternating [key element].
+
+*** 0xb record
+
+=0xb= indicates a record, and should have a byte length varint, followed
+by a payload where the first value is the head, and the remaining are
+the fields.
+
+*** 0xc set
+
+=0xc= indicates a set, and should be a byte length varint followed by
+a payload of it's encoded unique elements.
 
 * A textual syntax
 
-This describes /a/ textual syntax, not /the/ form of a value: it is a
-non-canonical human surface. Whitespace and spelling vary, many texts
-denote one value, and there is deliberately no canonical text. Identity
-is recovered by parsing to a value and encoding to CE (§7).
+This describes a textual syntax for this encoding.
 
 Parsing is two levels: a tokenizer that skips whitespace and cuts the
-input into tokens, and a small grammar over those tokens. That is the
-whole of it.
+input into tokens and then we have a small grammar over those tokens.
 
 ** Tokens
 
-Whitespace =[ \t\n\r]+= separates tokens and carries no other meaning.
+Whitespace =[ \t\n\r\,]+= separates tokens and carries no other meaning.
 A *delimiter* is whitespace or one of =[ ] { } < > ( ) : # ' | `=.
 After skipping whitespace, the first character selects the token:
 
-- =[ ] { } < > ( ) := and =#{= are structural; =`= is the mark.
+- =[ ] { } < > ( ) := and =#{= are structural; =`= is to prefix a value actionable.
 - =#[= … =]= is a bytestring: hex digit pairs, inner whitespace ignored
   (=#[DE AD BE EF]=, =#[]=).
+- =" ... "= is a string and =' ... '= is a quoted symbol.
+  Both may hold any utf8 character aside from the closing quote and
 - ='= … ='= is a string; =|= … =|= is a quoted symbol. Both hold any
-  scalar but the closing quote and =\=, plus the escapes =\' \\ \n \t
-  \r \|= and =\u{HEX}= (which pins an exact scalar, since the model
-  never normalizes).
+  scalar but the closing quote and =\= or the escapes =\' \\ \n \t \r=
 - A digit, or a =+= / =-= immediately followed by a digit, begins a
   number.
 - Anything else begins a bare symbol: a maximal run of non-delimiter
@@ -656,7 +376,7 @@ After skipping whitespace, the first character selects the token:
 So every character that is not whitespace or a delimiter — including
 =, ; + - * / . = ! ?= — is an ordinary symbol character. Two
 consequences worth stating: a symbol that must contain a delimiter is
-written quoted (=|<=|=, =|a:b|=, =|has space|=); and because =:= is its
+written quoted ='a:b' 'has space'= and because =:= is its
 own token it always splits a symbol from what follows, so =foo: bar= and
 =foo:bar= both read as the three tokens =foo : bar=, which is what lets
 dictionary entries be written =key: value=.
@@ -683,7 +403,7 @@ tokens.
   Atom     := Bytes | String | Number | Symbol
   Bytes    := "#[" HexByte* "]"
   String   := "'" (char | escape)* "'"
-  Symbol   := bare | "|" (char | escape)* "|"
+  Symbol   := bare | "'" (char | escape)* "'"
   Number   := sign? digit+                                          ; Integer
             | sign? digit+ ("." digit+)? (("e"|"E") sign? digit+)?  ; Double, must hold "." or "e"
   sign     := "+" | "-"
@@ -691,9 +411,9 @@ tokens.
 
 ** Outside the grammar
 
-- *Reserved spellings.* A /bare/ symbol equal to =null=, =true=,
+- *Reserved spellings.* A /bare/ symbol equal to =nil=, =true=,
   =false=, =NaN=, =Infinity=, or =-Infinity= denotes that value (the
-  last three are doubles); any other bare run is a symbol. Quote to
+  last 4 are doubles); any other bare run is a symbol. Quote to
   recover the symbol: =|null|=. Quoted symbols are never reclassified.
 - *Number form.* A token is a number only when it opens with a digit,
   or a sign on a digit; so =-=, =->=, and =.5= are symbols while =-5=
@@ -702,11 +422,7 @@ tokens.
   followed by a delimiter, whitespace, or end of input: a number against
   a symbol character (=1-2=, =42px=, =1.=, or =1,2= since =,= is a
   symbol character) is a syntax error, not two tokens.
-- *Mark.* =`= is a single optional prefix; two in a row is a syntax
-  error, mirroring CE's rejection of a doubled mark prefix (§7).
-- *Semantic checks, after parse* (same status as the CE decode
-  battery): dictionary keys and set members must be Data; duplicate
-  dictionary keys or set members are rejected; values are trees, so no
-  text may name a cycle.
+- *Actionable* =`= is a single optional prefix for any value, making it
+  actionable.
 - =(= and =)= are reserved with no meaning today, kept free for a
   possible future use. Currently they are a syntax error.

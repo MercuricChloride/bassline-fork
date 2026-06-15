@@ -26,6 +26,8 @@ const sharedGlobals = {
   crypto: 'readonly',
   AbortController: 'readonly',
   location: 'readonly',
+  TextEncoder: 'readonly',
+  TextDecoder: 'readonly',
 }
 
 const sourceRules = {
