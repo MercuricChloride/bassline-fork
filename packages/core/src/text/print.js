@@ -27,6 +27,7 @@ const DELIM = new Set([
   '"',
   '`',
 ])
+
 const RESERVED = new Set([
   'nil',
   'true',
@@ -154,14 +155,14 @@ export class BasslinePP extends BasslineVisitor {
     this.frame('#{', aSet.value, '}')
   }
   visitDict(aDict) {
-    this.frame('{', aDict.value, '}', ([k, v]) => {
+    this.frame('{', Array.from(aDict.value), '}', ([k, v]) => {
       this.visit(k)
       this.write(': ')
       this.visit(v)
     })
   }
   visitRecord(aRecord) {
-    const { head, fields } = aRecord.value
+    const [head, ...fields] = aRecord.value
     if (fields.length === 0) {
       this.write('<')
       this.visit(head)

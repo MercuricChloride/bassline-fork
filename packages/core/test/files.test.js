@@ -14,7 +14,7 @@ const eqAll = (xs, ys) =>
 const sampleDoc = [
   D.int(1n),
   D.str('two'),
-  D.record(D.sym('point'), [D.float(3.5), D.int(4n).toActionable()]),
+  D.record(D.sym('point'), D.float(3.5), D.int(4n).toActionable()),
   D.set([D.bytes(Uint8Array.of(0xa0)), D.bytes(Uint8Array.of(0x80))]),
 ]
 

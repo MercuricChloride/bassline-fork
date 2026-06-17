@@ -58,17 +58,17 @@ An example of this is lists. A list is expressible as vocabulary using
 meaningful. As such we only include concepts which lets our programs
 be able to work with data with zero shared words.
 
-** What this grants us
-
-*** TODO Data types expressible as values
+*** TODO Most other application specific constructs are expressible as values
 
 New data types are expressible without changes to the foundation. IE
 things like dates, uuids, timestamps, etc are ultimately not new forms
-of data, or new arrangements of data, but are best expressed as custom dialects.
+of data, or new arrangements of data, but are best expressed as custom
+vocabularies since ultimately they are not very semantically different
+from the underlying types we present.
 
 * The Value Space
 
-A *value* is either an *atom*, *frame*.
+A *value* is either an *atom* or a *frame*.
 
 An *atom* is a value that has no constituents.
 
@@ -102,7 +102,6 @@ The model distinguishes between three epistemic states:
 3. Silence
 
    A value isn't present, and is thus doesn't have a denotation.
-
 ** Booleans
 
 =false= and =true=.
@@ -138,7 +137,7 @@ dialects. For example one may represent rational numbers as =<rat
 
 UTF-8 encoded text without any normalization.
 
-** Symbols
+** TODO Symbols
 
 Similar to strings, but denotes a symbol rather than contents of
 something. By making this its own data type, it prevents things from
@@ -148,7 +147,6 @@ needing to implement recognition over stringly typed values.
 
 A native hex sequence, gives us a binary datatype.
 
-
 * Frames
 
 While these frames can technically be used to represent each other,
@@ -157,7 +155,7 @@ types.
 
 ** Lists (Ordered Framing)
 
-A sequence of values organized by position.
+A sequence of values organized by position
 
 ** Records (Ordered Labeled framing)
 
@@ -268,7 +266,7 @@ A good implemention of this specification must implement:
 
 All encoded values begin with a 8 bit descriptor.
 
-| actionable flag (1 bit) | type tag (7 bit) |
+| actionable flag (1 bit) | type tag (7 bit) | N-bit payload |
 
 The first bit is used to denote a value as actionable, and the last 7
 bits are reserved for the type tag.
@@ -277,7 +275,6 @@ We really only need 5 bits for this, as we only have 12 different
 values. But it's fine for now.
 
 ** Type Tags
-
 *** 0x0 Error
 
 A type tag of =0x0= indicates an encoding error and should never occur

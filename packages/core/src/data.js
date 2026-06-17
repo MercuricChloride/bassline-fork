@@ -5,10 +5,6 @@
 // NIL, true, false, int, float, string, symbol
 // Alongside 4 frame value types:
 // list, dict, record, set
-//
-// the function eq performs comparison by canonical encoding bytes
-// whereas equal performs semantic comparison, rejecting comparisons
-// between non data values
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: true })
@@ -71,47 +67,43 @@ function intToBytes(n) {
 // ================ Bassline Value Types ================
 
 export class BasslineValue {
-  actionable = false
-  constructor(value) {
+  #actionable
+  constructor(actionable = false) {
     if (new.target === BasslineValue)
       throw new Error('BasslineValue is abstract')
-    this.value = value
+    this.#actionable = actionable
   }
 
-  freeze() {
-    Object.freeze(this)
-    return this
+  get actionable() {
+    return this.#actionable
   }
 
-  children() {
-    return []
+  get isFrame() {
+    return false
+  }
+
+  toStatic() {
+    if (this.#actionable) {
+      return this.copy(false)
+    } else {
+      return this
+    }
+  }
+
+  toActionable() {
+    if (!this.#actionable) {
+      return this.copy(true)
+    } else {
+      return this
+    }
   }
 
   accept(_aVisitor) {
     throw new Error('abstract')
   }
 
-  set static(aValue) {
-    this.actionable = !aValue
-  }
-
-  get static() {
-    return !this.actionable
-  }
-
-  toActionable() {
-    return this.actionable ? this : this.clone(true)
-  }
-
-  toStatic() {
-    return this.actionable ? this.clone(false) : this
-  }
-
-  clone(actionable = false) {
-    const twin = Object.create(Object.getPrototypeOf(this))
-    Object.assign(twin, this)
-    twin.actionable = actionable
-    return twin
+  copy(_actionable) {
+    throw new Error('abstract')
   }
 
   encode() {
@@ -121,11 +113,22 @@ export class BasslineValue {
   ceKey() {
     return ceKey(this)
   }
+
+  eq(other) {
+    return eq(this, other)
+  }
+
+  compareBytes(other) {
+    return compareBytes(this.encode(), other.encode())
+  }
 }
 
 export class BasslineNil extends BasslineValue {
-  constructor() {
-    super(null)
+  get value() {
+    return null
+  }
+  copy(actionable = this.actionable) {
+    return new BasslineNil(actionable)
   }
   accept(aVisitor) {
     return aVisitor.visitNil(this)
@@ -133,189 +136,429 @@ export class BasslineNil extends BasslineValue {
 }
 
 export class BasslineBool extends BasslineValue {
-  constructor(value) {
-    super(Boolean(value))
+  #value
+  constructor(value, actionable = false) {
+    if (typeof value !== 'boolean')
+      throw new TypeError('bool expects a Boolean')
+    super(actionable)
+    this.#value = value
   }
-
+  get value() {
+    return this.#value
+  }
+  copy(actionable = this.actionable) {
+    return new BasslineBool(this.value, actionable)
+  }
   accept(aVisitor) {
     return aVisitor.visitBool(this)
   }
 }
 
 export class BasslineInt extends BasslineValue {
-  constructor(value) {
-    if (typeof value !== 'bigint') throw new TypeError('int expects a BigInt')
-    super(value)
+  #value
+  constructor(value, actionable = false) {
+    super(actionable)
+    if (typeof value === 'number') {
+      this.#value = BigInt(value)
+    } else if (typeof value === 'bigint') {
+      this.#value = value
+    } else {
+      throw new TypeError('int expects a BigInt or Number')
+    }
+  }
+
+  get value() {
+    return this.#value
   }
 
   accept(aVisitor) {
     return aVisitor.visitInt(this)
   }
+  copy(actionable = this.actionable) {
+    return new BasslineInt(this.value, actionable)
+  }
 }
 
 export class BasslineFloat extends BasslineValue {
-  constructor(value) {
+  #value
+  constructor(value, actionable = false) {
+    super(actionable)
     if (typeof value !== 'number') throw new TypeError('float expects a Number')
-    // Canonicalize NaN to the quiet pattern at construction (§Doubles), so any
-    // NaN payload collapses and in-memory equality never diverges from CE bytes.
-    super(Number.isNaN(value) ? NaN : value)
+    if (Number.isNaN(value)) {
+      this.#value = NaN
+    } else {
+      this.#value = value
+    }
+  }
+
+  get value() {
+    return this.#value
   }
 
   accept(aVisitor) {
     return aVisitor.visitFloat(this)
   }
+  copy(actionable = this.actionable) {
+    return new BasslineFloat(this.value, actionable)
+  }
 }
 
 export class BasslineString extends BasslineValue {
-  constructor(value) {
+  #value
+  constructor(value, actionable = false) {
     if (typeof value !== 'string') throw new TypeError('str expects a string')
     if (!value.isWellFormed()) throw new Error('string is not well-formed')
-    super(value)
+    super(actionable)
+    this.#value = value
+  }
+
+  get value() {
+    return this.#value
   }
 
   accept(aVisitor) {
     return aVisitor.visitString(this)
   }
+
+  copy(actionable = this.actionable) {
+    return new BasslineString(this.value, actionable)
+  }
 }
 
 export class BasslineSymbol extends BasslineValue {
-  constructor(value) {
+  #value
+  constructor(value, actionable = false) {
+    super(actionable)
     if (typeof value !== 'string') {
       console.error('symbol expects a string, but got:', value)
       throw new TypeError('symbol expects a string')
     }
     if (!value.isWellFormed())
       throw new Error('symbol string is not well-formed')
-    super(value)
+    this.#value = value
+  }
+
+  get value() {
+    return this.#value
   }
 
   accept(aVisitor) {
     return aVisitor.visitSymbol(this)
   }
+  copy(actionable = this.actionable) {
+    return new BasslineSymbol(this.value, actionable)
+  }
 }
 
+// NOTE: This isn't entirely safe for now
+// I'll eventually add mutation safety to the bytes here
+// but for now this is fine
 export class BasslineBytes extends BasslineValue {
-  constructor(value) {
+  #value
+  constructor(value, actionable = false) {
     if (!(value instanceof Uint8Array))
       throw new TypeError('bytes expects a Uint8Array')
-    super(value.slice())
+    super(actionable)
+    this.#value = value.slice()
+  }
+
+  get value() {
+    return this.#value
   }
 
   accept(aVisitor) {
     return aVisitor.visitBytes(this)
   }
+
+  copy(actionable = this.actionable) {
+    return new BasslineBytes(this.value, actionable)
+  }
 }
 
 export class BasslineList extends BasslineValue {
-  constructor(items) {
+  #value
+  constructor(items, actionable = false) {
     if (!Array.isArray(items) || !items.every(isValue)) {
       throw new TypeError('list expects an array of Bassline values')
     }
-    super(items.slice())
+    super(actionable)
+    this.#value = items.slice()
+  }
+
+  get isFrame() {
+    return true
+  }
+
+  at(index) {
+    if (typeof index !== 'number') throw new TypeError('index must be a number')
+    return this.#value.at(index)
+  }
+
+  length() {
+    return this.#value.length
+  }
+
+  append(...items) {
+    return new BasslineList([...this.#value, ...items], this.actionable)
+  }
+
+  map(callback) {
+    return new BasslineList(this.#value.map(callback), this.actionable)
+  }
+
+  filter(callback) {
+    return new BasslineList(this.#value.filter(callback), this.actionable)
+  }
+
+  get value() {
+    return this.#value.slice()
+  }
+
+  *[Symbol.iterator]() {
+    yield* this.value
   }
 
   accept(aVisitor) {
     return aVisitor.visitList(this)
   }
+
+  copy(actionable = this.actionable) {
+    return new BasslineList(this.value, actionable)
+  }
 }
 
 export class BasslineDict extends BasslineValue {
-  // value: Array<[key, val]> in insertion order. Uniqueness is a property of the
-  // canonical encoding, enforced at the boundaries (encode/decode), not here.
-  constructor(entries) {
-    const value = []
+  #value
+  #cache
+  constructor(entries, actionable = false) {
+    const value = new Map()
+    const cache = new Map()
     for (const [k, v] of entries) {
       if (!isValue(k) || !isValue(v))
         throw new TypeError('dict entry must be [Value, Value]')
-      value.push([k, v])
+      const key = k.ceKey()
+      value.set(key, v)
+      cache.set(key, k)
     }
-    super(value)
+    super(actionable)
+    this.#value = value
+    this.#cache = cache
+  }
+
+  get isFrame() {
+    return true
+  }
+
+  get value() {
+    const result = new Map()
+    for (const [key, val] of this.#value) {
+      const origKey = this.#cache.get(key)
+      if (!origKey) throw new Error('rebuild: missing original key in cache')
+      result.set(origKey, val)
+    }
+    return result
+  }
+
+  map(callback) {
+    return new BasslineDict(
+      Array.from(this.value).map(callback),
+      this.actionable
+    )
+  }
+
+  filter(callback) {
+    return new BasslineDict(
+      Array.from(this.value).filter(callback),
+      this.actionable
+    )
+  }
+
+  append(...entries) {
+    return new BasslineDict([...this.value, ...entries], this.actionable)
+  }
+
+  delete(...keys) {
+    const byKey = new Map(this.#value)
+    for (const k of keys) {
+      if (!isValue(k)) throw new TypeError('dict key must be a Bassline value')
+      byKey.delete(k.ceKey())
+    }
+    return new BasslineDict(
+      Array.from(byKey, ([k, v]) => [this.#cache.get(k), v]),
+      this.actionable
+    )
+  }
+
+  set(k, v) {
+    return this.append([k, v])
   }
 
   get(k) {
     if (!isValue(k)) throw new TypeError('dict key must be a Bassline value')
-    for (const [key, val] of this.value) if (eq(key, k)) return val
-    return undefined
+    return this.#value.get(k.ceKey())
   }
 
   has(k) {
     if (!isValue(k)) throw new TypeError('dict key must be a Bassline value')
-    return this.value.some(([key]) => eq(key, k))
+    return this.#value.has(k.ceKey())
+  }
+
+  *[Symbol.iterator]() {
+    for (const [k, v] of this.#value) {
+      const origKey = this.#cache.get(k)
+      if (!origKey) throw new Error('rebuild: missing original key in cache')
+      yield [origKey, v]
+    }
   }
 
   accept(aVisitor) {
     return aVisitor.visitDict(this)
   }
+
+  copy(actionable) {
+    return new BasslineDict([...this.value], actionable)
+  }
 }
 
 export class BasslineRecord extends BasslineValue {
-  constructor(head, fields) {
+  #value
+  constructor(record, actionable = false) {
+    const [head, ...fields] = record
     if (!isValue(head))
       throw new TypeError('record head must be a Bassline value')
     if (!Array.isArray(fields) || !fields.every(isValue)) {
       throw new TypeError('record fields must be an array of Bassline values')
     }
-    super({ head, fields })
+    super(actionable)
+    this.#value = [head, ...fields]
   }
 
-  set head(value) {
-    if (!isValue(value))
-      throw new TypeError('record head must be a Bassline value')
-    this.value.head = value
+  get isFrame() {
+    return true
   }
+
+  get value() {
+    return this.#value.slice()
+  }
+
   get head() {
-    return this.value.head
+    return this.value[0]
   }
 
   get fields() {
-    return this.value.fields
+    return this.value.slice(1)
   }
-  set fields(value) {
-    if (!Array.isArray(value) || !value.every(isValue))
-      throw new TypeError('record fields must be an array of Bassline values')
-    this.value.fields = value
+
+  map(callback) {
+    return new BasslineRecord(this.value.map(callback), this.actionable)
+  }
+
+  filter(callback) {
+    return new BasslineRecord(this.value.filter(callback), this.actionable)
   }
 
   accept(aVisitor) {
     return aVisitor.visitRecord(this)
   }
+
+  copy(actionable) {
+    return new BasslineRecord(this.value, actionable)
+  }
 }
 
 export class BasslineSet extends BasslineValue {
-  // value: Array<member> in insertion order. Uniqueness is enforced at the
-  // boundaries (encode/decode), not here.
-  constructor(members) {
-    const value = []
+  #value
+  constructor(members, actionable = false) {
+    const value = new Map()
     for (const m of members) {
       if (!isValue(m))
         throw new TypeError('set member must be a Bassline value')
-      value.push(m)
+      const key = m.ceKey()
+      value.set(key, m)
     }
-    super(value)
+    super(actionable)
+    this.#value = value
   }
 
-  has(m) {
-    if (!isValue(m)) throw new TypeError('set member must be a Bassline value')
-    return this.value.some(x => eq(x, m))
+  get isFrame() {
+    return true
+  }
+
+  get value() {
+    return Array.from(this.#value.values())
+  }
+
+  map(callback) {
+    const newMembers = this.value.map(m => callback(m))
+    return new BasslineSet(newMembers, this.actionable)
+  }
+
+  filter(callback) {
+    const newMembers = this.value.filter(m => callback(m))
+    return new BasslineSet(newMembers, this.actionable)
+  }
+
+  append(...members) {
+    const s = new Map(this.#value)
+    for (const m of members) {
+      if (!isValue(m))
+        throw new TypeError('set member must be a Bassline value')
+      const key = m.ceKey()
+      if (s.has(key)) continue
+      else s.set(key, m)
+    }
+    return new BasslineSet(Array.from(s.values()), this.actionable)
+  }
+
+  delete(...members) {
+    const s = new Map(this.#value)
+    for (const m of members) {
+      if (!isValue(m))
+        throw new TypeError('set member must be a Bassline value')
+      s.delete(m.ceKey())
+    }
+    return new BasslineSet(Array.from(s.values()), this.actionable)
+  }
+
+  add(m) {
+    return this.append(m)
+  }
+
+  has(...members) {
+    for (const m of members) {
+      if (!isValue(m))
+        throw new TypeError('set member must be a Bassline value')
+      if (!this.#value.has(m.ceKey())) return false
+    }
+    return true
+  }
+
+  *[Symbol.iterator]() {
+    yield* this.#value.values()
   }
 
   accept(aVisitor) {
     return aVisitor.visitSet(this)
   }
+
+  copy(actionable = this.actionable) {
+    return new BasslineSet(this.value, actionable)
+  }
 }
 
 export function toBassline(value) {
-  if (value instanceof BasslineValue) return value
   if (value === undefined) {
     throw new TypeError('cannot convert undefined to Bassline value')
   }
+  if (value instanceof BasslineValue) return value
   if (value === null) return nil()
   if (value === true) return bool(true)
   if (value === false) return bool(false)
-  if (typeof value === 'number') {
-    return new BasslineFloat(value)
-  }
   if (typeof value === 'bigint') return new BasslineInt(value)
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) return new BasslineInt(value)
+    else return new BasslineFloat(value)
+  }
   if (typeof value === 'string') return new BasslineString(value)
   if (typeof value === 'symbol') {
     if (!value.description)
@@ -376,7 +619,7 @@ export class BasslineVisitor {
     return aList
   }
   visitDict(aDict) {
-    for (const [key, value] of aDict.value) {
+    for (const [key, value] of aDict) {
       this.visit(key)
       this.visit(value)
     }
@@ -390,7 +633,7 @@ export class BasslineVisitor {
     return aRecord
   }
   visitSet(aSet) {
-    for (const member of aSet.value) {
+    for (const member of aSet) {
       this.visit(member)
     }
     return aSet
@@ -407,7 +650,7 @@ export const sym = s => new BasslineSymbol(s)
 export const bytes = u8 => new BasslineBytes(u8)
 export const list = items => new BasslineList(items)
 export const dict = entries => new BasslineDict(entries)
-export const record = (head, fields = []) => new BasslineRecord(head, fields)
+export const record = (head, ...fields) => new BasslineRecord([head, ...fields])
 export const set = members => new BasslineSet(members)
 
 /**
@@ -516,12 +759,11 @@ export class CEVisitor extends BasslineVisitor {
     })
   }
   visitDict(aDict) {
-    const entries = [...aDict.value].sort((a, b) =>
-      compareBytes(cachedCE(a[0]), cachedCE(b[0]))
-    )
-    for (let i = 1; i < entries.length; i++)
-      if (eq(entries[i - 1][0], entries[i][0]))
-        throw new Error('duplicate dict key')
+    const entries = []
+    for (const [k, v] of aDict) {
+      entries.push([k, v])
+    }
+    entries.sort((a, b) => compareBytes(cachedCE(a[0]), cachedCE(b[0])))
     this.frame(DICT_PREFIX, aDict.actionable, body => {
       for (const [k, v] of entries) {
         body.visit(k)
@@ -530,7 +772,7 @@ export class CEVisitor extends BasslineVisitor {
     })
   }
   visitRecord(aRecord) {
-    const { head, fields } = aRecord.value
+    const [head, ...fields] = aRecord.value
     this.frame(RECORD_PREFIX, aRecord.actionable, body => {
       body.visit(head)
       for (const f of fields) body.visit(f)
@@ -540,9 +782,6 @@ export class CEVisitor extends BasslineVisitor {
     const members = [...aSet.value].sort((a, b) =>
       compareBytes(cachedCE(a), cachedCE(b))
     )
-    for (let i = 1; i < members.length; i++)
-      if (eq(members[i - 1], members[i]))
-        throw new Error('duplicate set member')
     this.frame(SET_PREFIX, aSet.actionable, body => {
       for (const m of members) body.visit(m)
     })
@@ -722,7 +961,7 @@ function decodeRecord(cur) {
   const fields = []
   while (cur.pos < end) fields.push(decodeValue(cur))
   if (cur.pos !== end) throw new Error('record length mismatch')
-  return record(head, fields)
+  return record(head, ...fields)
 }
 
 function decodeDict(cur) {

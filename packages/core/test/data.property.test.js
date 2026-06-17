@@ -34,7 +34,7 @@ const { value } = fc.letrec(tie => ({
       .map(D.dict),
     fc
       .tuple(tie('value'), fc.array(tie('value'), { maxLength: 3 }))
-      .map(e => D.record(e[0], e[1]))
+      .map(e => D.record(e[0], ...e[1]))
   ),
 }))
 
@@ -129,7 +129,7 @@ describe('independent CE corpus', () => {
     ['unicode é', D.str('é'), '0602C3A9'],
     ['emoji', D.str('\u{1F600}'), '0604F09F9880'],
     ['actionable nested', D.list([D.int(1n)]).toActionable(), '8903040101'],
-    ['empty record', D.record(D.sym('foo'), []), '0B050703666F6F'],
+    ['empty record', D.record(D.sym('foo')), '0B050703666F6F'],
     ['NaN', D.float(NaN), '057FF8000000000000'],
     ['-0.0', D.float(-0), '058000000000000000'],
   ]

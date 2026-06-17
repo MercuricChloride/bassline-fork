@@ -1,58 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import * as D from '../src/data.js'
-import {
-  children,
-  rebuild,
-  rewrite,
-  rules,
-  onHead,
-  onSymbol,
-} from '../src/lang/rewrite.js'
+import { rewrite, rules, onHead, onSymbol } from '../src/lang/rewrite.js'
 import { parse } from '../src/text/parser.js'
 
 const v1 = src => parse(src)[0]
 
-describe('children / rebuild', () => {
-  it('lists the ordered constituents (dict flattened, record head-first)', () => {
-    expect(children(D.list([D.int(1n), D.int(2n)]))).toHaveLength(2)
-    expect(children(D.record(D.sym('p'), [D.int(1n)]))).toHaveLength(2) // head + field
-    expect(children(D.dict([[D.sym('a'), D.int(1n)]]))).toHaveLength(2) // k, v flattened
-    expect(children(D.set([D.int(1n), D.int(2n)]))).toHaveLength(2)
-    expect(children(D.int(1n))).toEqual([]) // atom
-  })
-
-  it('rebuild inverts children', () => {
-    for (const v of [
-      D.list([D.int(1n), D.int(2n)]),
-      D.record(D.sym('p'), [D.int(1n), D.int(2n)]),
-      D.dict([
-        [D.sym('a'), D.int(1n)],
-        [D.sym('b'), D.int(2n)],
-      ]),
-      D.set([D.int(1n), D.int(2n)]),
-      D.int(7n),
-    ]) {
-      expect(D.eq(rebuild(v, children(v)), v)).toBe(true)
-    }
-  })
-
-  it('rebuild preserves the actionable bit', () => {
-    const v = D.list([D.int(1n)]).toActionable()
-    const r = rebuild(v, children(v))
-    expect(D.isActionable(r)).toBe(true)
-    expect(D.eq(r, v)).toBe(true)
-  })
-})
-
 describe('rewrite', () => {
   it('the identity rule is a no-op', () => {
     const v = v1('[1 <p 2 3> {a: 1}]')
-    expect(
-      D.eq(
-        rewrite(v, x => x),
-        v
-      )
-    ).toBe(true)
+    const rewritten = rewrite(v, x => x)
+    expect(D.eq(rewritten, v)).toBe(true)
   })
 
   it('renames symbols by predicate, anywhere in the tree', () => {

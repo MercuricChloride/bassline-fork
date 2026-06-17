@@ -65,7 +65,7 @@ describe('frame layout', () => {
     expect(print(D.list([]))).toBe('[]')
     expect(print(D.dict([]))).toBe('{}')
     expect(print(D.set([]))).toBe('#{}')
-    expect(print(D.record(D.sym('point'), []))).toBe('<point>')
+    expect(print(D.record(D.sym('point')))).toBe('<point>')
   })
 
   it('breaks non-empty frames across indented lines', () => {
@@ -79,7 +79,7 @@ describe('frame layout', () => {
         ])
       )
     ).toBe('{\n  a: 1\n  b: 2\n}')
-    expect(print(D.record(D.sym('point'), [D.int(1n), D.int(2n)]))).toBe(
+    expect(print(D.record(D.sym('point'), D.int(1n), D.int(2n)))).toBe(
       '<point\n  1\n  2\n>'
     )
   })
@@ -119,17 +119,17 @@ describe('round-trip: parse(print(v)) eq v', () => {
       [D.sym('b'), D.int(2n)],
     ]),
     D.set([D.int(1n), D.int(2n), D.int(3n)]),
-    D.record(D.sym('point'), [D.int(1n), D.int(2n)]),
+    D.record(D.sym('point'), D.int(1n), D.int(2n)),
     // nesting + actionable values (non-Data values still round-trip)
     D.list([
       D.dict([[D.sym('k'), D.set([D.int(1n)])]]),
-      D.record(D.sym('tag'), []),
+      D.record(D.sym('tag')),
     ]),
     act(D.sym('x')),
     act(D.list([D.int(1n), D.int(2n)])),
     D.list([act(D.int(1n)), D.int(2n)]),
     D.dict([[D.sym('a'), act(D.int(1n))]]),
-    D.record(act(D.sym('head')), [D.int(1n)]),
+    D.record(act(D.sym('head')), D.int(1n)),
   ]
 
   it.each(samples.map((v, i) => [i, v]))('round-trips sample %i', (_i, v) => {

@@ -107,7 +107,7 @@
 
     "symbol": {
       "name": "entity.name.symbol.bassline",
-      "match": "[^\\s\\[\\]{}<>():#'\"`]+"
+      "match": "[^\\s\\[\\]{},<>():#'\"`]+"
     }
   }
 }

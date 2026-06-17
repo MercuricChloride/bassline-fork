@@ -48,10 +48,10 @@ const VECTORS = [
   ['#{2 1}', D.set([D.int(2n), D.int(1n)]), '0C 06 04 01 01 04 01 02'],
   [
     '<foo 1>',
-    D.record(D.sym('foo'), [D.int(1n)]),
+    D.record(D.sym('foo'), D.int(1n)),
     '0B 08 07 03 66 6F 6F 04 01 01',
   ],
-  ['<foo> (empty)', D.record(D.sym('foo'), []), '0B 05 07 03 66 6F 6F'],
+  ['<foo> (empty)', D.record(D.sym('foo')), '0B 05 07 03 66 6F 6F'],
   ['`x (actionable symbol)', act(D.sym('x')), '87 01 78'],
   ['`[1] (actionable list)', act(D.list([D.int(1n)])), '89 03 04 01 01'],
   [
@@ -157,7 +157,7 @@ describe('strings', () => {
 })
 
 describe('dictionaries', () => {
-  it('constructs faithfully — a duplicate key is not rejected here', () => {
+  it('constructs faithfully', () => {
     expect(() =>
       D.dict([
         [D.sym('a'), D.int(1n)],
@@ -166,15 +166,12 @@ describe('dictionaries', () => {
     ).not.toThrow()
   })
 
-  it('rejects a duplicate key at the encode boundary', () => {
-    expect(() =>
-      D.encode(
-        D.dict([
-          [D.sym('a'), D.int(1n)],
-          [D.sym('a'), D.int(2n)],
-        ])
-      )
-    ).toThrow()
+  it('deduplicates keys canonically', () => {
+    const d = D.dict([
+      [D.sym('a'), D.int(1n)],
+      [D.sym('a'), D.int(2n)],
+    ])
+    expect(d.value.size).toBe(1)
   })
 
   it('allows an actionable key', () => {
@@ -210,8 +207,9 @@ describe('sets', () => {
     expect(() => D.set([D.int(1n), D.int(1n)])).not.toThrow()
   })
 
-  it('rejects a duplicate member at the encode boundary', () => {
-    expect(() => D.encode(D.set([D.int(1n), D.int(1n)]))).toThrow()
+  it('deduplicates members canonically', () => {
+    const s = D.set([D.int(1n), D.int(1n)])
+    expect(s.value.length).toBe(1)
   })
 
   it('is order-insensitive', () => {

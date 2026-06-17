@@ -50,7 +50,7 @@ describe('frames', () => {
 
   it('parses a record', () => {
     expect(
-      D.eq(val('<point 1 2>'), D.record(D.sym('point'), [D.int(1n), D.int(2n)]))
+      D.eq(val('<point 1 2>'), D.record(D.sym('point'), D.int(1n), D.int(2n)))
     ).toBe(true)
   })
 
@@ -137,10 +137,11 @@ describe('errors', () => {
 describe('round-trip with canonical encoding', () => {
   it('parse then encode reproduces hand-built values', () => {
     const v = val('<entry "k" #{1 2 3}>')
-    const want = D.record(D.sym('entry'), [
+    const want = D.record(
+      D.sym('entry'),
       D.str('k'),
-      D.set([D.int(1n), D.int(2n), D.int(3n)]),
-    ])
+      D.set([D.int(1n), D.int(2n), D.int(3n)])
+    )
     expect(D.eq(v, want)).toBe(true)
     expect(D.eq(D.decode(D.encode(v)), v)).toBe(true)
   })

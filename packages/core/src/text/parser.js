@@ -68,7 +68,7 @@ export function parse(source) {
       fail(peek() ?? open, 'record needs a head')
     const head = parseValue()
     const fields = parseSeq(T.RANGLE, "'>'")
-    return D.record(head, fields)
+    return D.record(head, ...fields)
   }
 
   const parseDict = () => {

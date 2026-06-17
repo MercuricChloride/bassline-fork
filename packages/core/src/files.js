@@ -9,8 +9,6 @@ import { print } from './text/print.js'
 
 const asList = values => (Array.isArray(values) ? values : [values])
 
-// --- binary: concatenated canonical encodings (CE is prefix-free, self-delimiting) ---
-
 /**
  * Write one value or an array of values to a binary file.
  * @param path
