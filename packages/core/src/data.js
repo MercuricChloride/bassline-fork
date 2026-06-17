@@ -6,62 +6,20 @@
 // Alongside 4 frame value types:
 // list, dict, record, set
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: true })
-
-const CANON_NAN = Uint8Array.of(0x7f, 0xf8, 0, 0, 0, 0, 0, 0)
-
 /**
  * @param x
  * @returns {x is BasslineValue} whether x is a Bassline value.
  */
 export const isValue = x => x instanceof BasslineValue
 
-function assertValue(x) {
-  if (!isValue(x)) throw new TypeError('expected a Bassline value')
-}
-
-export const BAD_PREFIX = 0x0
-export const NIL_PREFIX = 0x1
-export const FALSE_PREFIX = 0x2
-export const TRUE_PREFIX = 0x3
-export const INT_PREFIX = 0x4
-export const FLOAT_PREFIX = 0x5
-export const STRING_PREFIX = 0x6
-export const SYMBOL_PREFIX = 0x7
-export const BYTES_PREFIX = 0x8
-export const LIST_PREFIX = 0x9
-export const DICT_PREFIX = 0xa
-export const RECORD_PREFIX = 0xb
-export const SET_PREFIX = 0xc
-export const ACTIONABLE = 0x80
-export const TAG_MASK = 0x7f
-
-const descriptor = (tag, actionable) => (actionable ? tag | ACTIONABLE : tag)
-const tagOf = b => b & TAG_MASK
-const actionableOf = b => (b & ACTIONABLE) !== 0
-
 /**
- * Minimal two's-complement big-endian bytes
- * @param n
+ * @param {unknown} x
+ * @throws {TypeError} if x is not a Bassline value.
+ * @returns {x is BasslineValue}
  */
-function intToBytes(n) {
-  if (n === 0n) return Uint8Array.of(0)
-  let width = 1
-  for (;;) {
-    const bits = BigInt(width) * 8n
-    const min = -(1n << (bits - 1n))
-    const max = (1n << (bits - 1n)) - 1n
-    if (n >= min && n <= max) break
-    width++
-  }
-  const out = new Uint8Array(width)
-  let v = BigInt.asUintN(width * 8, n)
-  for (let i = width - 1; i >= 0; i--) {
-    out[i] = Number(v & 0xffn)
-    v >>= 8n
-  }
-  return out
+export function assertValue(x) {
+  if (!isValue(x)) throw new TypeError('expected a Bassline value')
+  return x
 }
 
 // ================ Bassline Value Types ================
@@ -250,9 +208,6 @@ export class BasslineSymbol extends BasslineValue {
   }
 }
 
-// NOTE: This isn't entirely safe for now
-// I'll eventually add mutation safety to the bytes here
-// but for now this is fine
 export class BasslineBytes extends BasslineValue {
   #value
   constructor(value, actionable = false) {
@@ -263,7 +218,7 @@ export class BasslineBytes extends BasslineValue {
   }
 
   get value() {
-    return this.#value
+    return this.#value.slice()
   }
 
   accept(aVisitor) {
@@ -546,6 +501,19 @@ export class BasslineSet extends BasslineValue {
   }
 }
 
+// ================ factories ================
+export const nil = () => new BasslineNil()
+export const bool = b => new BasslineBool(b)
+export const int = n => new BasslineInt(n)
+export const float = x => new BasslineFloat(x)
+export const str = s => new BasslineString(s)
+export const sym = s => new BasslineSymbol(s)
+export const bytes = u8 => new BasslineBytes(u8)
+export const list = items => new BasslineList(items)
+export const dict = entries => new BasslineDict(entries)
+export const record = (head, ...fields) => new BasslineRecord([head, ...fields])
+export const set = members => new BasslineSet(members)
+
 export function toBassline(value) {
   if (value === undefined) {
     throw new TypeError('cannot convert undefined to Bassline value')
@@ -584,8 +552,6 @@ export function toBassline(value) {
   }
   throw new TypeError('cannot convert value to Bassline value')
 }
-
-// ================ Visitor ================
 
 export class BasslineVisitor {
   visit(aValue) {
@@ -640,46 +606,87 @@ export class BasslineVisitor {
   }
 }
 
-// ================ factories ================
-export const nil = () => new BasslineNil()
-export const bool = b => new BasslineBool(b)
-export const int = n => new BasslineInt(n)
-export const float = x => new BasslineFloat(x)
-export const str = s => new BasslineString(s)
-export const sym = s => new BasslineSymbol(s)
-export const bytes = u8 => new BasslineBytes(u8)
-export const list = items => new BasslineList(items)
-export const dict = entries => new BasslineDict(entries)
-export const record = (head, ...fields) => new BasslineRecord([head, ...fields])
-export const set = members => new BasslineSet(members)
+export class ActionableVisitor extends BasslineVisitor {
+  constructor() {
+    super()
+    this.foundActionable = false
+  }
+  visit(aValue) {
+    if (aValue.actionable) {
+      this.foundActionable = true
+      return this
+    }
+    return super.visit(aValue)
+  }
+}
+
+export class CycleFreeVisitor extends BasslineVisitor {
+  constructor() {
+    super()
+    this.seen = new Set()
+    this.cycleDetected = false
+  }
+  visit(aValue) {
+    if (this.seen.has(aValue)) {
+      this.cycleDetected = true
+      return this
+    }
+    this.seen.add(aValue)
+    return super.visit(aValue)
+  }
+}
 
 /**
  * Whether a value carries the actionable bit anywhere in its tree
  * @param v
+ * @returns {boolean}
  */
 export function hasActionable(v) {
-  if (v.actionable) return true
-  if (v instanceof BasslineList || v instanceof BasslineSet) {
-    for (const child of v.value) if (hasActionable(child)) return true
-    return false
-  }
-  if (v instanceof BasslineDict) {
-    for (const [k, val] of v.value)
-      if (hasActionable(k) || hasActionable(val)) return true
-    return false
-  }
-  if (v instanceof BasslineRecord) {
-    if (hasActionable(v.head)) return true
-    for (const f of v.fields) if (hasActionable(f)) return true
-    return false
-  }
-  return false
+  const visitor = new ActionableVisitor()
+  visitor.visit(v)
+  return visitor.foundActionable
 }
 
 export const isData = v => (assertValue(v), !hasActionable(v))
 export const isActionable = v => (assertValue(v), v.actionable)
 
+/**
+ *
+ * @param {BasslineValue} v
+ */
+export function cycleFree(v) {
+  const visitor = new CycleFreeVisitor()
+  visitor.visit(v)
+  return !visitor.cycleDetected
+}
+
 // ================ Canonical Encoding ================
+
+// All prefix constants
+export const BAD_PREFIX = 0x0
+export const NIL_PREFIX = 0x1
+export const FALSE_PREFIX = 0x2
+export const TRUE_PREFIX = 0x3
+export const INT_PREFIX = 0x4
+export const FLOAT_PREFIX = 0x5
+export const STRING_PREFIX = 0x6
+export const SYMBOL_PREFIX = 0x7
+export const BYTES_PREFIX = 0x8
+export const LIST_PREFIX = 0x9
+export const DICT_PREFIX = 0xa
+export const RECORD_PREFIX = 0xb
+export const SET_PREFIX = 0xc
+export const ACTIONABLE = 0x80
+export const TAG_MASK = 0x7f
+
+// accessor functions for tag & actionable bits
+const descriptor = (tag, actionable) => (actionable ? tag | ACTIONABLE : tag)
+const tagOf = b => b & TAG_MASK
+const actionableOf = b => (b & ACTIONABLE) !== 0
+
+const ENC = new TextEncoder()
+const DEC = new TextDecoder('utf-8', { fatal: true })
+const CANON_NAN = Uint8Array.of(0x7f, 0xf8, 0, 0, 0, 0, 0, 0)
 
 /** @type {WeakMap<BasslineValue, Uint8Array>} */
 const CE_CACHE = new WeakMap()
@@ -786,6 +793,29 @@ export class CEVisitor extends BasslineVisitor {
       for (const m of members) body.visit(m)
     })
   }
+}
+
+/**
+ * Minimal two's-complement big-endian bytes
+ * @param n
+ */
+function intToBytes(n) {
+  if (n === 0n) return Uint8Array.of(0)
+  let width = 1
+  for (;;) {
+    const bits = BigInt(width) * 8n
+    const min = -(1n << (bits - 1n))
+    const max = (1n << (bits - 1n)) - 1n
+    if (n >= min && n <= max) break
+    width++
+  }
+  const out = new Uint8Array(width)
+  let v = BigInt.asUintN(width * 8, n)
+  for (let i = width - 1; i >= 0; i--) {
+    out[i] = Number(v & 0xffn)
+    v >>= 8n
+  }
+  return out
 }
 
 function cachedCE(v) {
