@@ -10,7 +10,7 @@
 // stay value-friendly (the door to authoring rules as bassline values later).
 /** @import { Value } from '../data.js' */
 import { assertValue } from '../data.js'
-import { kind, match, frame, any, and, head, rule } from './match.js'
+import { kind, match, frame, any, and, head, rule, spelled } from './match.js'
 
 /**
  * Rewrite a value tree with a rule, bottom-up. Children are rewritten first,
@@ -24,7 +24,7 @@ export function rewrite(v, rule, opts = {}) {
   const { fixpoint = true, maxSteps = 100000 } = opts
   let steps = 0
   const rebuild = match(
-    [kind.dict, node => node.map(([k, v]) => [go(k), go(v)])],
+    [n => kind.dict(n), node => node.map(([k, v]) => [go(k), go(v)])],
     [frame, node => node.map(go)],
     [any, node => node]
   )
@@ -67,7 +67,7 @@ export function rules(...rs) {
  * @param {(node: Value) => Value} fn
  */
 export function onHead(name, fn) {
-  return rule(head(and(kind.symbol, s => s.value === name)), fn)
+  return rule(head(spelled(name)), fn)
 }
 
 /**

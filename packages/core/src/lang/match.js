@@ -1,10 +1,12 @@
 //@ts-check
-/** @import {Value, Values} from "../data.js" */
-/** @typedef {(v: Value) => boolean} Predicate */
-
+/** @import {Frame, Value, Values} from "../data.js" */
 /**
  * @template {Value} T
  * @typedef {(x: Value) => x is T} Guard
+ */
+
+/**
+ * @typedef {(x: Value) => boolean} Predicate
  */
 
 export const kind = {
@@ -32,18 +34,22 @@ export const kind = {
   set: aNode => aNode.kind === 'set',
 }
 
-/** @type {(...preds: Predicate[]) => Predicate} */
+/**
+ * @param {...Predicate} preds
+ * @returns {Predicate}
+ */
 export const and =
   (...preds) =>
   aNode =>
     preds.every(p => p(aNode))
-
-/** @type {(...preds: Predicate[]) => Predicate} */
+/**
+ * @param {...Predicate} preds
+ * @returns {Predicate}
+ */
 export const or =
   (...preds) =>
   aNode =>
     preds.some(p => p(aNode))
-
 /** @type {(p: Predicate) => Predicate} */
 export const not = p => aNode => !p(aNode)
 
@@ -55,6 +61,10 @@ export const actionable = aNode => aNode.actionable
 export const passive = not(actionable)
 
 export const any = () => true
+
+/** @type {(name: string) => Predicate} */
+export const spelled = name => aNode =>
+  kind.symbol(aNode) && aNode.value === name
 
 /** @type {(p: Predicate) => Predicate} */
 export const head = p => aNode => kind.record(aNode) && p(aNode.head)
