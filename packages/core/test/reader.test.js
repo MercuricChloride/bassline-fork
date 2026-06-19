@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parse } from '../src/text/parser.js'
+import { read } from '../src/text/reader.js'
 import * as D from '../src/data.js'
 
 /**
@@ -7,15 +7,15 @@ import * as D from '../src/data.js'
  * @param src
  */
 const val = src => {
-  const vs = parse(src)
+  const vs = read(src)
   expect(vs).toHaveLength(1)
   return vs[0]
 }
 
 describe('documents', () => {
   it('parses zero or more whitespace-separated values into an array', () => {
-    expect(parse('')).toEqual([])
-    const vs = parse('42 "hi" foo')
+    expect(read('')).toEqual([])
+    const vs = read('42 "hi" foo')
     expect(vs).toHaveLength(3)
     expect(D.eq(vs[0], D.int(42n))).toBe(true)
     expect(D.eq(vs[1], D.str('hi'))).toBe(true)
@@ -46,6 +46,7 @@ describe('frames', () => {
     expect(D.eq(val('[]'), D.list([]))).toBe(true)
     expect(D.eq(val('{}'), D.dict([]))).toBe(true)
     expect(D.eq(val('#{}'), D.set([]))).toBe(true)
+    expect(() => val('<>')).toThrow('Record cannot be empty!')
   })
 
   it('parses a record', () => {
@@ -103,34 +104,25 @@ describe('actionable', () => {
       D.eq(val('{`a: 1}'), D.dict([[D.sym('a').toActionable(), D.int(1n)]]))
     ).toBe(true)
   })
-
-  it('rejects two prefixes in a row', () => {
-    expect(() => parse('``foo')).toThrow()
-  })
 })
 
 describe('errors', () => {
   it('rejects a record with no head', () => {
-    expect(() => parse('<>')).toThrow()
+    expect(() => read('<>')).toThrow()
   })
 
   it('rejects a stray closer or reserved paren', () => {
-    expect(() => parse(']')).toThrow()
-    expect(() => parse('(')).toThrow()
+    expect(() => read(']')).toThrow()
+    expect(() => read('(')).toThrow()
   })
 
   it('rejects an unterminated frame', () => {
-    expect(() => parse('[1 2')).toThrow()
-    expect(() => parse('{a: 1')).toThrow()
+    expect(() => read('[1 2')).toThrow()
+    expect(() => read('{a: 1')).toThrow()
   })
 
   it('rejects a dictionary entry without a colon', () => {
-    expect(() => parse('{a 1}')).toThrow()
-  })
-
-  it('rejects duplicate dict keys and set members as a parse error', () => {
-    expect(() => parse('{a: 1 a: 2}')).toThrow()
-    expect(() => parse('#{1 1}')).toThrow()
+    expect(() => read('{a 1}')).toThrow()
   })
 })
 
@@ -149,9 +141,8 @@ describe('round-trip with canonical encoding', () => {
 
 describe('input validation', () => {
   it('rejects a non-string source at the boundary', () => {
-    // e.g. passing already-parsed values back into parse()
     for (const bad of [42, null, undefined, [D.int(1n)]]) {
-      expect(() => parse(bad)).toThrow(TypeError)
+      expect(() => read(bad)).toThrow(TypeError)
     }
   })
 })

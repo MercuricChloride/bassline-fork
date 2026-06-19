@@ -4,7 +4,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { encode, decodeAll } from './data.js'
-import { parse } from './text/parser.js'
+import { read } from './text/reader.js'
 import { print } from './text/print.js'
 
 const asList = values => (Array.isArray(values) ? values : [values])
@@ -49,7 +49,7 @@ export function saveText(path, values) {
  * @param path
  */
 export function loadText(path) {
-  return parse(readFileSync(path, 'utf8'))
+  return read(readFileSync(path, 'utf8'))
 }
 
 // --- conversion between the two on-disk forms ---

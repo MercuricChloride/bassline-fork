@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import * as D from '../src/data.js'
 import { rewrite, rules, onHead, onSymbol } from '../src/lang/rewrite.js'
-import { parse } from '../src/text/parser.js'
+import { read } from '../src/text/reader.js'
 
-const v1 = src => parse(src)[0]
+const v1 = src => read(src)[0]
 
 describe('rewrite', () => {
   it('the identity rule is a no-op', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { print } from '../src/text/print.js'
-import { parse } from '../src/text/parser.js'
+import { read } from '../src/text/reader.js'
 import * as D from '../src/data.js'
 
 const bs = (...n) => D.bytes(Uint8Array.of(...n))
@@ -61,16 +61,13 @@ describe('atom formatting', () => {
 })
 
 describe('frame layout', () => {
-  it('prints empty frames inline', () => {
+  it('prints short frames inline', () => {
     expect(print(D.list([]))).toBe('[]')
     expect(print(D.dict([]))).toBe('{}')
     expect(print(D.set([]))).toBe('#{}')
     expect(print(D.record(D.sym('point')))).toBe('<point>')
-  })
-
-  it('breaks non-empty frames across indented lines', () => {
-    expect(print(D.list([D.int(1n), D.int(2n)]))).toBe('[\n  1\n  2\n]')
-    expect(print(D.set([D.int(1n), D.int(2n)]))).toBe('#{\n  1\n  2\n}')
+    expect(print(D.list([D.int(1n), D.int(2n)]))).toBe('[1 2]')
+    expect(print(D.set([D.int(1n), D.int(2n)]))).toBe('#{1 2}')
     expect(
       print(
         D.dict([
@@ -78,18 +75,37 @@ describe('frame layout', () => {
           [D.sym('b'), D.int(2n)],
         ])
       )
-    ).toBe('{\n  a: 1\n  b: 2\n}')
+    ).toBe('{a: 1 b: 2}')
     expect(print(D.record(D.sym('point'), D.int(1n), D.int(2n)))).toBe(
-      '<point\n  1\n  2\n>'
+      '<point 1 2>'
     )
+    expect(print(D.list([D.list([D.int(1n)])]))).toBe('[[1]]') // nested short stays inline
   })
 
-  it('nests indentation', () => {
-    expect(print(D.list([D.list([D.int(1n)])]))).toBe('[\n  [\n    1\n  ]\n]')
+  it('breaks a frame that exceeds the width', () => {
+    const wide = D.list(Array.from({ length: 40 }, (_, i) => D.int(BigInt(i))))
+    const out = print(wide)
+    expect(out.startsWith('[\n')).toBe(true)
+    expect(out.endsWith('\n]')).toBe(true)
+    expect(out).toContain('\n  0\n') // first item on its own indented line
+  })
+
+  it('breaks the outer frame but keeps short inner frames inline', () => {
+    const cells = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((n, i) =>
+      D.record(D.sym('cell'), D.sym(n), D.int(BigInt(i)))
+    )
+    const out = print(D.record(D.sym('sheet'), ...cells), 40)
+    expect(out.startsWith('<sheet\n')).toBe(true)
+    expect(out).toContain('\n  <cell A 0>\n') // inner cell inline, indented
+    expect(out.endsWith('\n>')).toBe(true)
+  })
+
+  it('respects a custom width', () => {
+    expect(print(D.list([D.int(1n), D.int(2n)]), 3)).toBe('[\n  1\n  2\n]')
   })
 })
 
-describe('round-trip: parse(print(v)) eq v', () => {
+describe('round-trip: read(print(v)) eq v', () => {
   const samples = [
     D.nil(),
     D.bool(true),
@@ -133,6 +149,6 @@ describe('round-trip: parse(print(v)) eq v', () => {
   ]
 
   it.each(samples.map((v, i) => [i, v]))('round-trips sample %i', (_i, v) => {
-    expect(D.eq(parse(print(v))[0], v)).toBe(true)
+    expect(D.eq(read(print(v))[0], v)).toBe(true)
   })
 })

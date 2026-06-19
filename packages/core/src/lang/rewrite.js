@@ -8,7 +8,7 @@
 // A *rule* is `(node) => Value`: return a new node to keep rewriting, or return
 // the node unchanged to decline. Rules are plain functions, so they compose and
 // stay value-friendly (the door to authoring rules as bassline values later).
-
+/** @import { BasslineValue } from '../data.js' */
 import {
   isValue,
   eq,
@@ -56,34 +56,47 @@ export function rewrite(v, rule, opts = {}) {
 
 /**
  * Try each rule in order; the first that changes the node wins.
- * @param {...any} rs
+ * @param {...((node: BasslineValue) => BasslineValue)[]} rs
+ * @returns {(node: BasslineValue) => BasslineValue}
  */
-export const rules =
-  (...rs) =>
-  node => {
+export function rules(...rs) {
+  return node => {
     for (const r of rs) {
       const out = r(node)
       if (!eq(out, node)) return out
     }
     return node
   }
+}
 
 /**
  * Match a record whose head is the symbol `name` (ignores the actionable bit).
  * @param name
  * @param fn
  */
-export const onHead = (name, fn) => node =>
-  node instanceof BasslineRecord &&
-  node.head instanceof BasslineSymbol &&
-  node.head.value === name
-    ? fn(node)
-    : node
+export function onHead(name, fn) {
+  return node => {
+    if (
+      node instanceof BasslineRecord &&
+      node.head instanceof BasslineSymbol &&
+      node.head.value === name
+    ) {
+      return fn(node)
+    }
+    return node
+  }
+}
 
 /**
  * Match a symbol whose spelling satisfies `pred`.
  * @param pred
  * @param fn
  */
-export const onSymbol = (pred, fn) => node =>
-  node instanceof BasslineSymbol && pred(node.value) ? fn(node) : node
+export function onSymbol(pred, fn) {
+  return node => {
+    if (node instanceof BasslineSymbol && pred(node.value)) {
+      return fn(node)
+    }
+    return node
+  }
+}

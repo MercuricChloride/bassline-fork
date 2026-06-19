@@ -1,9 +1,12 @@
-// Pretty-printer: a Bassline value -> indented textual syntax.
+// A Pretty-printer from Bassline Values to the Bassline textual syntax
 //
-// The output is a non-canonical human surface; its one guarantee is round-trip:
-// parse(print(v)) yields a value eq to v. That drives the fiddly cases — doubles
-// print as re-parseable doubles, and symbols print bare only when they would lex
-// back unchanged.
+// The output is guaranteed to round-trip:
+// read(print(v)) yields a value eq to v.
+//
+// The Layout is width-aware: a node is rendered flat (one line) when it fits the
+// remaining width, and only broken across indented lines when it doesn't. So a
+// `<cell A1 "Rent">` stays inline while a big `<sheet ..>` breaks one cell per
+// line — each of those cells then re-deciding flat-or-break on its own.
 
 import { BasslineVisitor, isValue } from '../data.js'
 
@@ -87,13 +90,72 @@ function hex(u8) {
   return s
 }
 
+// The single-line ("flat") rendering of a value — the inline form, and the
+// measuring stick the pretty-printer uses to decide whether to break.
+class Flat extends BasslineVisitor {
+  visit(v) {
+    return (v.actionable ? '`' : '') + super.visit(v)
+  }
+  visitNil() {
+    return 'nil'
+  }
+  visitBool(b) {
+    return b.value ? 'true' : 'false'
+  }
+  visitInt(i) {
+    return i.value.toString()
+  }
+  visitFloat(f) {
+    return formatFloat(f.value)
+  }
+  visitString(s) {
+    return '"' + escapeBody(s.value, '"') + '"'
+  }
+  visitSymbol(s) {
+    return bareSafe(s.value) ? s.value : "'" + escapeBody(s.value, "'") + "'"
+  }
+  visitBytes(b) {
+    return '#[' + hex(b.value) + ']'
+  }
+  visitList(l) {
+    return '[' + l.value.map(x => this.visit(x)).join(' ') + ']'
+  }
+  visitSet(s) {
+    return '#{' + s.value.map(x => this.visit(x)).join(' ') + '}'
+  }
+  visitRecord(r) {
+    const [head, ...fields] = r.value
+    return '<' + [head, ...fields].map(x => this.visit(x)).join(' ') + '>'
+  }
+  visitDict(d) {
+    const entries = Array.from(d.value).map(
+      ([k, v]) => this.visit(k) + ': ' + this.visit(v)
+    )
+    return '{' + entries.join(' ') + '}'
+  }
+}
+
+const FLAT = new Flat()
+const flat = v => FLAT.visit(v)
+
 export class BasslinePP extends BasslineVisitor {
   str = ''
   depth = 0
   padding = 2
+  width = 72
+
+  constructor(width = 72) {
+    super()
+    this.width = width
+  }
 
   write(s) {
     this.str += s
+  }
+
+  /** Columns written on the current (last) line. */
+  column() {
+    return this.str.length - (this.str.lastIndexOf('\n') + 1)
   }
 
   /** A newline followed by the current indentation. */
@@ -102,60 +164,68 @@ export class BasslinePP extends BasslineVisitor {
   }
 
   /**
-   * open, then one indented line per item, then close — or `openclose` if empty.
-   * @param open
-   * @param items
-   * @param close
-   * @param render
+   * Write `node` flat if it fits the line; otherwise run `emitBroken`.
+   * @param node
+   * @param emitBroken
    */
-  frame(open, items, close, render = x => this.visit(x)) {
-    if (items.length === 0) return this.write(open + close)
-    this.write(open)
-    this.depth++
-    for (const item of items) {
+  compound(node, emitBroken) {
+    const s = flat(node)
+    if (this.column() + s.length <= this.width) return this.write(s)
+    if (node.actionable) this.write('`')
+    emitBroken()
+  }
+
+  /**
+   * A frame broken across lines: open, one indented item per line, close.
+   * @param node
+   * @param open
+   * @param close
+   * @param items
+   * @param renderItem
+   */
+  block(node, open, close, items, renderItem = x => this.visit(x)) {
+    this.compound(node, () => {
+      this.write(open)
+      this.depth++
+      for (const item of items) {
+        this.break()
+        renderItem(item)
+      }
+      this.depth--
       this.break()
-      render(item)
-    }
-    this.depth--
-    this.break()
-    this.write(close)
+      this.write(close)
+    })
   }
 
-  visit(aValue) {
-    if (aValue.actionable) this.write('`')
-    return super.visit(aValue)
+  visitNil(v) {
+    this.write(flat(v))
   }
-
-  visitNil() {
-    this.write('nil')
+  visitBool(v) {
+    this.write(flat(v))
   }
-  visitBool(aBool) {
-    this.write(aBool.value ? 'true' : 'false')
+  visitInt(v) {
+    this.write(flat(v))
   }
-  visitInt(anInt) {
-    this.write(anInt.value.toString())
+  visitFloat(v) {
+    this.write(flat(v))
   }
-  visitFloat(aFloat) {
-    this.write(formatFloat(aFloat.value))
+  visitString(v) {
+    this.write(flat(v))
   }
-  visitString(aString) {
-    this.write('"' + escapeBody(aString.value, '"') + '"')
+  visitSymbol(v) {
+    this.write(flat(v))
   }
-  visitSymbol(aSymbol) {
-    const s = aSymbol.value
-    this.write(bareSafe(s) ? s : "'" + escapeBody(s, "'") + "'")
-  }
-  visitBytes(aBytes) {
-    this.write('#[' + hex(aBytes.value) + ']')
+  visitBytes(v) {
+    this.write(flat(v))
   }
   visitList(aList) {
-    this.frame('[', aList.value, ']')
+    this.block(aList, '[', ']', aList.value)
   }
   visitSet(aSet) {
-    this.frame('#{', aSet.value, '}')
+    this.block(aSet, '#{', '}', aSet.value)
   }
   visitDict(aDict) {
-    this.frame('{', Array.from(aDict.value), '}', ([k, v]) => {
+    this.block(aDict, '{', '}', Array.from(aDict.value), ([k, v]) => {
       this.visit(k)
       this.write(': ')
       this.visit(v)
@@ -163,21 +233,17 @@ export class BasslinePP extends BasslineVisitor {
   }
   visitRecord(aRecord) {
     const [head, ...fields] = aRecord.value
-    if (fields.length === 0) {
-      this.write('<')
-      this.visit(head)
-      return this.write('>')
-    }
-    this.write('<')
-    this.visit(head)
-    this.depth++
-    for (const f of fields) {
+    this.compound(aRecord, () => {
+      this.write('<' + flat(head)) // head stays inline on the open line
+      this.depth++
+      for (const f of fields) {
+        this.break()
+        this.visit(f)
+      }
+      this.depth--
       this.break()
-      this.visit(f)
-    }
-    this.depth--
-    this.break()
-    this.write('>')
+      this.write('>')
+    })
   }
 
   toString() {
@@ -188,10 +254,11 @@ export class BasslinePP extends BasslineVisitor {
 /**
  * Pretty-print a value to text. parse(print(v))[0] is eq to v.
  * @param v
+ * @param {number} [width] line width that triggers breaking (default 72)
  */
-export function print(v) {
+export function print(v, width = 72) {
   if (!isValue(v)) throw new TypeError('expected a Bassline value')
-  const pp = new BasslinePP()
+  const pp = new BasslinePP(width)
   pp.visit(v)
   return pp.toString()
 }

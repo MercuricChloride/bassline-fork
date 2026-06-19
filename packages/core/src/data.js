@@ -11,6 +11,18 @@
  * @typedef {"nil" | "bool" | "int" | "float" | "string" | "symbol" | "list" | "dict" | "record" | "set"} ValueKind
  */
 
+/**
+ * @typedef {BasslineNil | BasslineBool | BasslineInt | BasslineFloat | BasslineString | BasslineSymbol | BasslineBytes } Scalar
+ */
+
+/**
+ * @typedef {BasslineList | BasslineDict | BasslineSet | BasslineRecord } Frame
+ */
+
+/**
+ * @typedef {Frame | Scalar} Value
+ */
+
 /** @type {(x: unknown) => x is BasslineValue} */
 export const isValue = x => x instanceof BasslineValue
 
@@ -82,7 +94,7 @@ export class BasslineValue {
 
   /**
    *
-   * @param {BasslineValue} other
+   * @param {Value} other
    */
   eq(other) {
     return eq(this, other)
