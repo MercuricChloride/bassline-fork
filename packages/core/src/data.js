@@ -8,31 +8,43 @@
 // list, dict, record, set
 
 /**
- * @typedef {"nil" | "bool" | "int" | "float" | "string" | "symbol" | "list" | "dict" | "record" | "set"} ValueKind
+ * @typedef {{
+ * nil: BasslineNil
+ * bool: BasslineBool
+ * int: BasslineInt
+ * float: BasslineFloat
+ * string: BasslineString
+ * symbol: BasslineSymbol
+ * bytes: BasslineBytes
+ * }} ScalarValues
  */
 
 /**
- * @typedef {BasslineNil | BasslineBool | BasslineInt | BasslineFloat | BasslineString | BasslineSymbol | BasslineBytes } Scalar
+ * @typedef {{
+ * list: BasslineList
+ * dict: BasslineDict
+ * record: BasslineRecord
+ * set: BasslineSet
+ * }} FrameValues
  */
 
-/**
- * @typedef {BasslineList | BasslineDict | BasslineSet | BasslineRecord } Frame
- */
-
-/**
- * @typedef {Frame | Scalar} Value
- */
+/** @typedef {ScalarValues & FrameValues} Values */
+/** @typedef {ScalarValues[keyof ScalarValues]} Scalar */
+/** @typedef {FrameValues[keyof FrameValues]} Frame */
+/** @typedef {BasslineValue} Value */
+/** @typedef { keyof Values } ValueKind */
 
 /** @type {(x: unknown) => x is BasslineValue} */
 export const isValue = x => x instanceof BasslineValue
 
 /**
  * @param {unknown} x
+ * @param msg
  * @throws {TypeError} if x is not a Bassline value.
  * @returns {x is BasslineValue}
  */
-export function assertValue(x) {
-  if (!isValue(x)) throw new TypeError('expected a Bassline value')
+export function assertValue(x, msg = 'expected a Bassline value') {
+  if (!isValue(x)) throw new TypeError(msg)
   return true
 }
 
@@ -52,6 +64,11 @@ export class BasslineValue {
 
   get isFrame() {
     return false
+  }
+
+  /** @returns {ValueKind} */
+  get kind() {
+    throw new Error('abstract')
   }
 
   toStatic() {
@@ -124,6 +141,7 @@ export class BasslineNil extends BasslineValue {
   accept(aVisitor) {
     return aVisitor.visitNil(this)
   }
+  /** @returns {'nil'} */
   get kind() {
     return 'nil'
   }
@@ -156,6 +174,7 @@ export class BasslineBool extends BasslineValue {
   accept(aVisitor) {
     return aVisitor.visitBool(this)
   }
+  /** @returns {'bool'}*/
   get kind() {
     return 'bool'
   }
@@ -191,6 +210,7 @@ export class BasslineInt extends BasslineValue {
   accept(aVisitor) {
     return aVisitor.visitInt(this)
   }
+  /** @returns {'int'}*/
   get kind() {
     return 'int'
   }
@@ -231,6 +251,7 @@ export class BasslineFloat extends BasslineValue {
   copy(actionable = this.actionable) {
     return new BasslineFloat(this.value, actionable)
   }
+  /** @returns {'float'}*/
   get kind() {
     return 'float'
   }
@@ -266,6 +287,7 @@ export class BasslineString extends BasslineValue {
   copy(actionable = this.actionable) {
     return new BasslineString(this.value, actionable)
   }
+  /** @returns {'string'}*/
   get kind() {
     return 'string'
   }
@@ -304,6 +326,7 @@ export class BasslineSymbol extends BasslineValue {
   copy(actionable = this.actionable) {
     return new BasslineSymbol(this.value, actionable)
   }
+  /** @returns {'symbol'}*/
   get kind() {
     return 'symbol'
   }
@@ -334,6 +357,7 @@ export class BasslineBytes extends BasslineValue {
   accept(aVisitor) {
     return aVisitor.visitBytes(this)
   }
+  /** @returns {'bytes'}*/
   get kind() {
     return 'bytes'
   }
@@ -422,7 +446,7 @@ export class BasslineList extends BasslineValue {
   copy(actionable = this.actionable) {
     return new BasslineList(this.value, actionable)
   }
-
+  /** @returns {'list'}*/
   get kind() {
     return 'list'
   }
@@ -569,6 +593,7 @@ export class BasslineDict extends BasslineValue {
     return new BasslineDict([...this.value], actionable)
   }
 
+  /** @returns {'dict'} */
   get kind() {
     return 'dict'
   }
@@ -642,6 +667,7 @@ export class BasslineRecord extends BasslineValue {
     return new BasslineRecord(this.value, actionable)
   }
 
+  /** @returns {'record'} */
   get kind() {
     return 'record'
   }
@@ -766,6 +792,7 @@ export class BasslineSet extends BasslineValue {
     return new BasslineSet(this.value, actionable)
   }
 
+  /** @returns {'set'} */
   get kind() {
     return 'set'
   }
@@ -1293,6 +1320,7 @@ function compareBytes(a, b) {
 export function eq(a, b) {
   assertValue(a)
   assertValue(b)
+  if (a === b) return true
   return bytesEqual(cachedCE(a), cachedCE(b))
 }
 
