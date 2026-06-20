@@ -1,22 +1,44 @@
 import { Box, Group, Text } from '@mantine/core'
-import { asToken, collect, firstKey } from '../collect'
-import { at, kind, sk } from '../match'
+import { asToken, collect } from '../collect'
+import type { Recognizers } from '../consume'
+import { useDirectives } from '../hooks'
+import { at, kind, keyed, sk } from '../match'
 import { Children, type NodeProps } from './shared'
 
-export function Document({ node, ctx }: NodeProps) {
-  const { directives, content } = collect(node)
+interface DocCfg {
+  bg?: string
+  fg?: string
+  author?: string
+  date?: string
+}
 
-  // a directive carrying `theme` -> an inert dict of semantic tokens. The
-  // document reconfigures the rendering of its subtree from it.
-  const themeDict = firstKey(directives, 'theme')
-  const isDict = themeDict !== undefined && kind.dict(themeDict)
-  const bg = isDict ? asToken(at(sk('bg'))(themeDict)) : undefined
-  const fg = isDict ? asToken(at(sk('text'))(themeDict)) : undefined
+const docDirectives: Recognizers<DocCfg> = [
+  // a `theme` directive carries an inert dict of semantic tokens
+  [
+    keyed(sk('theme')),
+    (d, acc, rx) => {
+      const theme = rx.flat(at(sk('theme'))(d))
+      if (!theme || !kind.dict(theme)) return acc
+      return {
+        ...acc,
+        bg: asToken(at(sk('bg'))(theme)),
+        fg: asToken(at(sk('text'))(theme)),
+      }
+    },
+  ],
+  [
+    keyed(sk('author')),
+    (d, acc, rx) => ({ ...acc, author: asToken(rx.flat(at(sk('author'))(d))) }),
+  ],
+  [
+    keyed(sk('date')),
+    (d, acc, rx) => ({ ...acc, date: asToken(rx.flat(at(sk('date'))(d))) }),
+  ],
+]
+const docInit: DocCfg = {}
 
-  // metadata directives the document chooses to surface; anything else ignored.
-  const author = asToken(firstKey(directives, 'author'))
-  const date = asToken(firstKey(directives, 'date'))
-
+export function Document({ node }: NodeProps) {
+  const { bg, fg, author, date } = useDirectives(node, docDirectives, docInit)
   return (
     <Box
       style={{
@@ -40,7 +62,7 @@ export function Document({ node, ctx }: NodeProps) {
           )}
         </Group>
       )}
-      <Children items={content} ctx={ctx} />
+      <Children items={collect(node).content} />
     </Box>
   )
 }

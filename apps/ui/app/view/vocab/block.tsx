@@ -1,45 +1,62 @@
 import { useState } from 'react'
 import { Badge, Button, Code, Group, Stack } from '@mantine/core'
-import { BasslineDict, record, sym, type Value } from '@bassline/core/data'
-import { asString, collect, firstKey } from '../collect'
-import { childCtx } from '../context'
-import { dialectFor } from '../dialects'
-import { kind } from '../match'
-import { render } from '../render'
+import type { Value } from '@bassline/core/data'
+import { asString, collect } from '../collect'
+import type { Recognizers } from '../consume'
+import { useDialect, useDirectives } from '../hooks'
+import { at, keyed, sk } from '../match'
+import { Render } from '../render'
 import type { NodeProps } from './shared'
 
-export function Block({ node, ctx }: NodeProps) {
-  // local document state: running appends a `{results}` directive, producing a
-  // new block value that we re-render. document <-> program <-> document.
-  const [current, setCurrent] = useState<Value>(node)
-  if (!kind.record(current)) return null
+interface BlockCfg {
+  language?: string
+  results?: Value
+}
+const blockDirectives: Recognizers<BlockCfg> = [
+  [
+    keyed(sk('language')),
+    (d, acc, rx) => ({
+      ...acc,
+      language: asString(rx.flat(at(sk('language'))(d))),
+    }),
+  ],
+  [
+    keyed(sk('results')),
+    (d, acc, rx) => ({ ...acc, results: rx.flat(at(sk('results'))(d)) }),
+  ],
+]
+const blockInit: BlockCfg = {}
 
-  const { directives, content } = collect(current)
-  const lang = asString(firstKey(directives, 'language'))
-  const cached = firstKey(directives, 'results')
-  const source = content.map(asString).find(s => s !== undefined) ?? ''
-  const dialect = dialectFor(lang)
-  const next = childCtx(ctx)
+export function Block({ node }: NodeProps) {
+  const { language, results: cached } = useDirectives(
+    node,
+    blockDirectives,
+    blockInit
+  )
+  const dialect = useDialect(language)
+  // a run result lives locally (document <-> program <-> document); a `results`
+  // directive already in the document is the cached form.
+  const [ran, setRan] = useState<Value | undefined>(undefined)
+  const result = ran ?? cached
+  const source =
+    collect(node)
+      .content.map(asString)
+      .find(s => s !== undefined) ?? ''
 
   const run = () => {
-    if (!dialect) return
-    const result = dialect(source, ctx)
-    const resultDirective = new BasslineDict([[sym('results'), result]], true)
-    const updated = record(current.head, ...current.fields, resultDirective)
-    setCurrent(updated)
-    ctx.dispatch(updated)
+    if (dialect) setRan(dialect(source))
   }
 
   return (
     <Stack gap="xs">
       <Group gap="xs">
-        <Badge variant="light">{lang ?? 'text'}</Badge>
-        {dialect && cached === undefined && (
+        <Badge variant="light">{language ?? 'text'}</Badge>
+        {dialect && result === undefined && (
           <Button size="xs" variant="light" onClick={run}>
             Run
           </Button>
         )}
-        {!dialect && lang && (
+        {!dialect && language && (
           <Badge
             color="gray"
             variant="outline"
@@ -50,12 +67,14 @@ export function Block({ node, ctx }: NodeProps) {
         )}
       </Group>
       <Code block>{source}</Code>
-      {cached !== undefined && (
+      {result !== undefined && (
         <Group gap="xs">
           <Badge color="green" variant="light">
             result
           </Badge>
-          <Code>{render(cached, next)}</Code>
+          <Code>
+            <Render value={result} />
+          </Code>
         </Group>
       )}
     </Stack>

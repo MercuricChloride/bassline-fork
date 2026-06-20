@@ -1,23 +1,39 @@
 import { Group, Stack as MStack } from '@mantine/core'
-import { asToken, collect, firstKey } from '../collect'
+import { asToken, collect } from '../collect'
+import type { Recognizers } from '../consume'
+import { useDirectives } from '../hooks'
+import { at, keyed, sk } from '../match'
 import { Children, type NodeProps } from './shared'
 
-export function Stack({ node, ctx }: NodeProps) {
-  const { directives, content } = collect(node)
-  const gap = asToken(firstKey(directives, 'gap')) ?? 'md'
+interface BoxCfg {
+  gap: string
+}
+
+const boxDirectives: Recognizers<BoxCfg> = [
+  [
+    keyed(sk('gap')),
+    (d, acc, rx) => ({
+      ...acc,
+      gap: asToken(rx.flat(at(sk('gap'))(d))) ?? acc.gap,
+    }),
+  ],
+]
+const boxInit: BoxCfg = { gap: 'md' }
+
+export function Stack({ node }: NodeProps) {
+  const { gap } = useDirectives(node, boxDirectives, boxInit)
   return (
     <MStack gap={gap}>
-      <Children items={content} ctx={ctx} />
+      <Children items={collect(node).content} />
     </MStack>
   )
 }
 
-export function Row({ node, ctx }: NodeProps) {
-  const { directives, content } = collect(node)
-  const gap = asToken(firstKey(directives, 'gap')) ?? 'md'
+export function Row({ node }: NodeProps) {
+  const { gap } = useDirectives(node, boxDirectives, boxInit)
   return (
     <Group gap={gap}>
-      <Children items={content} ctx={ctx} />
+      <Children items={collect(node).content} />
     </Group>
   )
 }

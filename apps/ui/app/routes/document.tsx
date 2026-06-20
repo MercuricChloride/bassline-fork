@@ -1,8 +1,7 @@
 import { Container, Paper, Stack, Title } from '@mantine/core'
 import { read } from '@bassline/core/text'
 import baseDoc from '../../public/document.blt?raw'
-import { defaultCtx } from '../view/context'
-import { render } from '../view/render'
+import { DocumentView } from '../view/hooks'
 
 const examples = import.meta.glob('../../public/examples/*.blt', {
   query: '?raw',
@@ -36,7 +35,7 @@ export default function DocumentRoute() {
               {n}.blt
             </Title>
             <Paper withBorder p="md" radius="md">
-              {render(read(src)[0], defaultCtx)}
+              <DocumentView doc={read(src)[0]} />
             </Paper>
           </Stack>
         ))}

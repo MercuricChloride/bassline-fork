@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { dict, int, record, str, sym } from '@bassline/core/data'
 import { kind } from '@bassline/core/match'
-import { at, dispatch, headed, keyed, sk } from './match'
+import { at, dispatch, headed, keyed, sk } from '~/view/match'
 
 describe('at / keyed (Data-land dict lookup)', () => {
   it('looks up by symbol key', () => {

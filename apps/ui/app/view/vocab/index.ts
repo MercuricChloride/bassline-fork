@@ -3,20 +3,20 @@
 // rule here; unrecognized heads fall through to the Fallback.
 import { createElement, type ReactNode } from 'react'
 import type { Value } from '@bassline/core/data'
-import type { Ctx } from '../context'
 import { headed } from '../match'
 import type { NodeRule } from '../render'
 import { Block } from './block'
 import { Button, Dropdown } from './controls'
 import { Document } from './document'
 import { Row, Stack } from './layout'
+import { Settings } from './settings'
 import type { NodeProps } from './shared'
 import { Heading, Link, Text } from './text'
 
 const node =
   (Comp: (p: NodeProps) => ReactNode) =>
-  (v: Value, ctx: Ctx): ReactNode =>
-    createElement(Comp, { node: v, ctx })
+  (v: Value): ReactNode =>
+    createElement(Comp, { node: v })
 
 export const VOCAB: NodeRule[] = [
   [headed('document'), node(Document)],
@@ -27,5 +27,6 @@ export const VOCAB: NodeRule[] = [
   [headed('link'), node(Link)],
   [headed('button'), node(Button)],
   [headed('dropdown'), node(Dropdown)],
+  [headed('settings'), node(Settings)],
   [headed('block'), node(Block)],
 ]

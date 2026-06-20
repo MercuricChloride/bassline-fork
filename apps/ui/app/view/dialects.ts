@@ -4,9 +4,8 @@
 // renders inert: custody without comprehension).
 import type { Value } from '@bassline/core/data'
 import { int, record, str, sym } from '@bassline/core/data'
-import type { Ctx } from './context'
 
-export type Dialect = (source: string, ctx: Ctx) => Value
+export type Dialect = (source: string) => Value
 
 const err = (msg: string): Value => record(sym('error'), str(msg))
 

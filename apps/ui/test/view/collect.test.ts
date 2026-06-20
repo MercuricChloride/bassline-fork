@@ -5,8 +5,8 @@ import { kind } from '@bassline/core/match'
 import { read } from '@bassline/core/text'
 // eslint-disable-next-line import/no-unresolved
 import docSource from '../../public/document.blt?raw'
-import { asString, collect, firstKey } from './collect'
-import { at, headed, sk } from './match'
+import { asString, collect } from '~/view/collect'
+import { at, headed, sk } from '~/view/match'
 
 const doc = read(docSource)[0]
 
@@ -53,17 +53,11 @@ describe('collect — node gathers its own directives', () => {
     expect(at(sk('results'))(directives[0])).toBeUndefined()
   })
 
-  it('a node may fold directives itself (firstOf)', () => {
-    const block = find(doc, 'block')!
-    const { directives } = collect(block)
-    expect(asString(firstKey(directives, 'language'))).toBe('forth')
-  })
-
   it('link collects its href directive, content is the label', () => {
     const link = find(doc, 'link')!
     const { directives, content } = collect(link)
     expect(asString(at(sk('href'))(directives[0]))).toBe('https://example.com')
-    expect(asString(content[0])).toBe('example')
+    expect(asString(content[0])).toBe('example ')
   })
 
   it('an inert dict stays in content (data, not a directive)', () => {

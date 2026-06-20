@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { Welcome } from './welcome'
+import { Welcome } from '~/welcome/welcome'
 import { testRender } from '~/utils/test-render'
 
 describe('Welcome', () => {

@@ -2,13 +2,10 @@
 //
 // A child is a DIRECTIVE if it carries the actionable mark, otherwise it is
 // CONTENT. There is deliberately NO merge: directives are handed back as an
-// ordered list of standalone "messages". A node that wants merge-like behavior
-// folds the list itself (see firstOf/lastOf) — no global settings policy.
+// ordered list of standalone "messages". A node folds them itself via a
+// recognition table (see consume.ts `recognize`) — no global settings policy.
 import type { Value } from '@bassline/core/data'
 import { kind } from '@bassline/core/match'
-import { at, sk } from './match'
-
-const atName = (name: string) => at(sk(name))
 
 export interface Collected {
   /** Actionable children, in document order. Each is a standalone message. */
@@ -16,6 +13,14 @@ export interface Collected {
   /** Everything else, in document order. */
   content: Value[]
 }
+
+/**
+ * A directive is an actionable dict or record (config / command about the node).
+ * An actionable *symbol* is NOT a directive — it is a reference (`` `foo ``),
+ * which is content that resolves to a value. Inert values are always content.
+ */
+const isDirective = (v: Value) =>
+  v.actionable && (kind.dict(v) || kind.record(v))
 
 /**
  * Partition a record's direct children into directives and content. Strictly
@@ -27,41 +32,10 @@ export function collect(node: Value): Collected {
   const directives: Value[] = []
   const content: Value[] = []
   for (const child of node.fields) {
-    ;(child.actionable ? directives : content).push(child)
+    ;(isDirective(child) ? directives : content).push(child)
   }
   return { directives, content }
 }
-
-// ---- Optional folds a node MAY opt into (not imposed) -----------------------
-
-/** First directive for which `pick` yields a value -> that value. */
-export function firstOf(
-  directives: Value[],
-  pick: (v: Value) => Value | undefined
-): Value | undefined {
-  for (const d of directives) {
-    const found = pick(d)
-    if (found !== undefined) return found
-  }
-  return undefined
-}
-
-/** Last directive for which `pick` yields a value -> that value. */
-export function lastOf(
-  directives: Value[],
-  pick: (v: Value) => Value | undefined
-): Value | undefined {
-  let result: Value | undefined
-  for (const d of directives) {
-    const found = pick(d)
-    if (found !== undefined) result = found
-  }
-  return result
-}
-
-/** Convenience: first directive carrying symbol key `name` -> its value. */
-export const firstKey = (directives: Value[], name: string) =>
-  firstOf(directives, atName(name))
 
 // ---- Boundary converters: Value -> JS primitive, ONLY at the Mantine edge ---
 
