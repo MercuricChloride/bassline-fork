@@ -8,11 +8,28 @@
     ".": {
       "types": "./src/bassline.d.ts",
       "default": "./src/bassline.js"
+    },
+    "./data": {
+      "types": "./types/src/data.d.ts",
+      "default": "./src/data.js"
+    },
+    "./text": {
+      "types": "./types/src/text/index.d.ts",
+      "default": "./src/text/index.js"
+    },
+    "./lang": {
+      "types": "./types/src/lang/index.d.ts",
+      "default": "./src/lang/index.js"
+    },
+    "./match": {
+      "types": "./types/src/match.d.ts",
+      "default": "./src/match.js"
     }
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest watch"
+    "test:watch": "vitest watch",
+    "build:types": "tsc"
   },
   "license": "AGPL-3.0"
 }

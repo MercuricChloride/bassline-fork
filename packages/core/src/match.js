@@ -1,5 +1,5 @@
 //@ts-check
-/** @import {Frame, Value, Values} from "../data.js" */
+/** @import {Frame, Value, Values} from "./data.js" */
 /**
  * @template {Value} T
  * @typedef {(x: Value) => x is T} Guard

@@ -1,6 +1,9 @@
 packages:
   - apps/daemon
   - apps/web-inspector
+  - apps/sheet
+  - apps/bcl
+  - apps/ui
   - packages/core
   - packages/std
   - packages/eth-rpc

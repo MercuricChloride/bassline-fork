@@ -10,7 +10,7 @@
 // stay value-friendly (the door to authoring rules as bassline values later).
 /** @import { Value } from '../data.js' */
 import { assertValue } from '../data.js'
-import { kind, match, frame, any, and, head, rule, spelled } from './match.js'
+import { kind, match, frame, any, and, head, rule, spelled } from '../match.js'
 
 /**
  * Rewrite a value tree with a rule, bottom-up. Children are rewritten first,

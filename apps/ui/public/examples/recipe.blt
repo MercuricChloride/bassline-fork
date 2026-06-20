@@ -1,0 +1,21 @@
+<document
+    `{ author: chef }
+    <stack
+        <heading `{level: 1} "Pancakes">
+
+        <recipe `{serves: 4}
+            <ingredient `{amount: "200g"} "flour">
+            <ingredient `{amount: "2"} "eggs">
+            <ingredient `{amount: "300ml"} "milk">
+            <step "Whisk everything into a smooth batter.">
+            <step "Fry in a hot, lightly buttered pan.">
+        >
+
+        <text "This renderer has no recipe vocabulary, so the recipe, its
+               ingredients, and its steps render structurally through the generic
+               fallback — labeled, inspectable, intact. A recipe-aware renderer
+               would lay the same value out as a card with a checklist. Same
+               document, richer reading: nothing was rejected, no schema migration,
+               no type discriminators — recognition simply went deeper.">
+    >
+>
