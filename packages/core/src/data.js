@@ -79,9 +79,142 @@ export function assertValue(x, msg = 'expected a Bassline value') {
   return true
 }
 
+export const fresh = /** @constant */ {
+  /** @param {boolean} actionable */
+  nil(actionable = false) {
+    return new BasslineNil(null, actionable)
+  },
+  /**
+   * @param {boolean} value
+   * @param {boolean} actionable
+   */
+  bool(value, actionable = false) {
+    if (typeof value !== 'boolean')
+      throw new TypeError('bool expects a Boolean')
+    return new BasslineBool(value, actionable)
+  },
+  /**
+   * @param {bigint | number} value
+   * @param {boolean} actionable
+   */
+  int(value, actionable = false) {
+    if (typeof value === 'number') {
+      return new BasslineInt(BigInt(value), actionable)
+    } else if (typeof value === 'bigint') {
+      return new BasslineInt(value, actionable)
+    } else {
+      throw new TypeError('int expects a BigInt or Number')
+    }
+  },
+  /**
+   * @param {number} value
+   * @param {boolean} actionable
+   */
+  float(value, actionable = false) {
+    if (typeof value !== 'number') throw new TypeError('float expects a Number')
+    if (Number.isNaN(value)) {
+      return new BasslineFloat(NaN, actionable)
+    } else {
+      return new BasslineFloat(value, actionable)
+    }
+  },
+
+  /**
+   * @param {string} value
+   * @param {boolean} actionable
+   */
+  string(value, actionable = false) {
+    if (typeof value !== 'string') throw new TypeError('str expects a string')
+    if (!value.isWellFormed()) throw new Error('string is not well-formed')
+    return new BasslineString(value, actionable)
+  },
+
+  /**
+   * @param {string} value
+   * @param {boolean} actionable
+   */
+  symbol(value, actionable = false) {
+    if (typeof value !== 'string') {
+      console.error('symbol expects a string, but got:', value)
+      throw new TypeError('symbol expects a string')
+    }
+    if (!value.isWellFormed())
+      throw new Error('symbol string is not well-formed')
+    return new BasslineSymbol(value, actionable)
+  },
+
+  /**
+   * @param {Uint8Array} value
+   * @param {boolean} actionable
+   */
+  bytes(value, actionable = false) {
+    if (!(value instanceof Uint8Array))
+      throw new TypeError('bytes expects a Uint8Array')
+    return new BasslineBytes(value.slice(), actionable)
+  },
+
+  /**
+   * @param {Value[]} items
+   * @param {boolean} actionable
+   */
+  list(items, actionable = false) {
+    if (!Array.isArray(items) || !items.every(isValue)) {
+      throw new TypeError('list expects an array of Bassline values')
+    }
+    return new BasslineList(items.slice(), actionable)
+  },
+
+  /**
+   * @param {Value[]} aRecord
+   * @param {boolean} actionable
+   */
+  record(aRecord, actionable = false) {
+    if (!Array.isArray(aRecord) || !aRecord.every(isValue)) {
+      throw new TypeError('record expects an array of Bassline values')
+    }
+    if (aRecord.length === 0) {
+      throw new TypeError('record must be a non-empty array of Bassline values')
+    }
+    return new BasslineRecord(aRecord.slice(), actionable)
+  },
+  /**
+   * @param {Value[]} members
+   * @param {boolean} actionable
+   */
+  set(members, actionable = false) {
+    /** @type {Map<string, Value>} */
+    const value = new Map()
+    for (const m of members) {
+      if (!isValue(m))
+        throw new TypeError('set member must be a Bassline value')
+      const key = m.ceKey()
+      value.set(key, m)
+    }
+    return new BasslineSet(value, actionable)
+  },
+  /**
+   * @param {Array<[Value, Value]>} entries
+   * @param {boolean} actionable
+   */
+  dict(entries, actionable = false) {
+    /** @type {Map<string, [Value, Value]>} */
+    const values = new Map()
+    for (const [k, v] of entries) {
+      if (!isValue(k) || !isValue(v))
+        throw new TypeError('dict entry must be [Value, Value]')
+      const keyCe = k.ceKey()
+      values.set(keyCe, [k, v])
+    }
+    return new BasslineDict(values, actionable)
+  },
+}
+
 // ================ Bassline Value Types ================
 
-/** @template T */
+/**
+ * @template T
+ * @template {keyof typeof fresh} [K=ValueKind]
+ */
 class ValueBase {
   /**
    * @param {T} value
@@ -102,6 +235,16 @@ class ValueBase {
     return this._value
   }
 
+  /** @returns {K} */
+  get kind() {
+    throw new Error('kind getter must be implemented by subclasses')
+  }
+
+  /** @returns {typeof fresh[typeof this['kind']]} */
+  get fresh() {
+    return fresh[this.kind]
+  }
+
   encode() {
     // Note: This is fine because this class is logically abstract
     //@ts-expect-error
@@ -114,19 +257,11 @@ class ValueBase {
     return ceKey(this)
   }
 
-  /**
-   * @param {T} value
-   * @param {boolean} actionable
-   */
-  fresh(value, actionable = this.actionable) {
-    const Ctor = /** @type {new (value: T, actionable: boolean) => this} */ (
-      this.constructor
-    )
-    return new Ctor(value, actionable)
-  }
-
   copy(actionable = this.actionable) {
-    return this.fresh(this.value, actionable)
+    const clone = Object.create(Object.getPrototypeOf(this))
+    clone._value = this._value
+    clone._actionable = actionable
+    return clone
   }
 
   /** @param {Value} other */
@@ -139,18 +274,8 @@ class ValueBase {
 
 /** @augments {ValueBase<null>} */
 export class BasslineNil extends ValueBase {
-  constructor(actionable = false) {
-    super(null, actionable)
-  }
-  /**
-   * @param {null} _value
-   * @param {boolean} actionable
-   */
-  fresh(_value, actionable = this.actionable) {
-    const Ctor = /** @type {new (actionable: boolean) => this} */ (
-      this.constructor
-    )
-    return new Ctor(actionable)
+  copy(actionable = this.actionable) {
+    return fresh.nil(actionable)
   }
   /** @param {BasslineVisitor} aVisitor */
   accept(aVisitor) {
@@ -164,15 +289,6 @@ export class BasslineNil extends ValueBase {
 
 /** @augments {ValueBase<boolean>} */
 export class BasslineBool extends ValueBase {
-  /**
-   * @param {boolean} value
-   * @param {boolean} actionable
-   */
-  constructor(value, actionable = false) {
-    if (typeof value !== 'boolean')
-      throw new TypeError('bool expects a Boolean')
-    super(value, actionable)
-  }
   /** @param {BasslineVisitor} aVisitor */
   accept(aVisitor) {
     return aVisitor.visitBool(this)
@@ -185,20 +301,6 @@ export class BasslineBool extends ValueBase {
 
 /** @augments {ValueBase<bigint>} */
 export class BasslineInt extends ValueBase {
-  /**
-   * @param {bigint | number} value
-   * @param {boolean} actionable
-   */
-  constructor(value, actionable = false) {
-    if (typeof value === 'number') {
-      super(BigInt(value), actionable)
-    } else if (typeof value === 'bigint') {
-      super(value, actionable)
-    } else {
-      throw new TypeError('int expects a BigInt or Number')
-    }
-  }
-
   /** @param {BasslineVisitor} aVisitor */
   accept(aVisitor) {
     return aVisitor.visitInt(this)
@@ -211,18 +313,6 @@ export class BasslineInt extends ValueBase {
 
 /** @augments {ValueBase<number>} */
 export class BasslineFloat extends ValueBase {
-  /**
-   * @param {number} value
-   * @param {boolean} actionable
-   */
-  constructor(value, actionable = false) {
-    if (typeof value !== 'number') throw new TypeError('float expects a Number')
-    if (Number.isNaN(value)) {
-      super(NaN, actionable)
-    } else {
-      super(value, actionable)
-    }
-  }
   /** @param {BasslineVisitor} aVisitor */
   accept(aVisitor) {
     return aVisitor.visitFloat(this)
@@ -235,16 +325,6 @@ export class BasslineFloat extends ValueBase {
 
 /** @augments {ValueBase<string>} */
 export class BasslineString extends ValueBase {
-  /**
-   * @param {string} value
-   * @param {boolean} actionable
-   */
-  constructor(value, actionable = false) {
-    if (typeof value !== 'string') throw new TypeError('str expects a string')
-    if (!value.isWellFormed()) throw new Error('string is not well-formed')
-    super(value, actionable)
-  }
-
   /** @param {BasslineVisitor} aVisitor */
   accept(aVisitor) {
     return aVisitor.visitString(this)
@@ -258,20 +338,6 @@ export class BasslineString extends ValueBase {
 
 /** @augments {ValueBase<string>} */
 export class BasslineSymbol extends ValueBase {
-  /**
-   * @param {string} value
-   * @param {boolean} actionable
-   */
-  constructor(value, actionable = false) {
-    if (typeof value !== 'string') {
-      console.error('symbol expects a string, but got:', value)
-      throw new TypeError('symbol expects a string')
-    }
-    if (!value.isWellFormed())
-      throw new Error('symbol string is not well-formed')
-    super(value, actionable)
-  }
-
   /** @param {BasslineVisitor} aVisitor */
   accept(aVisitor) {
     return aVisitor.visitSymbol(this)
@@ -284,15 +350,6 @@ export class BasslineSymbol extends ValueBase {
 
 /** @augments {ValueBase<Uint8Array>} */
 export class BasslineBytes extends ValueBase {
-  /**
-   * @param {Uint8Array} value
-   * @param {boolean} actionable
-   */
-  constructor(value, actionable = false) {
-    if (!(value instanceof Uint8Array))
-      throw new TypeError('bytes expects a Uint8Array')
-    super(value.slice(), actionable)
-  }
   get value() {
     return this._value.slice()
   }
@@ -307,19 +364,9 @@ export class BasslineBytes extends ValueBase {
 }
 
 /**
- * @augments {ValueBase<Value[]>}
+ * @augments {ValueBase<Value[], 'list' | 'record'>}
  */
 class SeqBase extends ValueBase {
-  /**
-   * @param {Value[]} items
-   * @param {boolean} actionable
-   */
-  constructor(items, actionable = false) {
-    if (!Array.isArray(items) || !items.every(isValue)) {
-      throw new TypeError('seq expects an array of Bassline values')
-    }
-    super(items.slice(), actionable)
-  }
   get value() {
     return this._value.slice()
   }
@@ -336,7 +383,6 @@ class SeqBase extends ValueBase {
   }
   /**
    * @param {(item: Value, index: number, array: Value[]) => Value} callback
-   * @returns {this}
    */
   map(callback) {
     const mapped = this._value.map(callback)
@@ -344,7 +390,6 @@ class SeqBase extends ValueBase {
   }
   /**
    * @param {(item: Value, index: number, array: Value[]) => boolean} callback
-   * @returns {this}
    */
   filter(callback) {
     const filtered = this._value.filter(callback)
@@ -359,7 +404,6 @@ class SeqBase extends ValueBase {
   /**
    * @param {number} index
    * @param {Value} value
-   * @returns {this}
    */
   set(index, value) {
     assertValue(value)
@@ -410,17 +454,6 @@ export class BasslineList extends SeqBase {
 }
 
 export class BasslineRecord extends SeqBase {
-  /**
-   * @param {Value[]} record
-   * @param {boolean} actionable
-   */
-  constructor(record, actionable = false) {
-    if (record.length === 0) {
-      throw new TypeError('record must be a non-empty array of Bassline values')
-    }
-    super(record, actionable)
-  }
-
   /** @param {BasslineVisitor} visitor */
   accept(visitor) {
     return visitor.visitRecord(this)
@@ -444,22 +477,6 @@ export class BasslineRecord extends SeqBase {
  * @augments {ValueBase<Map<string, Value>>}
  */
 export class BasslineSet extends ValueBase {
-  /**
-   * @param {Value[]} members
-   * @param {boolean} actionable
-   */
-  constructor(members, actionable = false) {
-    /** @type {Map<string, Value>} */
-    const value = new Map()
-    for (const m of members) {
-      if (!isValue(m))
-        throw new TypeError('set member must be a Bassline value')
-      const key = m.ceKey()
-      value.set(key, m)
-    }
-    super(value, actionable)
-  }
-
   /** @param {BasslineVisitor} visitor */
   accept(visitor) {
     return visitor.visitSet(this)
@@ -488,11 +505,23 @@ export class BasslineSet extends ValueBase {
           newValue.set(item.ceKey(), item)
       }
     }
-    return new BasslineSet(Array.from(newValue.values()), this.actionable)
+    return this.fresh(Array.from(newValue.values()), this.actionable)
   }
 
   get value() {
     return new Map(this._value)
+  }
+
+  get length() {
+    return this._value.size
+  }
+
+  get freshValue() {
+    return Array.from(this._value.values())
+  }
+
+  copy(actionable = this.actionable) {
+    return this.fresh(Array.from(this._value.values()), actionable)
   }
 
   asSeq() {
@@ -509,22 +538,6 @@ export class BasslineSet extends ValueBase {
  * @augments {ValueBase<Map<string, [Value, Value]>>}
  */
 export class BasslineDict extends ValueBase {
-  /**
-   * @param {Array<[Value, Value]>} entries
-   * @param {boolean} actionable
-   */
-  constructor(entries, actionable = false) {
-    /** @type {Map<string, [Value, Value]>} */
-    const values = new Map()
-    for (const [k, v] of entries) {
-      if (!isValue(k) || !isValue(v))
-        throw new TypeError('dict entry must be [Value, Value]')
-      const keyCe = k.ceKey()
-      values.set(keyCe, [k, v])
-    }
-    super(values, actionable)
-  }
-
   get value() {
     return new Map(this._value)
   }
@@ -546,10 +559,7 @@ export class BasslineDict extends ValueBase {
    * @param {Value} value
    */
   set(key, value) {
-    return new BasslineDict(
-      [...this.value.values(), [key, value]],
-      this.actionable
-    )
+    return this.fresh([...this.value.values(), [key, value]], this.actionable)
   }
 
   /** @param {Value} key */
@@ -570,7 +580,7 @@ export class BasslineDict extends ValueBase {
     if (this._value.has(ce)) {
       const newValue = this.value
       newValue.delete(ce)
-      return new BasslineDict(Array.from(newValue.values()), this.actionable)
+      return this.fresh(Array.from(newValue.values()), this.actionable)
     }
     return this
   }
@@ -588,24 +598,6 @@ export class BasslineDict extends ValueBase {
     return 'dict'
   }
 }
-
-// ================ factories ================
-/** @type {<T extends new (...args: any[]) => any>(aClass: T) => (...args: ConstructorParameters<T>) => InstanceType<T>} */
-const factory =
-  aClass =>
-  (...args) =>
-    new aClass(...args)
-export const nil = factory(BasslineNil)
-export const bool = factory(BasslineBool)
-export const int = factory(BasslineInt)
-export const float = factory(BasslineFloat)
-export const str = factory(BasslineString)
-export const sym = factory(BasslineSymbol)
-export const bytes = factory(BasslineBytes)
-export const list = factory(BasslineList)
-export const dict = factory(BasslineDict)
-export const record = factory(BasslineRecord)
-export const set = factory(BasslineSet)
 
 export class BasslineVisitor {
   /** @param {Value} aValue */
@@ -1081,7 +1073,7 @@ export class BasslineDecoder {
       entries.push([key, value])
     }
     if (this.pos !== end) throw new Error('extra bytes at end of dictionary')
-    return new BasslineDict(entries, actionable)
+    return fresh.dict(entries, actionable)
   }
 
   /** @param {boolean} actionable */
@@ -1094,7 +1086,7 @@ export class BasslineDecoder {
       record.push(field)
     }
     if (this.pos !== end) throw new Error('extra bytes at end of record')
-    return new BasslineRecord(record, actionable)
+    return fresh.record(record, actionable)
   }
 
   /** @param {boolean} actionable */
@@ -1117,7 +1109,7 @@ export class BasslineDecoder {
       members.push(member)
     }
     if (this.pos !== end) throw new Error('extra bytes at end of set')
-    return new BasslineSet(members, actionable)
+    return fresh.set(members, actionable)
   }
 
   /**
@@ -1127,36 +1119,33 @@ export class BasslineDecoder {
   decodeByTag(tag, actionable) {
     switch (tag) {
       case NIL_PREFIX:
-        return new BasslineNil(actionable)
+        return fresh.nil(actionable)
       case FALSE_PREFIX:
-        return new BasslineBool(false, actionable)
+        return fresh.bool(false, actionable)
       case TRUE_PREFIX:
-        return new BasslineBool(true, actionable)
+        return fresh.bool(true, actionable)
       case INT_PREFIX: {
         const len = this.readVarint()
         if (len === 0) throw new Error('zero-length integer')
         const int = this.decodeInt(this.readBytes(len))
-        return new BasslineInt(int, actionable)
+        return fresh.int(int, actionable)
       }
       case FLOAT_PREFIX: {
         const float = this.decodeF64(this.readBytes(8))
-        return new BasslineFloat(float, actionable)
+        return fresh.float(float, actionable)
       }
       case STRING_PREFIX: {
         const len = this.readVarint()
         const str = this.decodeUtf8(this.readBytes(len))
-        return new BasslineString(str, actionable)
+        return fresh.string(str, actionable)
       }
       case SYMBOL_PREFIX: {
         const len = this.readVarint()
-        return new BasslineSymbol(
-          this.decodeUtf8(this.readBytes(len)),
-          actionable
-        )
+        return fresh.symbol(this.decodeUtf8(this.readBytes(len)), actionable)
       }
       case BYTES_PREFIX: {
         const len = this.readVarint()
-        return new BasslineBytes(this.readBytes(len), actionable)
+        return fresh.bytes(this.readBytes(len), actionable)
       }
       case LIST_PREFIX:
         return this.decodeList(actionable)
