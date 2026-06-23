@@ -58,13 +58,11 @@ An example of this is lists. A list is expressible as vocabulary using
 meaningful. As such we only include concepts which lets our programs
 be able to work with data with zero shared words.
 
-*** TODO Most other application specific constructs are expressible as values
-
 New data types are expressible without changes to the foundation. IE
 things like dates, uuids, timestamps, etc are ultimately not new forms
-of data, or new arrangements of data, but are best expressed as custom
-vocabularies since ultimately they are not very semantically different
-from the underlying types we present.
+of data, but new arrangements of data and are best expressed as custom
+vocabularies because they are not very semantically different from the
+underlying types we present.
 
 * The Value Space
 
@@ -116,18 +114,9 @@ IEEE-754 64 bit floating point numbers.
 
 This is a well supported standard that's frozen in place.
 
-*** TODO Finalize specific edge cases and formats
-
-One thing that hasn't been finalized is expression of "weird" float
-values, this is tentative.
-
 NaN is canonicalized to the quiet pattern =0x7FF8000000000000= at
-construction time, not at encode time, so in-memory equality and
-CE-byte equality never diverge.
-
-=-0.0= and =+0.0= are distinct values (they encode differently).
-
-Equality is bitwise over the canonicalized representation.
+construction time so in-memory equality and CE-byte equality never
+diverge.
 
 Other forms of numeric values are expressible, but as
 dialects. For example one may represent rational numbers as =<rat
@@ -137,7 +126,7 @@ dialects. For example one may represent rational numbers as =<rat
 
 UTF-8 encoded text without any normalization.
 
-** TODO Symbols
+** Symbols
 
 Similar to strings, but denotes a symbol rather than contents of
 something. By making this its own data type, it prevents things from
@@ -347,10 +336,12 @@ a payload of it's encoded unique elements.
 
 * A textual syntax
 
-This describes a textual syntax for this encoding.
+This describes a textual syntax for working with this encoding.
 
-Parsing is two levels: a tokenizer that skips whitespace and cuts the
-input into tokens and then we have a small grammar over those tokens.
+** TODO What parens should denote
+
+I'm still not totally sure what to make parens denote yet, so I'll
+decide on that later I guess.
 
 ** Tokens
 
@@ -358,24 +349,31 @@ Whitespace =[ \t\n\r\,]+= separates tokens and carries no other meaning.
 A *delimiter* is whitespace or one of =[ ] { } < > ( ) : # ' " `=.
 After skipping whitespace, the first character selects the token:
 
-- =[ ] { } < > ( ) := and =#{= are structural; =`= is to prefix a value actionable.
+- =[ ] { } < > ( ) := and =#{= are structural
+
+-  =`= is to prefix a value and denote it as actionable
+
 - =#[= … =]= is a bytestring: hex digit pairs, inner whitespace ignored
   (=#[DE AD BE EF]=, =#[]=).
+
 - =" ... "= is a string and =' ... '= is a quoted symbol. Both hold any
   scalar but the closing quote and =\=; the escapes are =\" \\ \n \t \r=
   in a string and =\' \\ \n \t \r= in a symbol.
+
 - A digit, or a =+= / =-= immediately followed by a digit, begins a
   number.
+
 - Anything else begins a bare symbol: a maximal run of non-delimiter
   characters.
 
-So every character that is not whitespace or a delimiter — including
-=; + - * / . = ! ? |= — is an ordinary symbol character. Two
-consequences worth stating: a symbol that must contain a delimiter is
-written quoted ='a:b' 'has space'= and because =:= is its
-own token it always splits a symbol from what follows, so =foo: bar= and
-=foo:bar= both read as the three tokens =foo : bar=, which is what lets
-dictionary entries be written =key: value=.
+So every character that is not whitespace or a delimiter including
+=; + - * / . = ! ? |= is an ordinary symbol character.
+
+A symbol that must contain a delimiter is written in it's quoted form
+quoted ='a:b' 'has space'= and because =:= is its own token it always
+splits a symbol from what follows, so =foo: bar= and =foo:bar= both read
+as the three tokens =foo : bar=, which is what lets dictionary entries
+be written =key: value=.
 
 ** Grammar
 
@@ -407,18 +405,21 @@ tokens.
 
 ** Outside the grammar
 
-- *Reserved spellings.* A /bare/ symbol equal to =nil=, =true=,
-  =false=, =NaN=, =Infinity=, or =-Infinity= denotes that value (the
-  last 4 are doubles); any other bare run is a symbol. Quote to
-  recover the symbol: ='null'=. Quoted symbols are never reclassified.
-- *Number form.* A token is a number only when it opens with a digit,
-  or a sign on a digit; so =-=, =->=, and =.5= are symbols while =-5=
-  and =0.5= are numbers. Integer versus double is the presence of =.=
-  or =e=/=E=, so =1 ≠ 1.0= and =-0.0= is writable. A number must be
-  followed by a delimiter, whitespace, or end of input: a number against
-  a symbol character (=1-2=, =42px=, or =1.=) is a syntax error, not two
-  tokens.
-- *Actionable* =`= is a single optional prefix for any value, making it
-  actionable.
-- =(= and =)= are reserved with no meaning today, kept free for a
-  possible future use. Currently they are a syntax error.
+*** Reserved spellings
+A bare symbol equal to =nil=, =true=, =false=, =NaN=, =Infinity=, or =-Infinity=
+denotes that value (the last 4 are doubles); any other bare run is a
+symbol. Quote to recover the symbol: ='null'=. Quoted symbols are never
+reclassified.
+
+*** Number form
+A token is a number only when it opens with a digit, or a sign on a
+digit; so =-=, =->=, and =.5= are symbols while =-5= and =0.5= are
+numbers. Integer versus double is the presence of =.= or =e=/=E=, so =1 ≠
+1.0= and =-0.0= is writable. A number must be followed by a delimiter,
+whitespace, or end of input: a number against a symbol character (=1-2=,
+=42px=, or =1.=) is a syntax error, not two tokens.
+
+*** TODO Parens =(= and =)= are reserved with no meaning today
+
+They are reserved for possible future use. Currently they are a syntax
+error, but it's not clear to me what those pairs should denote.
