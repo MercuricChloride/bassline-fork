@@ -1,84 +1,7 @@
 // @ts-check
-// Reference implementation of the Bassline Data Model
-// Each value type is implemented as a subclass of BasslineValue
-// Each value has a single canonical encoding which determines it's identity
-// There are 7 atomic value types:
-// NIL, true, false, int, float, string, symbol
-// Alongside 4 frame value types:
-// list, dict, record, set
-
 /**
- * @typedef {{
- * nil: BasslineNil
- * bool: BasslineBool
- * int: BasslineInt
- * float: BasslineFloat
- * string: BasslineString
- * symbol: BasslineSymbol
- * bytes: BasslineBytes
- * }} ScalarValues
+ * This object provides constructors for the various Bassline value types
  */
-
-/**
- * @typedef {{
- * list: BasslineList
- * dict: BasslineDict
- * record: BasslineRecord
- * set: BasslineSet
- * }} FrameValues
- */
-
-/**
- * @template T
- * @typedef {{
- * readonly actionable: boolean
- * readonly value: T
- * readonly kind: ValueKind
- * copy(actionable: boolean): BasslineVal<T>
- * eq(other: Value): boolean
- * encode(): Uint8Array<ArrayBuffer>
- * ceKey(): string,
- * accept(aVisitor: BasslineVisitor): BasslineVal<T>
- * }} BasslineVal
- */
-
-/** @typedef {ScalarValues & FrameValues} Values */
-/** @typedef {ScalarValues[keyof ScalarValues]} Scalar */
-/** @typedef {FrameValues[keyof FrameValues]} Frame */
-/** @typedef {Values[keyof Values]} Value */
-/** @typedef { keyof Values } ValueKind */
-
-/** @type {(x: unknown) => x is Scalar} */
-export const isScalar = x =>
-  [
-    BasslineNil,
-    BasslineBool,
-    BasslineInt,
-    BasslineFloat,
-    BasslineString,
-    BasslineSymbol,
-    BasslineBytes,
-  ].some(aClass => x instanceof aClass)
-/** @type {(x: unknown) => x is Frame} */
-export const isFrame = x =>
-  [BasslineList, BasslineDict, BasslineRecord, BasslineSet].some(
-    aClass => x instanceof aClass
-  )
-
-/** @type {(x: unknown) => x is Value} */
-export const isValue = x => isScalar(x) || isFrame(x)
-
-/**
- * @param {unknown} x
- * @param msg
- * @throws {TypeError} if x is not a Bassline value.
- * @returns {x is Value}
- */
-export function assertValue(x, msg = 'expected a Bassline value') {
-  if (!isValue(x)) throw new TypeError(msg)
-  return true
-}
-
 export const fresh = /** @constant */ {
   /** @param {boolean} actionable */
   nil(actionable = false) {
@@ -257,18 +180,23 @@ class ValueBase {
     return ceKey(this)
   }
 
-  copy(actionable = this.actionable) {
-    const clone = Object.create(Object.getPrototypeOf(this))
-    clone._value = this._value
-    clone._actionable = actionable
-    return clone
-  }
-
   /** @param {Value} other */
   eq(other) {
     // Note: This is fine because this class is logically abstract
     //@ts-expect-error
     return eq(this, other)
+  }
+
+  /**
+   * Creates a shallow copy of this value.
+   * @param {boolean} [actionable] Whether the copied value should be actionable.
+   * @returns {Value} A shallow copy of this value.
+   */
+  copy(actionable = this.actionable) {
+    const clone = Object.create(Object.getPrototypeOf(this))
+    clone._value = this._value
+    clone._actionable = actionable
+    return clone
   }
 }
 
@@ -1221,3 +1149,86 @@ export class BasslineDecoder {
     return values
   }
 }
+
+/**
+ * @param {unknown} x
+ * @returns {x is Scalar}
+ */
+export function isScalar(x) {
+  return [
+    BasslineNil,
+    BasslineBool,
+    BasslineInt,
+    BasslineFloat,
+    BasslineString,
+    BasslineSymbol,
+    BasslineBytes,
+  ].some(aClass => x instanceof aClass)
+}
+
+/**
+ * @param {unknown} x
+ * @returns {x is Frame}
+ */
+export function isFrame(x) {
+  return [BasslineList, BasslineDict, BasslineRecord, BasslineSet].some(
+    aClass => x instanceof aClass
+  )
+}
+
+/** @param {unknown} x */
+export function isValue(x) {
+  return isScalar(x) || isFrame(x)
+}
+
+/**
+ * @param {unknown} x
+ * @param {string} [msg] - The error message to throw if x is not a Bassline value
+ * @throws {TypeError} if x is not a Bassline value.
+ * @returns {x is Value}
+ */
+export function assertValue(x, msg = 'expected a Bassline value') {
+  if (!isValue(x)) throw new TypeError(msg)
+  return true
+}
+
+/**
+ * @typedef {{
+ * nil: BasslineNil
+ * bool: BasslineBool
+ * int: BasslineInt
+ * float: BasslineFloat
+ * string: BasslineString
+ * symbol: BasslineSymbol
+ * bytes: BasslineBytes
+ * }} ScalarValues
+ */
+
+/**
+ * @typedef {{
+ * list: BasslineList
+ * dict: BasslineDict
+ * record: BasslineRecord
+ * set: BasslineSet
+ * }} FrameValues
+ */
+
+/**
+ * @template T
+ * @typedef {{
+ * readonly actionable: boolean
+ * readonly value: T
+ * readonly kind: ValueKind
+ * copy(actionable: boolean): BasslineVal<T>
+ * eq(other: Value): boolean
+ * encode(): Uint8Array<ArrayBuffer>
+ * ceKey(): string,
+ * accept(aVisitor: BasslineVisitor): BasslineVal<T>
+ * }} BasslineVal
+ */
+
+/** @typedef {ScalarValues & FrameValues} Values */
+/** @typedef {ScalarValues[keyof ScalarValues]} Scalar */
+/** @typedef {FrameValues[keyof FrameValues]} Frame */
+/** @typedef {Values[keyof Values]} Value */
+/** @typedef { keyof Values } ValueKind */
