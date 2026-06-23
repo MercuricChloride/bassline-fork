@@ -2,19 +2,7 @@
 // Reader for the Bassline Textual Syntax
 
 /** @import {Value} from "../data.js" */
-import {
-  BasslineBool,
-  BasslineBytes,
-  BasslineDict,
-  BasslineFloat,
-  BasslineInt,
-  BasslineList,
-  BasslineNil,
-  BasslineRecord,
-  BasslineSet,
-  BasslineString,
-  BasslineSymbol,
-} from '../data.js'
+import { fresh } from '../data.js'
 
 const WS = ' \t\n\r,'
 const DELIM = '[]{}<>():#\'"`'
@@ -162,7 +150,7 @@ export function read(source) {
       const b = nibbles[offset + 1]
       out[i] = a * 16 + b
     }
-    return new BasslineBytes(out, actionable)
+    return fresh.bytes(out, actionable)
   }
 
   // pos sits at the first character (a digit, or a sign on a digit).
@@ -193,10 +181,10 @@ export function read(source) {
     const text = source.slice(start, pos)
     if (isDouble) {
       const val = parseFloat(text)
-      return new BasslineFloat(val, actionable)
+      return fresh.float(val, actionable)
     } else {
       const val = BigInt(text)
-      return new BasslineInt(val, actionable)
+      return fresh.int(val, actionable)
     }
   }
 
@@ -211,19 +199,19 @@ export function read(source) {
     const text = source.slice(start, pos)
     switch (text) {
       case 'nil':
-        return new BasslineNil(actionable)
+        return fresh.nil(actionable)
       case 'true':
-        return new BasslineBool(true, actionable)
+        return fresh.bool(true, actionable)
       case 'false':
-        return new BasslineBool(false, actionable)
+        return fresh.bool(false, actionable)
       case 'NaN':
-        return new BasslineFloat(NaN, actionable)
+        return fresh.float(NaN, actionable)
       case 'Infinity':
-        return new BasslineFloat(Infinity, actionable)
+        return fresh.float(Infinity, actionable)
       case '-Infinity':
-        return new BasslineFloat(-Infinity, actionable)
+        return fresh.float(-Infinity, actionable)
       default:
-        return new BasslineSymbol(text, actionable)
+        return fresh.symbol(text, actionable)
     }
   }
 
@@ -248,20 +236,20 @@ export function read(source) {
   /** @param {boolean} actionable */
   function readList(actionable) {
     const items = readUntil(']')
-    return new BasslineList(items, actionable)
+    return fresh.list(items, actionable)
   }
 
   /** @param {boolean} actionable */
   function readSet(actionable) {
     const items = readUntil('}')
-    return new BasslineSet(items, actionable)
+    return fresh.set(items, actionable)
   }
 
   /** @param {boolean} actionable */
   function readRecord(actionable) {
     const items = readUntil('>')
     if (items.length === 0) fail(pos, `Record cannot be empty!`)
-    return new BasslineRecord(items, actionable)
+    return fresh.record(items, actionable)
   }
 
   /** @param {boolean} actionable */
@@ -281,7 +269,7 @@ export function read(source) {
       else fail(pos, "dictionary expected a separator ':'")
       entries.push([key, readValue()])
     }
-    return new BasslineDict(entries, actionable)
+    return fresh.dict(entries, actionable)
   }
 
   function readValue() {
@@ -319,13 +307,13 @@ export function read(source) {
     if (c === '"') {
       pos++
       const val = readQuoted('"')
-      return new BasslineString(val, actionable)
+      return fresh.string(val, actionable)
     }
 
     if (c === "'") {
       pos++
       const val = readQuoted("'")
-      return new BasslineSymbol(val, actionable)
+      return fresh.symbol(val, actionable)
     }
     if (c === '#') {
       if (k === '{') {

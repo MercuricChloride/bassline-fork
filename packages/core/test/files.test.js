@@ -3,19 +3,20 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as F from '../src/files.js'
-import * as D from '../src/data.js'
+import { fresh, eq } from '../src/data.js'
+const { bytes, int, float, string, symbol, record, set } = fresh
 
 const dir = mkdtempSync(join(tmpdir(), 'bassline-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 const p = name => join(dir, name)
 const eqAll = (xs, ys) =>
-  xs.length === ys.length && xs.every((x, i) => D.eq(x, ys[i]))
+  xs.length === ys.length && xs.every((x, i) => eq(x, ys[i]))
 
 const sampleDoc = [
-  D.int(1n),
-  D.str('two'),
-  D.record(D.sym('point'), D.float(3.5), D.int(4n).toActionable()),
-  D.set([D.bytes(Uint8Array.of(0xa0)), D.bytes(Uint8Array.of(0x80))]),
+  int(1n),
+  string('two'),
+  record([symbol('point'), float(3.5), int(4n).copy(true)]),
+  set([bytes(Uint8Array.of(0xa0)), bytes(Uint8Array.of(0x80))]),
 ]
 
 describe('binary files', () => {
@@ -25,8 +26,8 @@ describe('binary files', () => {
   })
 
   it('accepts a single value and an empty document', () => {
-    F.saveBinary(p('one.bce'), D.int(7n))
-    expect(eqAll(F.loadBinary(p('one.bce')), [D.int(7n)])).toBe(true)
+    F.saveBinary(p('one.bce'), int(7n))
+    expect(eqAll(F.loadBinary(p('one.bce')), [int(7n)])).toBe(true)
     F.saveBinary(p('empty.bce'), [])
     expect(F.loadBinary(p('empty.bce'))).toEqual([])
   })

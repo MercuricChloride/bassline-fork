@@ -121,14 +121,20 @@ class Flat extends BasslineVisitor {
     return '[' + l.value.map(x => this.visit(x)).join(' ') + ']'
   }
   visitSet(s) {
-    return '#{' + s.value.map(x => this.visit(x)).join(' ') + '}'
+    return (
+      '#{' +
+      Array.from(s.value.values())
+        .map(x => this.visit(x))
+        .join(' ') +
+      '}'
+    )
   }
   visitRecord(r) {
     const [head, ...fields] = r.value
     return '<' + [head, ...fields].map(x => this.visit(x)).join(' ') + '>'
   }
   visitDict(d) {
-    const entries = Array.from(d.value).map(
+    const entries = Array.from(d.value.values()).map(
       ([k, v]) => this.visit(k) + ': ' + this.visit(v)
     )
     return '{' + entries.join(' ') + '}'
@@ -222,10 +228,10 @@ export class BasslinePP extends BasslineVisitor {
     this.block(aList, '[', ']', aList.value)
   }
   visitSet(aSet) {
-    this.block(aSet, '#{', '}', aSet.value)
+    this.block(aSet, '#{', '}', Array.from(aSet.value.values()))
   }
   visitDict(aDict) {
-    this.block(aDict, '{', '}', Array.from(aDict.value), ([k, v]) => {
+    this.block(aDict, '{', '}', Array.from(aDict.value.values()), ([k, v]) => {
       this.visit(k)
       this.write(': ')
       this.visit(v)

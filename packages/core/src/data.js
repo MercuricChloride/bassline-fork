@@ -524,6 +524,26 @@ export class BasslineSet extends ValueBase {
     return this.fresh(Array.from(this._value.values()), actionable)
   }
 
+  /**
+   * @param {{ (node: Value): Value; (value: Value, index: number, array: Value[]): Value; }} callback
+   */
+  map(callback) {
+    return this.fresh(
+      Array.from(this._value.values()).map(callback),
+      this.actionable
+    )
+  }
+
+  /**
+   * @param {(value: Value, index: number, array: Value[]) => value is Value} callback
+   */
+  filter(callback) {
+    return this.fresh(
+      Array.from(this._value.values()).filter(callback),
+      this.actionable
+    )
+  }
+
   asSeq() {
     return new BasslineList(Array.from(this._value.values()), this.actionable)
   }
@@ -583,6 +603,23 @@ export class BasslineDict extends ValueBase {
       return this.fresh(Array.from(newValue.values()), this.actionable)
     }
     return this
+  }
+
+  /** @param {(value: [Value, Value], index: number, array: [Value, Value][]) => [Value, Value]} callback */
+  map(callback) {
+    return this.fresh(
+      Array.from(this._value.values()).map(callback),
+      this.actionable
+    )
+  }
+  /**
+   * @param {(value: [Value, Value], index: number, array: [Value, Value][]) => boolean} callback
+   */
+  filter(callback) {
+    return this.fresh(
+      Array.from(this._value.values()).filter(callback),
+      this.actionable
+    )
   }
 
   /**

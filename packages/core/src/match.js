@@ -1,55 +1,68 @@
 //@ts-check
-/** @import {Frame, Value, Values} from "./data.js" */
+/** @import {BasslineRecord, Value, ValueKind} from "./data.js" */
 /**
- * @template {Value} T
- * @typedef {(x: Value) => x is T} Guard
+ * @template T
+ * @typedef {(x: unknown) => x is T} Pred
  */
 
 /**
- * @typedef {(x: Value) => boolean} Predicate
+ * @template {Value} [T=Value]
+ * @typedef {(x: Value) => x is T} Predicate
  */
 
-export const kind = {
-  /** @type {Guard<Values['nil']>} */
-  nil: aNode => aNode.kind === 'nil',
-  /** @type {Guard<Values['bool']>} */
-  bool: aNode => aNode.kind === 'bool',
-  /** @type {Guard<Values['int']>} */
-  int: aNode => aNode.kind === 'int',
-  /** @type {Guard<Values['float']>} */
-  float: aNode => aNode.kind === 'float',
-  /** @type {Guard<Values['string']>} */
-  string: aNode => aNode.kind === 'string',
-  /** @type {Guard<Values['symbol']>} */
-  symbol: aNode => aNode.kind === 'symbol',
-  /** @type {Guard<Values['bytes']>} */
-  bytes: aNode => aNode.kind === 'bytes',
-  /** @type {Guard<Values['list']>} */
-  list: aNode => aNode.kind === 'list',
-  /** @type {Guard<Values['dict']>} */
-  dict: aNode => aNode.kind === 'dict',
-  /** @type {Guard<Values['record']>} */
-  record: aNode => aNode.kind === 'record',
-  /** @type {Guard<Values['set']>} */
-  set: aNode => aNode.kind === 'set',
+/**
+ * @template T
+ * @typedef {T extends (x: any, ...args: any[]) => x is infer K ? K : never} GuardOut
+ */
+
+/**
+ * @template T
+ * @typedef {T extends readonly [infer H, ...infer R] ? GuardOut<H> & AndOut<R> : unknown} AndOut
+ */
+
+/**
+ * @template {Value} [T=Value]
+ * @param {Predicate<T>} f
+ */
+function predicate(f) {
+  /** @type {Predicate<T>} */
+  return aValue => f(aValue)
+}
+
+export const kind = /** @constant */ {
+  nil: predicate(aNode => aNode.kind === 'nil'),
+  bool: predicate(aNode => aNode.kind === 'bool'),
+  int: predicate(aNode => aNode.kind === 'int'),
+  float: predicate(aNode => aNode.kind === 'float'),
+  string: predicate(aNode => aNode.kind === 'string'),
+  symbol: predicate(aNode => aNode.kind === 'symbol'),
+  bytes: predicate(aNode => aNode.kind === 'bytes'),
+  list: predicate(aNode => aNode.kind === 'list'),
+  dict: predicate(aNode => aNode.kind === 'dict'),
+  record: predicate(aNode => aNode.kind === 'record'),
+  set: predicate(aNode => aNode.kind === 'set'),
 }
 
 /**
- * @param {...Predicate} preds
- * @returns {Predicate}
+ * @template {Predicate[]} const T
+ * @param {T} preds
  */
 export const and =
   (...preds) =>
+  /** @type {Predicate<AndOut<T>>} */
   aNode =>
     preds.every(p => p(aNode))
+
 /**
- * @param {...Predicate} preds
- * @returns {Predicate}
+ * @template {Predicate[]} const T
+ * @param {T} preds
  */
 export const or =
   (...preds) =>
+  /** @type {Predicate<GuardOut<T[keyof T]>>} */
   aNode =>
     preds.some(p => p(aNode))
+
 /** @type {(p: Predicate) => Predicate} */
 export const not = p => aNode => !p(aNode)
 
@@ -62,12 +75,30 @@ export const passive = not(actionable)
 
 export const any = () => true
 
-/** @type {(name: string) => Predicate} */
-export const spelled = name => aNode =>
-  kind.symbol(aNode) && aNode.value === name
+/**
+ * @template {string} const T
+ * @template {ValueKind} K
+ * @param {T} name
+ * @param {K} kind
+ */
+export function spelled(name, kind = null) {
+  /** @type {Predicate<Value & {readonly value: T, readonly kind: K}>} */
+  return aNode => {
+    if (aNode.value !== name) return false
+    if (kind && aNode.kind !== kind) return false
+    return true
+  }
+}
 
-/** @type {(p: Predicate) => Predicate} */
-export const head = p => aNode => kind.record(aNode) && p(aNode.head)
+/**
+ * Creates a predicate that matches a record with a matching head
+ * @template {Value} T
+ * @param {Predicate<T>} p
+ */
+export function head(p) {
+  /** @type {Predicate<BasslineRecord & {readonly head: T}>} */
+  return aNode => kind.record(aNode) && p(aNode.head)
+}
 
 /** @type {(p: Predicate, f: (aNode: Value) => Value) => (aNode: Value) => Value} */
 export const rule = (p, f) => aNode => (p(aNode) ? f(aNode) : aNode)
