@@ -169,22 +169,25 @@ class ValueBase {
   }
 
   encode() {
-    // Note: This is fine because this class is logically abstract
-    //@ts-expect-error
-    return encode(this)
+    if (isValue(this)) {
+      return encode(this)
+    }
+    throw new Error('encode must be called on a Bassline value')
   }
 
   ceKey() {
-    // Note: This is fine because this class is logically abstract
-    //@ts-expect-error
-    return ceKey(this)
+    if (isValue(this)) {
+      return ceKey(this)
+    }
+    throw new Error('ceKey must be called on a Bassline value')
   }
 
   /** @param {Value} other */
   eq(other) {
-    // Note: This is fine because this class is logically abstract
-    //@ts-expect-error
-    return eq(this, other)
+    if (isValue(this)) {
+      return eq(this, other)
+    }
+    throw new Error('eq must be called on a Bassline value')
   }
 
   /**
