@@ -1,7 +1,4 @@
-// Read and write Bassline values to files, in either the canonical binary
-// encoding or the textual syntax. Both forms hold a document — zero or more
-// values. Node-only (uses the filesystem).
-
+/** @import {Value} from "./data.js" */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { encode, decodeAll } from './data.js'
 import { read } from './text/reader.js'
@@ -11,8 +8,8 @@ const asList = values => (Array.isArray(values) ? values : [values])
 
 /**
  * Write one value or an array of values to a binary file.
- * @param path
- * @param values
+ * @param {string} path
+ * @param {Value|Value[]} values
  */
 export function saveBinary(path, values) {
   const parts = asList(values).map(encode)
@@ -27,26 +24,29 @@ export function saveBinary(path, values) {
 
 /**
  * Decode the sequence of values stored in a binary file.
- * @param path
+ * @param {string} path
  */
 export function loadBinary(path) {
   return decodeAll(readFileSync(path))
 }
 
-// --- text: the .blt syntax, a document of zero or more values ---
-
 /**
  * Write one value or an array of values to a text file.
- * @param path
- * @param values
+ * @param {string} path
+ * @param {Value|Value[]} values
  */
 export function saveText(path, values) {
-  writeFileSync(path, asList(values).map(print).join('\n\n') + '\n')
+  writeFileSync(
+    path,
+    asList(values)
+      .map(v => print(v))
+      .join('\n\n') + '\n'
+  )
 }
 
 /**
  * Parse a text file into its list of values.
- * @param path
+ * @param {string} path
  */
 export function loadText(path) {
   return read(readFileSync(path, 'utf8'))
@@ -56,8 +56,8 @@ export function loadText(path) {
 
 /**
  * Convert a text file to binary.
- * @param srcPath
- * @param dstPath
+ * @param {string} srcPath
+ * @param {string} dstPath
  */
 export function textToBinary(srcPath, dstPath) {
   saveBinary(dstPath, loadText(srcPath))
@@ -65,8 +65,8 @@ export function textToBinary(srcPath, dstPath) {
 
 /**
  * Convert a binary file to text.
- * @param srcPath
- * @param dstPath
+ * @param {string} srcPath
+ * @param {string} dstPath
  */
 export function binaryToText(srcPath, dstPath) {
   saveText(dstPath, loadBinary(srcPath))

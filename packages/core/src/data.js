@@ -1,8 +1,5 @@
 // @ts-check
 
-/**
- * This object provides constructors for the various Bassline value types
- */
 export const fresh = /** @constant */ {
   /** @param {boolean} actionable */
   nil(actionable = false) {
@@ -110,7 +107,7 @@ export const fresh = /** @constant */ {
     for (const m of members) {
       if (!isValue(m))
         throw new TypeError('set member must be a Bassline value')
-      const key = m.ceKey()
+      const key = ceKey(m)
       value.set(key, m)
     }
     return new BasslineSet(value, actionable)
@@ -125,7 +122,7 @@ export const fresh = /** @constant */ {
     for (const [k, v] of entries) {
       if (!isValue(k) || !isValue(v))
         throw new TypeError('dict entry must be [Value, Value]')
-      const keyCe = k.ceKey()
+      const keyCe = ceKey(k)
       values.set(keyCe, [k, v])
     }
     return new BasslineDict(values, actionable)
@@ -374,7 +371,7 @@ export class BasslineSet extends ValueBase {
   has(aValue) {
     if (!isValue(aValue))
       throw new TypeError('set member must be a Bassline value')
-    return this._value.has(aValue.ceKey())
+    return this._value.has(ceKey(aValue))
   }
 
   /** @param {...Value} items */
@@ -387,10 +384,10 @@ export class BasslineSet extends ValueBase {
         case 'set':
         case 'list':
         case 'dict':
-          for (const v of item.asSeq()) newValue.set(v.ceKey(), v)
+          for (const v of item.asSeq()) newValue.set(ceKey(v), v)
           break
         default:
-          newValue.set(item.ceKey(), item)
+          newValue.set(ceKey(item), item)
       }
     }
     return this.fresh(Array.from(newValue.values()), this.actionable)
@@ -473,7 +470,7 @@ export class BasslineDict extends ValueBase {
   /** @param {Value} key */
   get(key) {
     if (!isValue(key)) throw new TypeError('dict key must be a Bassline value')
-    return this._value.get(key.ceKey())?.[1]
+    return this._value.get(ceKey(key))?.[1]
   }
 
   /** @param {Value} key */
@@ -484,7 +481,7 @@ export class BasslineDict extends ValueBase {
   /** @param {Value} key */
   delete(key) {
     if (!isValue(key)) throw new TypeError('dict key must be a Bassline value')
-    const ce = key.ceKey()
+    const ce = ceKey(key)
     if (this._value.has(ce)) {
       const newValue = this.value
       newValue.delete(ce)
@@ -633,12 +630,21 @@ const CANON_NAN = Uint8Array.of(0x7f, 0xf8, 0, 0, 0, 0, 0, 0)
 const CE_CACHE = new WeakMap()
 
 /**
- *
  * @param {Value} v
- * @param {number[]} [sink]
  * @returns {Uint8Array}
  */
-export function encode(v, sink = []) {
+export function encode(v) {
+  /** @type {number[]} */
+  const sink = []
+  encodeWithSink(v, sink)
+  return Uint8Array.from(sink)
+}
+
+/**
+ * @param {Value} v
+ * @param {number[]} sink
+ */
+function encodeWithSink(v, sink) {
   const encodeVal = generic({
     nil: prefix,
     bool: prefix,
@@ -703,15 +709,13 @@ export function encode(v, sink = []) {
 
   encodeVal(v)
 
-  return Uint8Array.from(sink)
-
   /**
    * @param {Value} value The value to be framed
    * @param {(enc: (v: Value) => void) => void} callback
    */
   function frame(value, callback) {
     const frameSink = []
-    callback(e => encode(e, frameSink))
+    callback(e => encodeWithSink(e, frameSink))
     const contents = Uint8Array.from(frameSink)
     prefix(value)
     varint(contents.length)
@@ -782,12 +786,6 @@ function cachedCE(v) {
   }
   return b
 }
-
-// /** @param {Value} v*/
-// export function encode(v) {
-//   assertValue(v)
-//   return cachedCE(v).slice()
-// }
 
 /** @param {Uint8Array} bytes */
 export function decode(bytes) {
