@@ -1,4 +1,5 @@
 // @ts-check
+
 /**
  * This object provides constructors for the various Bassline value types
  */
@@ -65,7 +66,6 @@ export const fresh = /** @constant */ {
       throw new Error('symbol string is not well-formed')
     return new BasslineSymbol(value, actionable)
   },
-
   /**
    * @param {Uint8Array} value
    * @param {boolean} actionable
@@ -208,10 +208,6 @@ export class BasslineNil extends ValueBase {
   copy(actionable = this.actionable) {
     return fresh.nil(actionable)
   }
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitNil(this)
-  }
   /** @returns {'nil'} */
   get kind() {
     return 'nil'
@@ -220,10 +216,6 @@ export class BasslineNil extends ValueBase {
 
 /** @augments {ValueBase<boolean>} */
 export class BasslineBool extends ValueBase {
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitBool(this)
-  }
   /** @returns {'bool'}*/
   get kind() {
     return 'bool'
@@ -232,10 +224,6 @@ export class BasslineBool extends ValueBase {
 
 /** @augments {ValueBase<bigint>} */
 export class BasslineInt extends ValueBase {
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitInt(this)
-  }
   /** @returns {'int'}*/
   get kind() {
     return 'int'
@@ -244,10 +232,6 @@ export class BasslineInt extends ValueBase {
 
 /** @augments {ValueBase<number>} */
 export class BasslineFloat extends ValueBase {
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitFloat(this)
-  }
   /** @returns {'float'}*/
   get kind() {
     return 'float'
@@ -256,11 +240,6 @@ export class BasslineFloat extends ValueBase {
 
 /** @augments {ValueBase<string>} */
 export class BasslineString extends ValueBase {
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitString(this)
-  }
-
   /** @returns {'string'}*/
   get kind() {
     return 'string'
@@ -269,10 +248,6 @@ export class BasslineString extends ValueBase {
 
 /** @augments {ValueBase<string>} */
 export class BasslineSymbol extends ValueBase {
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitSymbol(this)
-  }
   /** @returns {'symbol'}*/
   get kind() {
     return 'symbol'
@@ -283,10 +258,6 @@ export class BasslineSymbol extends ValueBase {
 export class BasslineBytes extends ValueBase {
   get value() {
     return this._value.slice()
-  }
-  /** @param {BasslineVisitor} aVisitor */
-  accept(aVisitor) {
-    return aVisitor.visitBytes(this)
   }
   /** @returns {'bytes'}*/
   get kind() {
@@ -374,10 +345,6 @@ class SeqBase extends ValueBase {
 }
 
 export class BasslineList extends SeqBase {
-  /** @param {BasslineVisitor} visitor */
-  accept(visitor) {
-    return visitor.visitList(this)
-  }
   /** @returns {'list'}*/
   get kind() {
     return 'list'
@@ -385,11 +352,6 @@ export class BasslineList extends SeqBase {
 }
 
 export class BasslineRecord extends SeqBase {
-  /** @param {BasslineVisitor} visitor */
-  accept(visitor) {
-    return visitor.visitRecord(this)
-  }
-
   get head() {
     return /** @type {Value} */ (this.at(0))
   }
@@ -408,11 +370,6 @@ export class BasslineRecord extends SeqBase {
  * @augments {ValueBase<Map<string, Value>>}
  */
 export class BasslineSet extends ValueBase {
-  /** @param {BasslineVisitor} visitor */
-  accept(visitor) {
-    return visitor.visitSet(this)
-  }
-
   /** @param {Value} aValue */
   has(aValue) {
     if (!isValue(aValue))
@@ -553,118 +510,72 @@ export class BasslineDict extends ValueBase {
     )
   }
 
-  /**
-   * @template {BasslineVisitor} T
-   * @param {T} aVisitor
-   */
-  accept(aVisitor) {
-    return aVisitor.visitDict(this)
-  }
-
   /** @returns {'dict'} */
   get kind() {
     return 'dict'
   }
 }
 
-export class BasslineVisitor {
-  /** @param {Value} aValue */
-  process(aValue) {
-    this.visit(aValue)
-    return this
-  }
-  /** @param {Value} aValue */
-  visit(aValue) {
-    return aValue.accept(this)
-  }
-  /** @param {BasslineNil} aNil */
-  visitNil(aNil) {
-    return aNil
-  }
-  /** @param {BasslineBool} aBool */
-  visitBool(aBool) {
-    return aBool
-  }
-  /** @param {BasslineInt} anInt */
-  visitInt(anInt) {
-    return anInt
-  }
-  /** @param {BasslineFloat} aFloat */
-  visitFloat(aFloat) {
-    return aFloat
-  }
-  /** @param {BasslineString} aString */
-  visitString(aString) {
-    return aString
-  }
-  /** @param {BasslineSymbol} aSymbol */
-  visitSymbol(aSymbol) {
-    return aSymbol
-  }
-  /** @param {BasslineBytes} aBytes */
-  visitBytes(aBytes) {
-    return aBytes
-  }
-  /** @param {BasslineList} aList */
-  visitList(aList) {
-    for (const item of aList.value) {
-      this.visit(item)
-    }
-    return aList
-  }
-  /** @param {BasslineDict} aDict */
-  visitDict(aDict) {
-    for (const [key, value] of aDict.value.values()) {
-      this.visit(key)
-      this.visit(value)
-    }
-    return aDict
-  }
-  /** @param {BasslineRecord} aRecord */
-  visitRecord(aRecord) {
-    for (const item of aRecord) this.visit(item)
-    return aRecord
-  }
-  /** @param {BasslineSet} aSet */
-  visitSet(aSet) {
-    for (const member of aSet.value.values()) this.visit(member)
-    return aSet
-  }
+function fallbackHandler(aValue) {
+  console.warn('No handler for this value kind: ', aValue)
+  return aValue
 }
 
-class ActionableVisitor extends BasslineVisitor {
-  foundActionable = false
-  /** @param {Value} aValue */
-  visit(aValue) {
-    if (aValue.actionable) {
-      this.foundActionable = true
-      return aValue
-    }
-    return super.visit(aValue)
-  }
+/**
+ * @template [T=Value]
+ * @param {{[K in ValueKind]?: (value: Values[K]) => T}} handlers
+ * @param {(v: Value) => T} fallback
+ * @returns {(v: Value) => T}
+ */
+export function generic(handlers, fallback = fallbackHandler) {
+  return v => (handlers?.[v.kind] ?? fallback)(v)
 }
 
-class CycleVisitor extends BasslineVisitor {
-  seen = new Set()
-  cycle = false
-  /** @param {Value} aValue */
-  visit(aValue) {
-    if (this.cycle) return aValue
-    if (this.seen.has(aValue)) {
-      this.cycle = true
-      return aValue
-    }
-    this.seen.add(aValue)
-    return super.visit(aValue)
+export const walk = generic(
+  {
+    *list(v) {
+      for (const item of v.value) yield item
+    },
+    *record(v) {
+      yield v.head
+      for (const item of v.fields) yield item
+    },
+    *dict(v) {
+      for (const [key, value] of v.value.values()) {
+        yield key
+        yield value
+      }
+    },
+    *set(v) {
+      for (const member of v.value.values()) yield member
+    },
+  },
+  function* (v) {
+    yield v
   }
+)
+
+/**
+ * @param {Value} v
+ */
+export function hasActionable(v) {
+  for (const el of walk(v)) {
+    if (el.actionable) return true
+  }
+  return false
 }
 
-/** @param {Value} v */
-export const hasActionable = v =>
-  new ActionableVisitor().process(v).foundActionable
-
-/** @param {Value} v */
-export const cycleFree = v => !new CycleVisitor().process(v).cycle
+/**
+ * @param {Value} v
+ */
+export function cycleFree(v) {
+  const seen = new Set()
+  for (const el of walk(v)) {
+    if (seen.has(el)) return false
+    seen.add(el)
+  }
+  return true
+}
 
 /** @param {Value} v */
 export const isData = v => (assertValue(v), !hasActionable(v))
@@ -688,8 +599,23 @@ export const LIST_PREFIX = 0x9
 export const DICT_PREFIX = 0xa
 export const RECORD_PREFIX = 0xb
 export const SET_PREFIX = 0xc
+
 export const ACTIONABLE = 0x80
 export const TAG_MASK = 0x7f
+
+export const valueDescriptor = generic({
+  nil: v => descriptor(NIL_PREFIX, v.actionable),
+  bool: v => descriptor(v.value ? TRUE_PREFIX : FALSE_PREFIX, v.actionable),
+  int: v => descriptor(INT_PREFIX, v.actionable),
+  float: v => descriptor(FLOAT_PREFIX, v.actionable),
+  string: v => descriptor(STRING_PREFIX, v.actionable),
+  symbol: v => descriptor(SYMBOL_PREFIX, v.actionable),
+  bytes: v => descriptor(BYTES_PREFIX, v.actionable),
+  list: v => descriptor(LIST_PREFIX, v.actionable),
+  dict: v => descriptor(DICT_PREFIX, v.actionable),
+  record: v => descriptor(RECORD_PREFIX, v.actionable),
+  set: v => descriptor(SET_PREFIX, v.actionable),
+})
 
 // accessor functions for tag & actionable bits
 /** @type {(tag: number, actionable: boolean) => number} */
@@ -705,135 +631,121 @@ const CANON_NAN = Uint8Array.of(0x7f, 0xf8, 0, 0, 0, 0, 0, 0)
 
 /** @type {WeakMap<Value, Uint8Array>} */
 const CE_CACHE = new WeakMap()
-export class CEVisitor extends BasslineVisitor {
-  /** @type {number[]} */
-  sink = []
+
+/**
+ *
+ * @param {Value} v
+ * @param {number[]} [sink]
+ * @returns {Uint8Array}
+ */
+export function encode(v, sink = []) {
+  const encodeVal = generic({
+    nil: prefix,
+    bool: prefix,
+
+    float(v) {
+      const dv = new DataView(new ArrayBuffer(8))
+      dv.setFloat64(0, v.value, false) // big-endian
+
+      prefix(v)
+      raw(new Uint8Array(dv.buffer))
+    },
+
+    int(v) {
+      const b = intToBytes(v.value)
+
+      prefix(v)
+      varint(b.length)
+      raw(b)
+    },
+
+    string(v) {
+      const b = ENC.encode(v.value)
+
+      prefix(v)
+      varint(b.length)
+      raw(b)
+    },
+
+    symbol(v) {
+      const b = ENC.encode(v.value)
+
+      prefix(v)
+      varint(b.length)
+      raw(b)
+    },
+
+    bytes(v) {
+      prefix(v)
+      varint(v.value.length)
+      raw(v.value)
+    },
+
+    list: v => frame(v, enc => v.value.forEach(enc)),
+    record: v => frame(v, enc => v.value.forEach(enc)),
+
+    set(v) {
+      const members = Array.from(v.value.values())
+      members.sort((a, b) => compareBytes(cachedCE(a), cachedCE(b)))
+      frame(v, enc => members.forEach(enc))
+    },
+    dict(v) {
+      const entries = Array.from(v.value.values())
+      entries.sort((a, b) => compareBytes(cachedCE(a[0]), cachedCE(b[0])))
+      frame(v, enc =>
+        entries.forEach(([key, value]) => {
+          enc(key)
+          enc(value)
+        })
+      )
+    },
+  })
+
+  encodeVal(v)
+
+  return Uint8Array.from(sink)
+
+  /**
+   * @param {Value} value The value to be framed
+   * @param {(enc: (v: Value) => void) => void} callback
+   */
+  function frame(value, callback) {
+    const frameSink = []
+    callback(e => encode(e, frameSink))
+    const contents = Uint8Array.from(frameSink)
+    prefix(value)
+    varint(contents.length)
+    raw(contents)
+  }
+
+  /** @param {Value} v */
+  function prefix(v) {
+    return byte(valueDescriptor(v))
+  }
+
   /** @param {number} b */
-  byte(b) {
-    this.sink.push(b & 0xff)
-    return this
+  function byte(b) {
+    sink.push(b & 0xff)
   }
-  /** @param {Uint8Array} u8 */
-  raw(u8) {
-    for (let i = 0; i < u8.length; i++) this.sink.push(u8[i])
-    return this
+
+  /** @param {Uint8Array} bytes */
+  function raw(bytes) {
+    sink.push(...bytes)
   }
-  /** @param {number} n */
-  varint(n) {
+
+  /**@param {number} n */
+  function varint(n) {
     let v = n
     while (true) {
       const b = v % 128
       v = Math.floor(v / 128)
       if (v > 0) {
-        this.sink.push(b | 0x80)
+        sink.push(b | 0x80)
       } else {
-        this.sink.push(b)
-        return this
+        sink.push(b)
+        return
       }
     }
-  }
-  toUint8Array() {
-    return Uint8Array.from(this.sink)
-  }
-
-  /**
-   * Encodes a frame consisting of a descriptor byte, a varint length, and the body bytes.
-   * The body is built in a subvisitor so it's length is known before writing.
-   * @param {number} tag prefix tag to encode
-   * @param {boolean} actionable whether or not the value is actionable
-   * @param {(body: CEVisitor) => void} emit function that receives a sub-visitor to build the frame body
-   */
-  frame(tag, actionable, emit) {
-    const body = new CEVisitor()
-    emit(body)
-    this.byte(descriptor(tag, actionable)).varint(body.sink.length)
-    for (const b of body.sink) this.sink.push(b)
-    return this
-  }
-  /** @param {BasslineNil} aNil */
-  visitNil(aNil) {
-    this.byte(descriptor(NIL_PREFIX, aNil.actionable))
-    return aNil
-  }
-
-  /** @param {BasslineBool} aBool */
-  visitBool(aBool) {
-    const tag = aBool.value ? TRUE_PREFIX : FALSE_PREFIX
-    this.byte(descriptor(tag, aBool.actionable))
-    return aBool
-  }
-  /** @param {BasslineInt} anInt */
-  visitInt(anInt) {
-    const b = intToBytes(anInt.value)
-    this.byte(descriptor(INT_PREFIX, anInt.actionable)).varint(b.length).raw(b)
-    return anInt
-  }
-  /** @param {BasslineFloat} aFloat */
-  visitFloat(aFloat) {
-    const dv = new DataView(new ArrayBuffer(8))
-    dv.setFloat64(0, aFloat.value, false) // big-endian
-    this.byte(descriptor(FLOAT_PREFIX, aFloat.actionable)).raw(
-      new Uint8Array(dv.buffer)
-    )
-    return aFloat
-  }
-  /** @param {BasslineString} aString */
-  visitString(aString) {
-    const u8 = ENC.encode(aString.value)
-    this.byte(descriptor(STRING_PREFIX, aString.actionable))
-      .varint(u8.length)
-      .raw(u8)
-    return aString
-  }
-  /** @param {BasslineSymbol} aSymbol */
-  visitSymbol(aSymbol) {
-    const u8 = ENC.encode(aSymbol.value)
-    this.byte(descriptor(SYMBOL_PREFIX, aSymbol.actionable))
-      .varint(u8.length)
-      .raw(u8)
-    return aSymbol
-  }
-  /** @param {BasslineBytes} aBytes */
-  visitBytes(aBytes) {
-    this.byte(descriptor(BYTES_PREFIX, aBytes.actionable))
-      .varint(aBytes.value.length)
-      .raw(aBytes.value)
-    return aBytes
-  }
-  /** @param {BasslineList} aList */
-  visitList(aList) {
-    this.frame(LIST_PREFIX, aList.actionable, body => {
-      for (const c of aList.value) body.visit(c)
-    })
-    return aList
-  }
-  /** @param {BasslineDict} aDict */
-  visitDict(aDict) {
-    const entries = Array.from(aDict.value.values())
-    entries.sort((a, b) => compareBytes(cachedCE(a[0]), cachedCE(b[0])))
-    this.frame(DICT_PREFIX, aDict.actionable, body => {
-      for (const [k, v] of entries) {
-        body.visit(k)
-        body.visit(v)
-      }
-    })
-    return aDict
-  }
-  /** @param {BasslineRecord} aRecord */
-  visitRecord(aRecord) {
-    this.frame(RECORD_PREFIX, aRecord.actionable, body => {
-      for (const item of aRecord.value) body.visit(item)
-    })
-    return aRecord
-  }
-  /** @param {BasslineSet} aSet */
-  visitSet(aSet) {
-    const members = Array.from(aSet.value.values())
-    members.sort((a, b) => compareBytes(cachedCE(a), cachedCE(b)))
-    this.frame(SET_PREFIX, aSet.actionable, body => {
-      for (const m of members) body.visit(m)
-    })
-    return aSet
   }
 }
 
@@ -864,19 +776,18 @@ function intToBytes(n) {
 function cachedCE(v) {
   let b = CE_CACHE.get(v)
   if (!b) {
-    const visitor = new CEVisitor()
-    visitor.visit(v)
-    b = visitor.toUint8Array()
-    CE_CACHE.set(v, b)
+    const encoded = encode(v)
+    CE_CACHE.set(v, encoded)
+    b = encoded
   }
   return b
 }
 
-/** @param {Value} v*/
-export function encode(v) {
-  assertValue(v)
-  return cachedCE(v).slice()
-}
+// /** @param {Value} v*/
+// export function encode(v) {
+//   assertValue(v)
+//   return cachedCE(v).slice()
+// }
 
 /** @param {Uint8Array} bytes */
 export function decode(bytes) {
@@ -1196,6 +1107,17 @@ export function assertValue(x, msg = 'expected a Bassline value') {
 }
 
 /**
+ * @template V
+ * @template {ValueKind} K
+ * @typedef {{
+ * readonly value: V
+ * readonly kind: K
+ * actionable(): boolean
+ * actionable(a: boolean): AltValue<V, K>
+ * }} AltValue
+ */
+
+/**
  * @typedef {{
  * nil: BasslineNil
  * bool: BasslineBool
@@ -1226,7 +1148,6 @@ export function assertValue(x, msg = 'expected a Bassline value') {
  * eq(other: Value): boolean
  * encode(): Uint8Array<ArrayBuffer>
  * ceKey(): string,
- * accept(aVisitor: BasslineVisitor): BasslineVal<T>
  * }} BasslineVal
  */
 
