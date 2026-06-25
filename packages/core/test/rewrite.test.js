@@ -1,11 +1,35 @@
+/** @import {Value, Values} from "../src/data.js" */
 import { describe, it, expect } from 'vitest'
 import { eq, fresh } from '../src/data.js'
-import { rewrite, rules, onHead, onSymbol } from '../src/lang/rewrite.js'
+import { rewrite, rules } from '../src/lang/rewrite.js'
 import { read } from '../src/text/reader.js'
 
 const { list, int } = fresh
 
 const v1 = src => read(src)[0]
+
+/**
+ * @template {Value} T
+ * @param {Values['symbol']} matches
+ * @param {(v: Values['symbol']) => T} fn
+ */
+function onSymbol(matches, fn) {
+  /** @param {Value} v */
+  return v => (v.kind === 'symbol' && matches(v.value) ? fn(v) : v)
+}
+
+/**
+ * @template {Value} T
+ * @param {string} headName
+ * @param {(v: Values['record']) => T} fn
+ */
+function onHead(headName, fn) {
+  /** @param {Value} v */
+  return v =>
+    v.kind === 'record' && v.head.kind === 'symbol' && v.head.value === headName
+      ? fn(v)
+      : v
+}
 
 describe('rewrite', () => {
   it('the identity rule is a no-op', () => {

@@ -1,16 +1,5 @@
-// Tree rewriting over bassline values.
-//
-// Two structural primitives — children() and rebuild() — turn the data model
-// into something you can walk generically: every value is its ordered children
-// plus a way to put new children back. rewrite() drives a rule over the tree to
-// a fixpoint, and a few combinators (rules/onHead/onSymbol) build rules.
-//
-// A *rule* is `(node) => Value`: return a new node to keep rewriting, or return
-// the node unchanged to decline. Rules are plain functions, so they compose and
-// stay value-friendly (the door to authoring rules as bassline values later).
 /** @import { Value } from '../data.js' */
 import { assertValue } from '../data.js'
-import { kind, and, head, rule, spelled } from '../match.js'
 
 /**
  * Rewrite a value tree with a rule, bottom-up. Children are rewritten first,
@@ -55,7 +44,7 @@ export function rewrite(v, rule, opts = {}) {
 // ================ rule combinators ================
 
 /**
- * Try each rule in order; the first that changes the node wins.
+ * Try each rule in order; the first that changes the node is returned, or the original node if none do.
  * @param {...((node: Value) => Value)} rs
  * @returns {(node: Value) => Value}
  */
@@ -67,25 +56,4 @@ export function rules(...rs) {
     }
     return node
   }
-}
-
-/**
- * Match a record whose head is the symbol `name`
- * @param {string} name
- * @param {(node: Value) => Value} fn
- */
-export function onHead(name, fn) {
-  return rule(head(spelled(name)), fn)
-}
-
-/**
- * Match a symbol whose spelling satisfies `pred`.
- * @param { (value: string) => boolean } pred
- * @param {(node: Value) => Value} fn
- */
-export function onSymbol(pred, fn) {
-  return rule(
-    and(kind.symbol, n => pred(n.value)),
-    fn
-  )
 }
