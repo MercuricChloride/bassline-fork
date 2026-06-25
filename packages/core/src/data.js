@@ -45,7 +45,8 @@ export const fresh = /** @constant */ {
    * @param {boolean} actionable
    */
   string(value, actionable = false) {
-    if (typeof value !== 'string') throw new TypeError('str expects a string')
+    if (typeof value !== 'string')
+      throw new TypeError('string expects a string')
     if (!value.isWellFormed()) throw new Error('string is not well-formed')
     return new BasslineString(value, actionable)
   },
@@ -328,7 +329,6 @@ class SeqBase extends ValueBase {
           break
       }
     }
-    newValue.push(...items)
     return this.fresh(newValue, this.actionable)
   }
 
