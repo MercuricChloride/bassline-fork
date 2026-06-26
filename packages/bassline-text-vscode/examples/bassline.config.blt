@@ -1,0 +1,7 @@
+`<export {name: "ce" path: "out.bin"}>
+
+`<comment "this is a comment">
+
+`<endpoint {name: "deploy" host: '127.0.0.1' port: 9000}>
+
+<foo ^_^>

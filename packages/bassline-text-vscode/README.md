@@ -1,65 +1,95 @@
-# bassline-text README
+# bassline-text
 
-This is the README for your extension "bassline-text". After writing up a brief description, we recommend including the following sections.
+VS Code support for the bassline text format (`.blt`). Parsing and printing use `@bassline/core` (`read`, `readSpans`, `print`); the extension adds no separate parser.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- Syntax highlighting via a TextMate grammar ([`syntaxes/bassline-text.tmLanguage.json`](syntaxes/bassline-text.tmLanguage.json)).
+- Bracket auto-close, surround, and matching for `[] {} <> #{ } #[ ] "" ''` ([`language-configuration.json`](language-configuration.json)). `(` `)` are omitted; they are a syntax error in bassline.
+- Diagnostics: each edit runs `read`; a `ReaderError` is shown as one squiggle at its line/column.
+- Formatting via `print`; width is `bassline.formatWidth` (default 72).
+- Semantic tokens: `` `<comment "…">`` is colored as a comment.
+- CodeLens: _Run…_ and _Format_ at the top of the document, plus one lens per recognized top-level directive.
+- Structural editing: slurp and barf, forward and backward, over lists, sets, records, and dicts.
+- Completion: the bare symbols already present in the document.
 
-For example if there is an image subfolder under your extension project workspace:
+## Affordances and directives
 
-\!\[feature X\]\(images/feature-x.png\)
+Commands beyond the static set come from a provider of named affordances ([`src/affordances.ts`](src/affordances.ts)), registered two ways:
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- Built-ins, registered in code (`format`).
+- Kinds, registered for a directive head and instantiated by a document. An actionable record `` `<head {…}>`` whose head names a kind adds an affordance.
 
-## Requirements
+A document is loaded into the provider from the workspace manifest (`bassline.config.blt`, on activation) or via _Load Affordances from Document…_. Provider affordances appear in _Run Command…_, and directives present in the open document appear as CodeLens.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+| Directive | Effect |
+| --- | --- |
+| `` `<comment "…">`` | Dropped by `export`, kept by the formatter. Registers no command. |
+| `` `<export {name: "…" path: "…"}>`` | Writes the document's encoded values to a workspace-relative path. |
+| `` `<endpoint {name: "…" host: "…" port: N}>`` | Sends the document's encoded values to a TCP socket. |
 
-## Extension Settings
+## Limitations
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+- `endpoint` connects, writes the encoded values, and closes. It requires a listener on the port. No handshake, response, discovery, or retry.
+- `export` writes concatenated canonical encodings to the local filesystem. No other formats.
+- CodeLens covers top-level directives only.
+- Semantic tokens cover comments only.
+- Completion offers document symbols only; no directive heads or parameter keys.
+- No `evaluate` affordance: the core evaluator is being replaced and will return as one `provider.offer`.
+- Not implemented: hover, document symbols, definition, rename, `url`/DocumentLink, webview editing.
 
-For example:
+## Commands and keybindings
 
-This extension contributes the following settings:
+| Command | ID | Default key |
+| --- | --- | --- |
+| Format Document | `bassline.format` | — |
+| Run Command… | `bassline.run` | — |
+| Load Affordances from Document… | `bassline.loadAffordances` | — |
+| Reload Workspace Manifest | `bassline.reloadManifest` | — |
+| Slurp Forward | `bassline.slurpForward` | `ctrl+alt+right` |
+| Barf Forward | `bassline.barfForward` | `ctrl+alt+left` |
+| Slurp Backward | `bassline.slurpBackward` | `ctrl+alt+shift+left` |
+| Barf Backward | `bassline.barfBackward` | `ctrl+alt+shift+right` |
 
-- `myExtension.enable`: Enable/disable this extension.
-- `myExtension.thing`: Set to `blah` to do something.
+Keybindings apply only when a `bassline-text` editor is focused. `bassline.runDirective` is invoked by CodeLens; it has no keybinding or palette entry.
 
-## Known Issues
+## Settings
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- `bassline.manifest` — manifest path loaded on activation (default `bassline.config.blt`).
+- `bassline.formatWidth` — formatter width (default `72`).
 
-## Release Notes
+## Layout
 
-Users appreciate release notes as you update your extension.
+| File | Role |
+| --- | --- |
+| [`src/extension.ts`](src/extension.ts) | Activation; registers the provider, commands, and language-feature providers. |
+| [`src/affordances.ts`](src/affordances.ts) | The provider: `offer`, `kind`, `load`, `resolve`. |
+| [`src/directives.ts`](src/directives.ts) | Directive recognition and parameter extraction. |
+| [`src/builtins.ts`](src/builtins.ts) | `format` affordance; `export` and `endpoint` kinds. |
+| [`src/paredit.ts`](src/paredit.ts) | Structural edits (slurp/barf), pure `(text, offset) → edit`. |
+| [`src/format.ts`](src/format.ts) | Formatter over `print`. |
+| [`src/diagnostics.ts`](src/diagnostics.ts) | Reader-error diagnostics. |
+| [`src/codelens.ts`](src/codelens.ts) | Document and per-form lenses. |
+| [`src/semanticTokens.ts`](src/semanticTokens.ts) | Comment tokens. |
+| [`src/completion.ts`](src/completion.ts) | `symbolsIn`: bare symbols in a document. |
+| [`src/util.ts`](src/util.ts) | `fullRange`. |
 
-### 1.0.0
+## Development
 
-Initial release of ...
+From the monorepo root:
 
-### 1.0.1
+```bash
+pnpm install
+pnpm --filter bassline-text build      # bundle to dist/extension.js
+pnpm --filter bassline-text watch       # rebuild on change
+pnpm --filter bassline-text test        # vitest
+pnpm --filter bassline-text typecheck   # tsc --noEmit
+```
 
-Fixed issue #.
+Press **F5** to launch an Extension Development Host (the repo-root [`.vscode/launch.json`](../../.vscode/launch.json) targets this package and opens [`examples/`](examples)), or run:
 
-### 1.1.0
+```bash
+code --extensionDevelopmentPath=packages/bassline-text-vscode packages/bassline-text-vscode/examples
+```
 
-Added features X, Y, and Z.
-
----
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-- Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-- Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-- Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-- [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-- [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+[`esbuild.mjs`](esbuild.mjs) bundles `@bassline/core` and `@bassline/comm` into `dist/extension.js`; `vscode` is external.

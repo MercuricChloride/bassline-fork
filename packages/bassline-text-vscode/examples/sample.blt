@@ -1,0 +1,9 @@
+<entry "title" "hello bassline">
+
+[1 2 3 #{4 5 6}]
+
+`<comment "this is a comment">
+
+`<endpoint {name: "asfd" host: "something" port: 6969}>
+
+<cell total `<+ 1 2 3>>
