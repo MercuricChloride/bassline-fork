@@ -1,0 +1,24 @@
+{
+  "name": "@bassline/comm",
+  "version": "0.0.1",
+  "description": "Lookup-parameterized communication constructs for Bassline",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "@bassline/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@bassline/core": "workspace:*"
+  },
+  "license": "AGPL-3.0"
+}
