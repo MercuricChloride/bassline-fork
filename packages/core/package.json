@@ -20,10 +20,6 @@
     "./lang": {
       "types": "./types/src/lang/index.d.ts",
       "default": "./src/lang/index.js"
-    },
-    "./match": {
-      "types": "./types/src/match.d.ts",
-      "default": "./src/match.js"
     }
   },
   "scripts": {

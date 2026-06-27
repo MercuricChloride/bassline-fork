@@ -1,9 +1,11 @@
-<entry "title" "hello bassline">
+(entry "title" "hello bassline")
 
 [1 2 3 #{4 5 6}]
 
-`<comment "this is a comment">
+`(comment "this is a comment")
 
-`<endpoint {name: "asfd" host: "something" port: 6969}>
+`(endpoint {name: "sdflkjsdflkjsdf" host: "something" port: 6969})
 
-<cell total `<+ 1 2 3>>
+`(export {path: "something-else-out.bin"})
+
+(cell total `(+ 1 2 3))

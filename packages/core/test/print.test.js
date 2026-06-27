@@ -45,7 +45,7 @@ describe('atom formatting', () => {
   it('escapes strings (double-quoted)', () => {
     expect(print(string(''))).toBe('""')
     expect(print(string('say "hi"'))).toBe('"say \\"hi\\""')
-    expect(print(string('a\nb\t'))).toBe('"a\\nb\\t"')
+    expect(print(string('a\nb\t'))).toBe('"a\nb\\t"') // newline literal, tab escaped
     expect(print(string("it's fine"))).toBe('"it\'s fine"') // a single quote is literal in a string
   })
 
@@ -56,7 +56,8 @@ describe('atom formatting', () => {
     expect(print(symbol('a|b'))).toBe('a|b') // | is an ordinary symbol char now
     expect(print(symbol('a b'))).toBe("'a b'") // whitespace
     expect(print(symbol('a:b'))).toBe("'a:b'") // delimiter
-    expect(print(symbol('->'))).toBe("'->'") // contains >
+    expect(print(symbol('->'))).toBe('->') // <> are ordinary symbol chars now
+    expect(print(symbol('a(b'))).toBe("'a(b'") // ( is a record delimiter
     expect(print(symbol('a"b'))).toBe("'a\"b'") // contains the string delimiter
     expect(print(symbol('nil'))).toBe("'nil'") // reserved word
     expect(print(symbol('null'))).toBe('null') // NOT reserved (nil is)
@@ -79,7 +80,7 @@ describe('frame layout', () => {
     expect(print(list([]))).toBe('[]')
     expect(print(dict([]))).toBe('{}')
     expect(print(set([]))).toBe('#{}')
-    expect(print(record([symbol('point')]))).toBe('<point>')
+    expect(print(record([symbol('point')]))).toBe('(point)')
     expect(print(list([int(1n), int(2n)]))).toBe('[1 2]')
     expect(print(set([int(1n), int(2n)]))).toBe('#{1 2}')
     expect(
@@ -91,7 +92,7 @@ describe('frame layout', () => {
       )
     ).toBe('{a: 1 b: 2}')
     expect(print(record([symbol('point'), int(1n), int(2n)]))).toBe(
-      '<point 1 2>'
+      '(point 1 2)'
     )
     expect(print(list([list([int(1n)])]))).toBe('[[1]]') // nested short stays inline
   })
@@ -109,9 +110,9 @@ describe('frame layout', () => {
       record([symbol('cell'), symbol(n), int(BigInt(i))])
     )
     const out = print(record([symbol('sheet'), ...cells]), 40)
-    expect(out.startsWith('<sheet\n')).toBe(true)
-    expect(out).toContain('\n  <cell A 0>\n') // inner cell inline, indented
-    expect(out.endsWith('\n>')).toBe(true)
+    expect(out.startsWith('(sheet\n')).toBe(true)
+    expect(out).toContain('\n  (cell A 0)\n') // inner cell inline, indented
+    expect(out.endsWith('\n)')).toBe(true)
   })
 
   it('respects a custom width', () => {

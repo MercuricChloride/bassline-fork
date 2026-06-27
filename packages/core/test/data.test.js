@@ -59,12 +59,12 @@ const VECTORS = [
     '0C 06 04 01 01 04 01 02',
   ],
   [
-    '<foo 1>',
+    '(foo 1)',
     fresh.record([fresh.symbol('foo'), fresh.int(1n)]),
     '0B 08 07 03 66 6F 6F 04 01 01',
   ],
   [
-    '<foo> (empty)',
+    '(foo) (empty)',
     fresh.record([fresh.symbol('foo')]),
     '0B 05 07 03 66 6F 6F',
   ],

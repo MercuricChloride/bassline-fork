@@ -4,7 +4,7 @@
 import * as vscode from 'vscode'
 import { read, readSpans } from '@bassline/core/text'
 import { Affordances, type RunContext, type Disposable } from './affordances'
-import { registerBuiltins } from './builtins'
+import { registerBuiltins, evaluateBlockAt } from './builtins'
 import { registerDiagnostics } from './diagnostics'
 import { registerFormatter } from './format'
 import { registerCodeLens } from './codelens'
@@ -94,6 +94,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('bassline.format', () =>
       provider.get('format')?.run(ctx())
+    ),
+    vscode.commands.registerCommand('bassline.evaluate', () =>
+      provider.get('evaluate')?.run(ctx())
+    ),
+
+    // Evaluate a single `(borth …)` block at a source offset (per-block CodeLens).
+    vscode.commands.registerCommand(
+      'bassline.evaluateBlock',
+      async (uriString: string, start: number) => {
+        const doc =
+          vscode.workspace.textDocuments.find(
+            d => d.uri.toString() === uriString
+          ) ?? vscode.window.activeTextEditor?.document
+        if (doc) await evaluateBlockAt(doc, start)
+      }
     ),
 
     // Run the directive at a given source offset (used by per-form CodeLens).

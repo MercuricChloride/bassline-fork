@@ -5,7 +5,7 @@
 import { fresh } from '../data.js'
 
 const WS = ' \t\n\r,'
-const DELIM = '[]{}<>():#\'"`'
+const DELIM = '[]{}():#\'"`'
 const SIGNS = '+-'
 
 /** @type {(c: string) => boolean} */
@@ -42,8 +42,24 @@ export class ReaderError extends Error {
       }
     }
     super(`reader error at ${line}:${col}: ${msg}`)
+    /** Byte offset into the source where the error was detected. */
+    this.pos = pos
+    this.line = line
+    this.col = col
   }
 }
+
+/**
+ * A parsed value together with its source span and child spans. `start` sits
+ * before any actionable `` ` ``; `end` is just past the form. `children` are the
+ * sub-spans in document order (record head + fields, dict keys + values, list
+ * and set members); atoms have none.
+ * @typedef {object} Spanned
+ * @property {Value} value
+ * @property {number} start
+ * @property {number} end
+ * @property {Spanned[]} children
+ */
 
 /**
  * Read source text into a document (zero or more values).
@@ -51,11 +67,22 @@ export class ReaderError extends Error {
  * @returns {Value[]}
  */
 export function read(source) {
+  return readSpans(source).map(s => s.value)
+}
+
+/**
+ * Like {@link read}, but each value is wrapped with its source span. `read` is
+ * the projection `readSpans(source).map(s => s.value)`, so the values produced
+ * are identical; only the span metadata is extra.
+ * @param {string} source
+ * @returns {Spanned[]}
+ */
+export function readSpans(source) {
   if (typeof source !== 'string') throw new TypeError('read expects a string')
 
   const n = source.length
   let pos = 0
-  /** @type {Value[]} */
+  /** @type {Spanned[]} */
   const values = []
 
   /**
@@ -68,10 +95,10 @@ export function read(source) {
   }
 
   /**
-   * @param {Value} value
+   * @param {Spanned} span
    */
-  function push(value) {
-    values.push(value)
+  function push(span) {
+    values.push(span)
   }
 
   function readEscape() {
@@ -216,11 +243,12 @@ export function read(source) {
   }
 
   /**
-   *
+   * Read child values until `closer`, returning their spans in document order.
    * @param {string} closer
+   * @returns {Spanned[]}
    */
   function readUntil(closer) {
-    /** @type {Value[]} */
+    /** @type {Spanned[]} */
     const items = []
     while (true) {
       while (isWs(source[pos])) pos++
@@ -233,29 +261,61 @@ export function read(source) {
     }
   }
 
-  /** @param {boolean} actionable */
+  /**
+   * @param {boolean} actionable
+   * @returns {{ value: Value, children: Spanned[] }}
+   */
   function readList(actionable) {
     const items = readUntil(']')
-    return fresh.list(items, actionable)
+    return {
+      value: fresh.list(
+        items.map(s => s.value),
+        actionable
+      ),
+      children: items,
+    }
   }
 
-  /** @param {boolean} actionable */
+  /**
+   * @param {boolean} actionable
+   * @returns {{ value: Value, children: Spanned[] }}
+   */
   function readSet(actionable) {
     const items = readUntil('}')
-    return fresh.set(items, actionable)
+    return {
+      value: fresh.set(
+        items.map(s => s.value),
+        actionable
+      ),
+      children: items,
+    }
   }
 
-  /** @param {boolean} actionable */
+  /**
+   * @param {boolean} actionable
+   * @returns {{ value: Value, children: Spanned[] }}
+   */
   function readRecord(actionable) {
-    const items = readUntil('>')
+    const items = readUntil(')')
     if (items.length === 0) fail(pos, `Record cannot be empty!`)
-    return fresh.record(items, actionable)
+    return {
+      value: fresh.record(
+        items.map(s => s.value),
+        actionable
+      ),
+      children: items,
+    }
   }
 
-  /** @param {boolean} actionable */
+  /**
+   * @param {boolean} actionable
+   * @returns {{ value: Value, children: Spanned[] }}
+   */
   function readDict(actionable) {
     /** @type {[Value, Value][]} */
     const entries = []
+    /** @type {Spanned[]} */
+    const children = []
     while (true) {
       while (isWs(source[pos])) pos++
       if (pos >= n) fail(pos, "unterminated, expected '}'")
@@ -267,15 +327,19 @@ export function read(source) {
       while (isWs(source[pos])) pos++
       if (source[pos] === ':') pos++
       else fail(pos, "dictionary expected a separator ':'")
-      entries.push([key, readValue()])
+      const val = readValue()
+      entries.push([key.value, val.value])
+      children.push(key, val)
     }
-    return fresh.dict(entries, actionable)
+    return { value: fresh.dict(entries, actionable), children }
   }
 
+  /** @returns {Spanned} */
   function readValue() {
-    const INVALID_CHARS = ':()]}>'
+    const INVALID_CHARS = ':)]}'
     let actionable = false
     while (isWs(source[pos])) pos++
+    const start = pos
     while (source[pos] === '`') {
       pos++
       actionable = true
@@ -289,48 +353,45 @@ export function read(source) {
       fail(pos, `unexpected closing character: ${c}`)
     }
 
+    /** @type {Value} */
+    let value
+    /** @type {Spanned[]} */
+    let children = []
+
     if (c === '[') {
       pos++
-      return readList(actionable)
-    }
-
-    if (c === '{') {
+      ;({ value, children } = readList(actionable))
+    } else if (c === '{') {
       pos++
-      return readDict(actionable)
-    }
-
-    if (c === '<') {
+      ;({ value, children } = readDict(actionable))
+    } else if (c === '(') {
       pos++
-      return readRecord(actionable)
-    }
-
-    if (c === '"') {
+      ;({ value, children } = readRecord(actionable))
+    } else if (c === '"') {
       pos++
-      const val = readQuoted('"')
-      return fresh.string(val, actionable)
-    }
-
-    if (c === "'") {
+      value = fresh.string(readQuoted('"'), actionable)
+    } else if (c === "'") {
       pos++
-      const val = readQuoted("'")
-      return fresh.symbol(val, actionable)
-    }
-    if (c === '#') {
+      value = fresh.symbol(readQuoted("'"), actionable)
+    } else if (c === '#') {
       if (k === '{') {
         pos += 2
-        return readSet(actionable)
-      }
-      if (k === '[') {
+        ;({ value, children } = readSet(actionable))
+      } else if (k === '[') {
         pos += 2
-        return readBytes(actionable)
+        value = readBytes(actionable)
+      } else {
+        // Note: I could see this not be an error but do a normal symbol parse
+        fail(pos, "'#' must begin '#[' or '#{'")
       }
-      // Note: I could see this not be an error but do a normal symbol parse
-      fail(pos, "'#' must begin '#[' or '#{'")
+    } else {
+      const numberLike = isDigit(c) || (isSign(c) && isDigit(k))
+      value = numberLike
+        ? readNumber(pos, actionable)
+        : readSymbol(pos, actionable)
     }
-    const numberLike = isDigit(c) || (isSign(c) && isDigit(k))
-    return numberLike
-      ? readNumber(pos, actionable)
-      : readSymbol(pos, actionable)
+
+    return { value, start, end: pos, children }
   }
 
   while (true) {

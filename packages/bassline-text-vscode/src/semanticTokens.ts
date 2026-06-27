@@ -1,5 +1,5 @@
 // Reader-backed semantic tokens: readSpans sees structure the TextMate grammar
-// can't, so we color each `<comment "…">` directive as a comment. Extend with a
+// can't, so we color each `(comment "…")` directive as a comment. Extend with a
 // new token type in the legend and another span pass.
 import * as vscode from 'vscode'
 import { readSpans } from '@bassline/core/text'

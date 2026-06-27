@@ -6,6 +6,8 @@ packages:
   - apps/ui
   - packages/core
   - packages/std
+  - packages/comm
   - packages/eth-rpc
+  - packages/bassline-text-vscode
 allowBuilds:
   esbuild: true

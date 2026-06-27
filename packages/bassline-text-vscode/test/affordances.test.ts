@@ -19,7 +19,7 @@ describe('Affordances', () => {
       void d
       return { name: 'deploy', title: 'Send via deploy', run: noop }
     })
-    const handle = p.load(read('`<endpoint {name: "deploy" port: 9000}>'))
+    const handle = p.load(read('`(endpoint {name: "deploy" port: 9000})'))
     expect(p.get('deploy')?.title).toBe('Send via deploy')
 
     // The load handle removes exactly what it added.
@@ -34,7 +34,7 @@ describe('Affordances', () => {
       make()
       return undefined
     })
-    p.load(read('`<unknown {x: 1}>'))
+    p.load(read('`(unknown {x: 1})'))
     expect(make).not.toHaveBeenCalled()
     expect(p.list()).toHaveLength(0)
   })
@@ -42,7 +42,7 @@ describe('Affordances', () => {
   it('ignores content (non-actionable forms)', () => {
     const p = new Affordances()
     p.kind('endpoint', () => ({ name: 'deploy', title: 't', run: noop }))
-    p.load(read('<endpoint {port: 9000}>'))
+    p.load(read('(endpoint {port: 9000})'))
     expect(p.list()).toHaveLength(0)
   })
 
@@ -53,7 +53,7 @@ describe('Affordances', () => {
       title: 'Send via deploy',
       run: noop,
     }))
-    const [directive] = read('`<endpoint {name: "deploy" port: 9000}>')
+    const [directive] = read('`(endpoint {name: "deploy" port: 9000})')
     expect(p.resolve(directive)?.name).toBe('deploy')
     // resolve does not register: the command list stays empty.
     expect(p.list()).toHaveLength(0)
@@ -61,7 +61,7 @@ describe('Affordances', () => {
 
   it('resolve returns undefined for an unknown head', () => {
     const p = new Affordances()
-    const [directive] = read('`<unknown {x: 1}>')
+    const [directive] = read('`(unknown {x: 1})')
     expect(p.resolve(directive)).toBeUndefined()
   })
 })

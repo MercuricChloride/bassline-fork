@@ -338,18 +338,13 @@ a payload of it's encoded unique elements.
 
 This describes a textual syntax for working with this encoding.
 
-** TODO What parens should denote
-
-I'm still not totally sure what to make parens denote yet, so I'll
-decide on that later I guess.
-
 ** Tokens
 
 Whitespace =[ \t\n\r\,]+= separates tokens and carries no other meaning.
-A *delimiter* is whitespace or one of =[ ] { } < > ( ) : # ' " `=.
+A *delimiter* is whitespace or one of =[ ] { } ( ) : # ' " `=.
 After skipping whitespace, the first character selects the token:
 
-- =[ ] { } < > ( ) := and =#{= are structural
+- =[ ] { } ( ) := and =#{= are structural
 
 -  =`= is to prefix a value and denote it as actionable
 
@@ -367,7 +362,8 @@ After skipping whitespace, the first character selects the token:
   characters.
 
 So every character that is not whitespace or a delimiter including
-=; + - * / . = ! ? |= is an ordinary symbol character.
+=< > ; + - * / . = ! ? |= is an ordinary symbol character (so =-> <- <=
+>== read as symbols).
 
 A symbol that must contain a delimiter is written in it's quoted form
 quoted ='a:b' 'has space'= and because =:= is its own token it always
@@ -390,7 +386,7 @@ tokens.
   Frame    := List | Set | Record | Dict
   List     := "[" Value* "]"
   Set      := "#{" Value* "}"
-  Record   := "<" Value Value* ">"   ; the first Value is the head
+  Record   := "(" Value Value* ")"   ; the first Value is the head
   Dict     := "{" Entry* "}"
   Entry    := Value ":" Value
 
@@ -418,8 +414,3 @@ numbers. Integer versus double is the presence of =.= or =e=/=E=, so =1 ≠
 1.0= and =-0.0= is writable. A number must be followed by a delimiter,
 whitespace, or end of input: a number against a symbol character (=1-2=,
 =42px=, or =1.=) is a syntax error, not two tokens.
-
-*** TODO Parens =(= and =)= are reserved with no meaning today
-
-They are reserved for possible future use. Currently they are a syntax
-error, but it's not clear to me what those pairs should denote.

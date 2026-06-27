@@ -14,7 +14,7 @@ describe('sendRepo', () => {
     const replyH = repo.store(reply, 'REPLY')
     const rejectH = repo.store(reject, 'REJECT')
 
-    // `<call [1 2] REPLY REJECT>
+    // `(call [1 2] REPLY REJECT)
     const message = record(
       [symbol('call'), list([int(1n), int(2n)]), replyH, rejectH],
       true

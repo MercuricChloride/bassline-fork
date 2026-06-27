@@ -28,7 +28,7 @@ describe('slurpForward', () => {
     expect(run(slurpForward, '[|] b')).toBe('[b]')
   })
   it('engulfs into a record', () => {
-    expect(run(slurpForward, '<f|> x')).toBe('<f x>')
+    expect(run(slurpForward, '(f|) x')).toBe('(f x)')
   })
   it('treats a dict value/key as an ordinary sibling', () => {
     expect(run(slurpForward, '{a|: 1} b')).toBe('{a: 1 b}')

@@ -33,7 +33,7 @@ function onHead(headName, fn) {
 
 describe('rewrite', () => {
   it('the identity rule is a no-op', () => {
-    const v = v1('[1 <p 2 3> {a: 1}]')
+    const v = v1('[1 (p 2 3) {a: 1}]')
     const rewritten = rewrite(v, x => x)
     expect(eq(rewritten, v)).toBe(true)
   })
@@ -43,32 +43,32 @@ describe('rewrite', () => {
       s => s.startsWith('foo-'),
       s => fresh.symbol('bar-' + s.value.slice(4))
     )
-    const v = v1('[foo-a <foo-head foo-b 1> {foo-k: foo-v}]')
-    const want = v1('[bar-a <bar-head bar-b 1> {bar-k: bar-v}]')
+    const v = v1('[foo-a (foo-head foo-b 1) {foo-k: foo-v}]')
+    const want = v1('[bar-a (bar-head bar-b 1) {bar-k: bar-v}]')
     expect(eq(rewrite(v, ren), want)).toBe(true)
   })
 
   it('expands a record head structurally', () => {
     const expand = onHead('def', r => list([r.head, ...r.fields]))
-    expect(eq(rewrite(v1('<def foo 123>'), expand), v1('[def foo 123]'))).toBe(
+    expect(eq(rewrite(v1('(def foo 123)'), expand), v1('[def foo 123]'))).toBe(
       true
     )
   })
 
   it('reduces nested redexes to a fixpoint', () => {
     const succ = onHead('succ', r => int(r.fields[0].value + 1n))
-    expect(eq(rewrite(v1('<succ <succ <succ 0>>>'), succ), fresh.int(3n))).toBe(
+    expect(eq(rewrite(v1('(succ (succ (succ 0)))'), succ), fresh.int(3n))).toBe(
       true
     )
   })
 
   it('fixpoint:false applies a rule once per node; fixpoint chases new redexes', () => {
     const r = rules(
-      onHead('a', () => v1('<b>')), // <a> -> <b>
-      onHead('b', () => v1('done')) // <b> -> done
+      onHead('a', () => v1('(b)')), // (a) -> (b)
+      onHead('b', () => v1('done')) // (b) -> done
     )
-    expect(eq(rewrite(v1('<a>'), r, { fixpoint: false }), v1('<b>'))).toBe(true)
-    expect(eq(rewrite(v1('<a>'), r), v1('done'))).toBe(true)
+    expect(eq(rewrite(v1('(a)'), r, { fixpoint: false }), v1('(b)'))).toBe(true)
+    expect(eq(rewrite(v1('(a)'), r), v1('done'))).toBe(true)
   })
 
   it('rules() takes the first rule that changes the node', () => {

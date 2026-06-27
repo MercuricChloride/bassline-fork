@@ -14,13 +14,13 @@ const one = (src: string) => read(src)[0]
 
 describe('isDirective', () => {
   it('accepts an actionable record', () => {
-    expect(isDirective(one('`<endpoint {port: 9000}>'))).toBe(true)
+    expect(isDirective(one('`(endpoint {port: 9000})'))).toBe(true)
   })
   it('accepts an actionable dict', () => {
     expect(isDirective(one('`{port: 9000}'))).toBe(true)
   })
   it('rejects a non-actionable record (it is content)', () => {
-    expect(isDirective(one('<endpoint {port: 9000}>'))).toBe(false)
+    expect(isDirective(one('(endpoint {port: 9000})'))).toBe(false)
   })
   it('rejects an actionable symbol (it is a reference, not a directive)', () => {
     expect(isDirective(one('`foo'))).toBe(false)
@@ -29,7 +29,7 @@ describe('isDirective', () => {
 
 describe('headSpelling', () => {
   it('reads the symbol head of a record', () => {
-    expect(headSpelling(one('`<endpoint {port: 9000}>'))).toBe('endpoint')
+    expect(headSpelling(one('`(endpoint {port: 9000})'))).toBe('endpoint')
   })
   it('is undefined for a dict', () => {
     expect(headSpelling(one('`{port: 9000}'))).toBeUndefined()
@@ -38,18 +38,18 @@ describe('headSpelling', () => {
 
 describe('isComment', () => {
   it('accepts an actionable comment directive', () => {
-    expect(isComment(one('`<comment "drop me">'))).toBe(true)
+    expect(isComment(one('`(comment "drop me")'))).toBe(true)
   })
   it('rejects a non-actionable comment record (it is just data)', () => {
-    expect(isComment(one('<comment "drop me">'))).toBe(false)
+    expect(isComment(one('(comment "drop me")'))).toBe(false)
   })
   it('rejects a non-comment directive', () => {
-    expect(isComment(one('`<endpoint {port: 9000}>'))).toBe(false)
+    expect(isComment(one('`(endpoint {port: 9000})'))).toBe(false)
   })
 })
 
 describe('params extraction', () => {
-  const d = one('`<endpoint {name: "deploy" host: "127.0.0.1" port: 9000}>')
+  const d = one('`(endpoint {name: "deploy" host: "127.0.0.1" port: 9000})')
   const params = paramsOf(d)
 
   it('finds the parameter dict inside a record', () => {

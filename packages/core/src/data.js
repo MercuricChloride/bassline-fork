@@ -433,6 +433,10 @@ export class BasslineSet extends ValueBase {
     return new BasslineList(Array.from(this._value.values()), this.actionable)
   }
 
+  get values() {
+    return this.asSeq()
+  }
+
   /** @returns {'set'} */
   get kind() {
     return 'set'
@@ -507,6 +511,14 @@ export class BasslineDict extends ValueBase {
     )
   }
 
+  get keys() {
+    return new BasslineList(Array.from(this._value.values()).map(([k]) => k))
+  }
+
+  get values() {
+    return new BasslineList(Array.from(this._value.values()).map(([, v]) => v))
+  }
+
   /** @returns {'dict'} */
   get kind() {
     return 'dict'
@@ -531,20 +543,24 @@ export function generic(handlers, fallback = fallbackHandler) {
 export const walk = generic(
   {
     *list(v) {
-      for (const item of v.value) yield item
+      yield v
+      for (const item of v.value) yield* walk(item)
     },
     *record(v) {
-      yield v.head
-      for (const item of v.fields) yield item
+      yield v
+      yield* walk(v.head)
+      for (const item of v.fields) yield* walk(item)
     },
     *dict(v) {
+      yield v
       for (const [key, value] of v.value.values()) {
-        yield key
-        yield value
+        yield* walk(key)
+        yield* walk(value)
       }
     },
     *set(v) {
-      for (const member of v.value.values()) yield member
+      yield v
+      for (const member of v.value.values()) yield* walk(member)
     },
   },
   function* (v) {

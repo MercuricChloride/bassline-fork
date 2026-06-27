@@ -18,7 +18,7 @@ export function headSpelling(v: Value): string | undefined {
 }
 
 /**
- * A comment is an actionable `<comment "…">` directive: an instruction to the
+ * A comment is an actionable `(comment "…")` directive: an instruction to the
  * consumer to drop it. Consumers that serialize or evaluate filter these out;
  * the formatter preserves them.
  */

@@ -5,7 +5,7 @@
 import { read } from '@bassline/core/text'
 import { walk } from '@bassline/core/data'
 
-const DELIM = new Set([...' \t\n\r,[]{}<>():#\'"`'])
+const DELIM = new Set([...' \t\n\r,[]{}():#\'"`'])
 
 /** Whether a symbol can be written bare (so inserting it produces valid text). */
 function bareSafe(s: string): boolean {

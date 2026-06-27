@@ -6,11 +6,11 @@ describe('symbolsIn', () => {
     expect(symbolsIn('[a b a]')?.sort()).toEqual(['a', 'b'])
   })
   it('includes the record head and dict keys', () => {
-    expect(symbolsIn('<entry x>')?.sort()).toEqual(['entry', 'x'])
+    expect(symbolsIn('(entry x)')?.sort()).toEqual(['entry', 'x'])
     expect(symbolsIn('{name: 1 host: 2}')?.sort()).toEqual(['host', 'name'])
   })
   it('excludes strings, numbers, and reserved literals', () => {
-    expect(symbolsIn('<f "str" 42 true>')).toEqual(['f'])
+    expect(symbolsIn('(f "str" 42 true)')).toEqual(['f'])
   })
   it('excludes symbols that are not bare-safe', () => {
     expect(symbolsIn("'a b' c")).toEqual(['c'])

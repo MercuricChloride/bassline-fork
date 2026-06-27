@@ -37,6 +37,10 @@
         "title": "Bassline: Format Document"
       },
       {
+        "command": "bassline.evaluate",
+        "title": "Bassline: Evaluate Document"
+      },
+      {
         "command": "bassline.run",
         "title": "Bassline: Run Command…"
       },

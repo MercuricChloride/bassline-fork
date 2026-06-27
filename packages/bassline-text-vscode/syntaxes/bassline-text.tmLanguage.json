@@ -77,29 +77,29 @@
       "patterns": [
         {
           "name": "constant.numeric.float.bassline",
-          "match": "(?<![^\\s\\[\\]{}<>():#'\"`])(NaN|-?Infinity)(?=[\\s\\[\\]{}<>():#'\"`]|$)"
+          "match": "(?<![^\\s\\[\\]{}():#'\"`])(NaN|-?Infinity)(?=[\\s\\[\\]{}():#'\"`]|$)"
         },
         {
           "name": "constant.numeric.float.bassline",
-          "match": "(?<![^\\s\\[\\]{}<>():#'\"`])[+-]?(\\d+\\.\\d+([eE][+-]?\\d+)?|\\d+[eE][+-]?\\d+)(?=[\\s\\[\\]{}<>():#'\"`]|$)"
+          "match": "(?<![^\\s\\[\\]{}():#'\"`])[+-]?(\\d+\\.\\d+([eE][+-]?\\d+)?|\\d+[eE][+-]?\\d+)(?=[\\s\\[\\]{}():#'\"`]|$)"
         },
         {
           "name": "constant.numeric.integer.bassline",
-          "match": "(?<![^\\s\\[\\]{}<>():#'\"`])[+-]?\\d+(?=[\\s\\[\\]{}<>():#'\"`]|$)"
+          "match": "(?<![^\\s\\[\\]{}():#'\"`])[+-]?\\d+(?=[\\s\\[\\]{}():#'\"`]|$)"
         }
       ]
     },
 
     "constant": {
       "name": "constant.language.bassline",
-      "match": "(?<![^\\s\\[\\]{}<>():#'\"`])(nil|true|false)(?=[\\s\\[\\]{}<>():#'\"`]|$)"
+      "match": "(?<![^\\s\\[\\]{}():#'\"`])(nil|true|false)(?=[\\s\\[\\]{}():#'\"`]|$)"
     },
 
     "punctuation": {
       "patterns": [
         {
           "name": "punctuation.section.brackets.bassline",
-          "match": "#\\{|[\\[\\]{}<>()]"
+          "match": "#\\{|[\\[\\]{}()]"
         },
         { "name": "punctuation.separator.key-value.bassline", "match": ":" }
       ]
@@ -107,7 +107,7 @@
 
     "symbol": {
       "name": "entity.name.symbol.bassline",
-      "match": "[^\\s\\[\\]{},<>():#'\"`]+"
+      "match": "[^\\s\\[\\]{},():#'\"`]+"
     }
   }
 }

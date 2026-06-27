@@ -9,24 +9,12 @@
 export function rewrite(v: Value, rule: (node: Value) => Value, opts?: {
     fixpoint?: boolean;
     maxSteps?: number;
-}): import("../data.js").BasslineValue;
+}): Value;
 /**
- * Try each rule in order; the first that changes the node wins.
+ * Try each rule in order; the first that changes the node is returned, or the original node if none do.
  * @param {...((node: Value) => Value)} rs
  * @returns {(node: Value) => Value}
  */
 export function rules(...rs: ((node: Value) => Value)[]): (node: Value) => Value;
-/**
- * Match a record whose head is the symbol `name`
- * @param {string} name
- * @param {(node: Value) => Value} fn
- */
-export function onHead(name: string, fn: (node: Value) => Value): (aNode: Value) => Value;
-/**
- * Match a symbol whose spelling satisfies `pred`.
- * @param { (value: string) => boolean } pred
- * @param {(node: Value) => Value} fn
- */
-export function onSymbol(pred: (value: string) => boolean, fn: (node: Value) => Value): (aNode: Value) => Value;
 import type { Value } from '../data.js';
 //# sourceMappingURL=rewrite.d.ts.map

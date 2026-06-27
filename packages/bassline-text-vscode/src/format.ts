@@ -17,7 +17,7 @@ export function formatText(
   return values.map(v => print(v, width)).join('\n\n') + '\n'
 }
 
-function configuredWidth(): number {
+export function configuredWidth(): number {
   return vscode.workspace
     .getConfiguration('bassline')
     .get<number>('formatWidth', DEFAULT_WIDTH)

@@ -26,7 +26,7 @@ const FRAME = new Set(['list', 'set', 'record', 'dict'])
 
 const isFrame = (n: Spanned): boolean => FRAME.has(n.value.kind)
 
-/** End offset of a frame's opening delimiter — past `[`/`{`/`<`, or `#{`. */
+/** End offset of a frame's opening delimiter — past `[`/`{`/`(`, or `#{`. */
 function openerEnd(frame: Spanned, src: string): number {
   let i = frame.start
   while (src[i] === '`') i++ // the actionable mark belongs to the opener

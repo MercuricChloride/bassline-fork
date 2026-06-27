@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { read } from '../src/text/reader.js'
+import { read, readSpans, ReaderError } from '../src/text/reader.js'
 import {
   encode,
   decode,
@@ -69,12 +69,21 @@ describe('frames', () => {
     expect(eq(val('[]'), list([]))).toBe(true)
     expect(eq(val('{}'), dict([]))).toBe(true)
     expect(eq(val('#{}'), set([]))).toBe(true)
-    expect(() => val('<>')).toThrow('Record cannot be empty!')
+    expect(() => val('()')).toThrow('Record cannot be empty!')
   })
 
   it('parses a record', () => {
     expect(
-      eq(val('<point 1 2>'), record([symbol('point'), int(1n), int(2n)]))
+      eq(val('(point 1 2)'), record([symbol('point'), int(1n), int(2n)]))
+    ).toBe(true)
+  })
+
+  it('reads angle characters as bare symbols', () => {
+    expect(eq(val('->'), symbol('->'))).toBe(true)
+    expect(eq(val('<='), symbol('<='))).toBe(true)
+    expect(eq(val('>='), symbol('>='))).toBe(true)
+    expect(
+      eq(val('(lt a b)'), record([symbol('lt'), symbol('a'), symbol('b')]))
     ).toBe(true)
   })
 
@@ -123,12 +132,12 @@ describe('actionable', () => {
 
 describe('errors', () => {
   it('rejects a record with no head', () => {
-    expect(() => read('<>')).toThrow()
+    expect(() => read('()')).toThrow()
   })
 
-  it('rejects a stray closer or reserved paren', () => {
+  it('rejects a stray closer', () => {
     expect(() => read(']')).toThrow()
-    expect(() => read('(')).toThrow()
+    expect(() => read(')')).toThrow()
   })
 
   it('rejects an unterminated frame', () => {
@@ -139,11 +148,68 @@ describe('errors', () => {
   it('rejects a dictionary entry without a colon', () => {
     expect(() => read('{a 1}')).toThrow()
   })
+
+  it('carries pos/line/col on the ReaderError', () => {
+    let err
+    try {
+      read('[1\n  2 )')
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(ReaderError)
+    expect(err.line).toBe(2)
+    expect(err.col).toBe(5)
+    expect(err.pos).toBe(7)
+  })
+})
+
+describe('readSpans', () => {
+  it('projects to the same values as read', () => {
+    const src = '(entry "k" #{1 2 3}) [1 2] `foo'
+    const spanned = readSpans(src)
+    expect(spanned.map(s => s.value)).toEqual(read(src))
+  })
+
+  it('spans an atom by byte offsets, with no children', () => {
+    const [s] = readSpans('  42 ')
+    expect(s.start).toBe(2)
+    expect(s.end).toBe(4)
+    expect(s.children).toEqual([])
+  })
+
+  it('includes the actionable backtick in the span', () => {
+    const [s] = readSpans('`foo')
+    expect(s.value.actionable).toBe(true)
+    expect(s.start).toBe(0)
+    expect(s.end).toBe(4)
+  })
+
+  it('exposes list members as child spans', () => {
+    const [s] = readSpans('[1 22]')
+    expect(s.children.map(c => [c.start, c.end])).toEqual([
+      [1, 2],
+      [3, 5],
+    ])
+  })
+
+  it('exposes the record head as the first child', () => {
+    const [s] = readSpans('(a b)')
+    expect(s.children).toHaveLength(2)
+    expect(s.children[0].value.value).toBe('a')
+    expect(s.children[0].start).toBe(1)
+  })
+
+  it('exposes dict keys and values as interleaved child spans', () => {
+    const [s] = readSpans('{k: 1}')
+    expect(s.children).toHaveLength(2)
+    expect(s.children[0].value.value).toBe('k')
+    expect([s.children[1].start, s.children[1].end]).toEqual([4, 5])
+  })
 })
 
 describe('round-trip with canonical encoding', () => {
   it('parse then encode reproduces hand-built values', () => {
-    const v = val('<entry "k" #{1 2 3}>')
+    const v = val('(entry "k" #{1 2 3})')
     const want = record([
       symbol('entry'),
       string('k'),

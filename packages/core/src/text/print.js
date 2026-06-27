@@ -10,8 +10,6 @@ const DELIM = new Set([
   ']',
   '{',
   '}',
-  '<',
-  '>',
   '(',
   ')',
   ':',
@@ -52,10 +50,9 @@ function escapeBody(s, quote) {
   for (const ch of s) {
     if (ch === quote) out += '\\' + quote
     else if (ch === '\\') out += '\\\\'
-    else if (ch === '\n') out += '\\n'
     else if (ch === '\t') out += '\\t'
     else if (ch === '\r') out += '\\r'
-    else out += ch
+    else out += ch // newlines are emitted literally; they re-read inside quotes
   }
   return out
 }
@@ -101,7 +98,7 @@ const flatten = generic({
       .map(x => flat(x))
       .join(' ') +
     '}',
-  record: v => '<' + v.value.map(x => flat(x)).join(' ') + '>',
+  record: v => '(' + v.value.map(x => flat(x)).join(' ') + ')',
   dict: v =>
     '{' +
     Array.from(v.value.values())
@@ -147,7 +144,7 @@ export function print(value, width = 72, padding = 2) {
       record: v =>
         compound(v, () => {
           const [head, ...fields] = v.value
-          write('<' + flat(head))
+          write('(' + flat(head))
           depth++
           for (const f of fields) {
             br()
@@ -155,7 +152,7 @@ export function print(value, width = 72, padding = 2) {
           }
           depth--
           br()
-          write('>')
+          write(')')
         }),
     },
     v => write(flat(v))

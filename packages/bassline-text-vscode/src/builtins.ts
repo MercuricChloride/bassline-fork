@@ -2,11 +2,19 @@
 // `endpoint` are document-instantiated kinds that a manifest names. All land in
 // the same provider, so every consumer treats them uniformly.
 import * as vscode from 'vscode'
-import { read } from '@bassline/core/text'
-import { encode } from '@bassline/core/data'
-import { connect } from '@bassline/comm'
+import { read, print, readSpans } from '@bassline/core/text'
+import type { Spanned } from '@bassline/core/text'
+import { encode, fresh } from '@bassline/core/data'
+import type { Value } from '@bassline/core/data'
+import {
+  connect,
+  BorthEvaluator,
+  isBorthDocument,
+  isBorthExpression,
+  isStackDirective,
+} from '@bassline/comm'
 import type { Affordances, RunContext } from './affordances'
-import { formatEdits } from './format'
+import { formatEdits, configuredWidth } from './format'
 import { paramsOf, at, asString, asNumber, isComment } from './directives'
 
 function activeDoc(ctx: RunContext): vscode.TextDocument | undefined {
@@ -22,6 +30,89 @@ function resolveInWorkspace(rel: string): vscode.Uri | undefined {
   const folders = vscode.workspace.workspaceFolders
   if (!folders) return undefined
   return vscode.Uri.joinPath(folders[0].uri, rel)
+}
+
+/**
+ * Persist the result stack as the document's state. Only the `(stack …)` form is
+ * touched: it is replaced in place with the final stack (or appended if the
+ * document has none). Every other form — including the `(borth …)` blocks — is
+ * left exactly as written, so the program stays in the document.
+ */
+async function persistStack(
+  doc: vscode.TextDocument,
+  stack: Value[]
+): Promise<void> {
+  const text = doc.getText()
+  const stackSpan = readSpans(text).find(s => isStackDirective(s.value))
+  const stackForm = print(
+    fresh.record([fresh.symbol('stack'), ...stack], true),
+    configuredWidth()
+  )
+  const edit = new vscode.WorkspaceEdit()
+  if (stackSpan) {
+    edit.replace(
+      doc.uri,
+      new vscode.Range(
+        doc.positionAt(stackSpan.start),
+        doc.positionAt(stackSpan.end)
+      ),
+      stackForm
+    )
+  } else {
+    const sep = text.endsWith('\n') ? '\n' : '\n\n'
+    edit.insert(doc.uri, doc.positionAt(text.length), `${sep}${stackForm}\n`)
+  }
+  await vscode.workspace.applyEdit(edit)
+}
+
+/**
+ * Read the document, confirm it is a borth document, run `evaluate` against a
+ * fresh evaluator, then persist the resulting stack. `evaluate` receives the
+ * spans so callers can target a single block by source offset.
+ */
+async function withBorthDoc(
+  doc: vscode.TextDocument,
+  evaluate: (ev: BorthEvaluator, spans: Spanned[]) => void
+): Promise<void> {
+  let spans: Spanned[]
+  try {
+    spans = readSpans(doc.getText())
+  } catch (e) {
+    vscode.window.showErrorMessage(`Bassline evaluate: ${String(e)}`)
+    return
+  }
+  if (!isBorthDocument(spans.map(s => s.value))) {
+    vscode.window.showInformationMessage(
+      'Bassline: not a borth document (needs a `(lang borth) directive).'
+    )
+    return
+  }
+  try {
+    const ev = new BorthEvaluator().init()
+    evaluate(ev, spans)
+    await persistStack(doc, ev.stack)
+  } catch (e) {
+    vscode.window.showErrorMessage(`Bassline evaluate: ${String(e)}`)
+  }
+}
+
+/**
+ * Evaluate only the `(borth …)` block that starts at `start` (used by the
+ * per-block CodeLens), advancing the document's `(stack …)`.
+ */
+export async function evaluateBlockAt(
+  doc: vscode.TextDocument,
+  start: number
+): Promise<void> {
+  await withBorthDoc(doc, (ev, spans) => {
+    const span = spans.find(s => s.start === start)
+    if (span && isBorthExpression(span.value)) {
+      ev.evaluateBlock(
+        spans.map(s => s.value),
+        span.value
+      )
+    }
+  })
 }
 
 export function registerBuiltins(provider: Affordances): void {
@@ -40,8 +131,26 @@ export function registerBuiltins(provider: Affordances): void {
     },
   })
 
+  // --- evaluate: run the document's `(lang …)` evaluator, persist its state ---
+  // borth: a document opens with `(lang borth). `(def {…})` blocks bind first,
+  // `(stack …)` seeds the stack, then `(borth …)` blocks evaluate in order. Only
+  // the `(stack …)` form is rewritten with the result (see persistStack); the
+  // `(borth …)` blocks stay, so each evaluation runs them again from the new
+  // stack — re-evaluating advances the state.
+  provider.offer({
+    name: 'evaluate',
+    title: 'Evaluate Document',
+    run: async ctx => {
+      const doc = activeDoc(ctx)
+      if (!doc) return
+      await withBorthDoc(doc, (ev, spans) =>
+        ev.evaluateDocument(spans.map(s => s.value))
+      )
+    },
+  })
+
   // --- export kind: encode the document's values to canonical bytes --------
-  // `<export {name: "ce" path: "out.bin"}>`
+  // `(export {name: "ce" path: "out.bin"})`
   provider.kind('export', directive => {
     const params = paramsOf(directive)
     const name = asString(at(params, 'name')) ?? 'export'
@@ -77,7 +186,7 @@ export function registerBuiltins(provider: Affordances): void {
   })
 
   // --- endpoint kind: stream the document's values to a running socket -----
-  // `<endpoint {name: "deploy" host: "127.0.0.1" port: 9000}>`
+  // `(endpoint {name: "deploy" host: "127.0.0.1" port: 9000})`
   provider.kind('endpoint', directive => {
     const params = paramsOf(directive)
     const name = asString(at(params, 'name')) ?? 'endpoint'
