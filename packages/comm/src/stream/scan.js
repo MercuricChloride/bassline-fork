@@ -19,7 +19,7 @@ import {
   DICT_PREFIX,
   RECORD_PREFIX,
   SET_PREFIX,
-  TAG_MASK,
+  tagOf,
 } from '@bassline/core/data'
 
 /** Returned when the buffer doesn't yet hold a value's header (descriptor + varint). */
@@ -66,7 +66,7 @@ export function peekVarint(bytes, offset) {
  */
 export function scanValue(bytes, offset = 0) {
   if (offset >= bytes.length) return NEED_MORE
-  const tag = bytes[offset] & TAG_MASK
+  const tag = tagOf(bytes[offset])
 
   switch (tag) {
     case NIL_PREFIX:

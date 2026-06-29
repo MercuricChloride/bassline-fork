@@ -91,7 +91,7 @@ describe('NaN payload normalization', () => {
       const dv = new DataView(new ArrayBuffer(8))
       dv.setBigUint64(0, bits)
       const v = float(dv.getFloat64(0))
-      expect(hex(encode(v))).toBe('057FF8000000000000')
+      expect(hex(encode(v))).toBe('0A7FF8000000000000')
       expect(eq(decode(encode(v)), v)).toBe(true)
     }
   )
@@ -118,12 +118,12 @@ describe('mutation resistance', () => {
 // encoding rules — ground truth separate from the implementation.
 describe('independent CE corpus', () => {
   const corpus = [
-    ['256', int(256n), '04020100'],
-    ['-256', int(-256n), '0402FF00'],
+    ['256', int(256n), '08020100'],
+    ['-256', int(-256n), '0802FF00'],
     [
       'high-byte set sorts 80 < A0',
       set([bytes(Uint8Array.of(0x80)), bytes(Uint8Array.of(0xa0))]),
-      '0C060801800801A0',
+      '18061001801001A0',
     ],
     [
       'high-byte dict keys sort 00 < 80',
@@ -131,14 +131,14 @@ describe('independent CE corpus', () => {
         [bytes(Uint8Array.of(0x80)), nil()],
         [bytes(Uint8Array.of(0x00)), nil()],
       ]),
-      '0A080801000108018001',
+      '14081001000210018002',
     ],
-    ['unicode é', string('é'), '0602C3A9'],
-    ['emoji', string('\u{1F600}'), '0604F09F9880'],
-    ['actionable nested', list([int(1n)]).copy(true), '8903040101'],
-    ['empty record', record([symbol('foo')]), '0B050703666F6F'],
-    ['NaN', float(NaN), '057FF8000000000000'],
-    ['-0.0', float(-0), '058000000000000000'],
+    ['unicode é', string('é'), '0C02C3A9'],
+    ['emoji', string('\u{1F600}'), '0C04F09F9880'],
+    ['actionable nested', list([int(1n)]).copy(true), '1303080101'],
+    ['empty record', record([symbol('foo')]), '16050E03666F6F'],
+    ['NaN', float(NaN), '0A7FF8000000000000'],
+    ['-0.0', float(-0), '0A8000000000000000'],
   ]
 
   it.each(corpus)('encodes %s and round-trips', (_name, v, want) => {

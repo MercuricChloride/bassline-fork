@@ -32,9 +32,7 @@ export class ReaderError extends Error {
     constructor(source: string, pos: number, msg: string);
     /** Byte offset into the source where the error was detected. */
     pos: number;
-    /** 1-based line of {@link pos}. */
     line: number;
-    /** 1-based column of {@link pos}. */
     col: number;
 }
 /**

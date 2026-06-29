@@ -17,32 +17,33 @@ const bytesOf = s =>
 const act = v => v.copy(true)
 
 // (label, value, canonical-encoding hex) — hand-computed from the doc's encoding
-// rules: an 8-bit descriptor (actionable flag in the high bit | 7-bit tag), then
-// the payload; frames carry a byte-length varint and a sorted body.
+// rules: an 8-bit descriptor (7-bit tag in the high bits | actionable flag in the
+// low bit, i.e. byte = (tag << 1) | actionable), then the payload; frames carry a
+// byte-length varint and a sorted body.
 const VECTORS = [
-  ['nil', fresh.nil(), '01'],
-  ['false', fresh.bool(false), '02'],
-  ['true', fresh.bool(true), '03'],
-  ['0', fresh.int(0n), '04 01 00'],
-  ['1', fresh.int(1n), '04 01 01'],
-  ['-1', fresh.int(-1n), '04 01 FF'],
-  ['128', fresh.int(128n), '04 02 00 80'],
-  ['255', fresh.int(255n), '04 02 00 FF'],
-  ['256', fresh.int(256n), '04 02 01 00'],
-  ['1.0', fresh.float(1.0), '05 3F F0 00 00 00 00 00 00'],
-  ['"hi" string', fresh.string('hi'), '06 02 68 69'],
-  ['foo symbol', fresh.symbol('foo'), '07 03 66 6F 6F'],
-  ['#[FF]', fresh.bytes(Uint8Array.of(0xff)), '08 01 FF'],
-  ['[1]', fresh.list([fresh.int(1n)]), '09 03 04 01 01'],
+  ['nil', fresh.nil(), '02'],
+  ['false', fresh.bool(false), '04'],
+  ['true', fresh.bool(true), '06'],
+  ['0', fresh.int(0n), '08 01 00'],
+  ['1', fresh.int(1n), '08 01 01'],
+  ['-1', fresh.int(-1n), '08 01 FF'],
+  ['128', fresh.int(128n), '08 02 00 80'],
+  ['255', fresh.int(255n), '08 02 00 FF'],
+  ['256', fresh.int(256n), '08 02 01 00'],
+  ['1.0', fresh.float(1.0), '0A 3F F0 00 00 00 00 00 00'],
+  ['"hi" string', fresh.string('hi'), '0C 02 68 69'],
+  ['foo symbol', fresh.symbol('foo'), '0E 03 66 6F 6F'],
+  ['#[FF]', fresh.bytes(Uint8Array.of(0xff)), '10 01 FF'],
+  ['[1]', fresh.list([fresh.int(1n)]), '12 03 08 01 01'],
   [
     '[1 2]',
     fresh.list([fresh.int(1n), fresh.int(2n)]),
-    '09 06 04 01 01 04 01 02',
+    '12 06 08 01 01 08 01 02',
   ],
   [
     '{a: 1}',
     fresh.dict([[fresh.symbol('a'), fresh.int(1n)]]),
-    '0A 06 07 01 61 04 01 01',
+    '14 06 0E 01 61 08 01 01',
   ],
   // built with keys out of order to exercise canonical sorting
   [
@@ -51,57 +52,64 @@ const VECTORS = [
       [fresh.symbol('b'), fresh.int(2n)],
       [fresh.symbol('a'), fresh.int(1n)],
     ]),
-    '0A 0C 07 01 61 04 01 01 07 01 62 04 01 02',
+    '14 0C 0E 01 61 08 01 01 0E 01 62 08 01 02',
   ],
   [
     '#{2 1}',
     fresh.set([fresh.int(2n), fresh.int(1n)]),
-    '0C 06 04 01 01 04 01 02',
+    '18 06 08 01 01 08 01 02',
+  ],
+  // a marked and an unmarked member of different types: the actionable nil sorts
+  // by its type tag (lowest), not pushed to the end by its mark — type-major order.
+  [
+    '#{1 `nil} (mixed mark/type)',
+    fresh.set([fresh.int(1n), act(fresh.nil())]),
+    '18 04 03 08 01 01',
   ],
   [
     '(foo 1)',
     fresh.record([fresh.symbol('foo'), fresh.int(1n)]),
-    '0B 08 07 03 66 6F 6F 04 01 01',
+    '16 08 0E 03 66 6F 6F 08 01 01',
   ],
   [
     '(foo) (empty)',
     fresh.record([fresh.symbol('foo')]),
-    '0B 05 07 03 66 6F 6F',
+    '16 05 0E 03 66 6F 6F',
   ],
-  ['`x (actionable symbol)', act(fresh.symbol('x')), '87 01 78'],
+  ['`x (actionable symbol)', act(fresh.symbol('x')), '0F 01 78'],
   [
     '`[1] (actionable list)',
     act(fresh.list([fresh.int(1n)])),
-    '89 03 04 01 01',
+    '13 03 08 01 01',
   ],
   [
     '[`1 2] (actionable element)',
     fresh.list([act(fresh.int(1n)), fresh.int(2n)]),
-    '09 06 84 01 01 04 01 02',
+    '12 06 09 01 01 08 01 02',
   ],
   [
     '{`a: 1} (actionable key)',
     fresh.dict([[act(fresh.symbol('a')), fresh.int(1n)]]),
-    '0A 06 87 01 61 04 01 01',
+    '14 06 0F 01 61 08 01 01',
   ],
 ]
 
 // Each MUST be rejected by decode (the trust boundary for incoming bytes).
 const REJECTS = [
   ['error/bad prefix 0x0', '00'],
-  ['zero-length integer', '04 00'],
-  ['non-minimal integer', '04 02 00 01'],
-  ['non-minimal varint', '06 80 00'],
-  ['overlong UTF-8', '06 02 C0 80'],
-  ['surrogate code point', '06 03 ED A0 80'],
-  ['non-canonical NaN', '05 7F F0 00 00 00 00 00 01'],
-  ['dict keys out of order', '0A 0C 07 01 62 04 01 02 07 01 61 04 01 01'],
-  ['duplicate dict key', '0A 0C 07 01 61 04 01 01 07 01 61 04 01 02'],
-  ['set members out of order', '0C 06 04 01 02 04 01 01'],
-  ['duplicate set member', '0C 06 04 01 01 04 01 01'],
-  ['frame length exceeds input', '09 09 04 01 01'],
-  ['frame length mismatch', '09 02 04 01 01'],
-  ['trailing garbage', '01 01'],
+  ['zero-length integer', '08 00'],
+  ['non-minimal integer', '08 02 00 01'],
+  ['non-minimal varint', '0C 80 00'],
+  ['overlong UTF-8', '0C 02 C0 80'],
+  ['surrogate code point', '0C 03 ED A0 80'],
+  ['non-canonical NaN', '0A 7F F0 00 00 00 00 00 01'],
+  ['dict keys out of order', '14 0C 0E 01 62 08 01 02 0E 01 61 08 01 01'],
+  ['duplicate dict key', '14 0C 0E 01 61 08 01 01 0E 01 61 08 01 02'],
+  ['set members out of order', '18 06 08 01 02 08 01 01'],
+  ['duplicate set member', '18 06 08 01 01 08 01 01'],
+  ['frame length exceeds input', '12 09 08 01 01'],
+  ['frame length mismatch', '12 02 08 01 01'],
+  ['trailing garbage', '02 02'],
 ]
 
 describe('canonical encoding', () => {
@@ -162,11 +170,11 @@ describe('equality', () => {
 describe('doubles', () => {
   it('treats -0.0 and +0.0 as distinct', () => {
     expect(eq(fresh.float(-0), fresh.float(0))).toBe(false)
-    expect(hex(encode(fresh.float(-0)))).toBe('05 80 00 00 00 00 00 00 00')
+    expect(hex(encode(fresh.float(-0)))).toBe('0A 80 00 00 00 00 00 00 00')
   })
 
   it('canonicalizes NaN', () => {
-    expect(hex(encode(fresh.float(NaN)))).toBe('05 7F F8 00 00 00 00 00 00')
+    expect(hex(encode(fresh.float(NaN)))).toBe('0A 7F F8 00 00 00 00 00 00')
     expect(eq(fresh.float(NaN), fresh.float(NaN))).toBe(true)
   })
 })

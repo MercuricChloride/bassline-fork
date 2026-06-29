@@ -267,9 +267,11 @@ export const LIST_PREFIX: 9;
 export const DICT_PREFIX: 10;
 export const RECORD_PREFIX: 11;
 export const SET_PREFIX: 12;
-export const ACTIONABLE: 128;
-export const TAG_MASK: 127;
 export const valueDescriptor: (v: Value) => number;
+/** @type {(tag: number, actionable: boolean) => number} */
+export const descriptor: (tag: number, actionable: boolean) => number;
+export function tagOf(b: number): number;
+export function actionableOf(b: number): boolean;
 export class BasslineDecoder {
     /**
      * @param {Uint8Array} input

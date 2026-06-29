@@ -613,9 +613,6 @@ export const DICT_PREFIX = 0xa
 export const RECORD_PREFIX = 0xb
 export const SET_PREFIX = 0xc
 
-export const ACTIONABLE = 0x80
-export const TAG_MASK = 0x7f
-
 export const valueDescriptor = generic({
   nil: v => descriptor(NIL_PREFIX, v.actionable),
   bool: v => descriptor(v.value ? TRUE_PREFIX : FALSE_PREFIX, v.actionable),
@@ -630,13 +627,13 @@ export const valueDescriptor = generic({
   set: v => descriptor(SET_PREFIX, v.actionable),
 })
 
-// accessor functions for tag & actionable bits
+// accessor functions for the descriptor byte
 /** @type {(tag: number, actionable: boolean) => number} */
-const descriptor = (tag, actionable) => (actionable ? tag | ACTIONABLE : tag)
+export const descriptor = (tag, actionable) => (tag << 1) | (actionable ? 1 : 0)
 /** @param {number} b */
-const tagOf = b => b & TAG_MASK
+export const tagOf = b => b >> 1
 /** @param {number} b */
-const actionableOf = b => (b & ACTIONABLE) !== 0
+export const actionableOf = b => (b & 1) !== 0
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: true })

@@ -150,16 +150,16 @@ describe('StreamDecoder.push', () => {
     expect(() => streamDecoder().push(Uint8Array.of(0x00))).toThrow(
       /bad descriptor/
     )
-    expect(() => streamDecoder().push(Uint8Array.of(0x0d))).toThrow(
+    expect(() => streamDecoder().push(Uint8Array.of(0x1a))).toThrow(
       /bad descriptor/
     )
   })
 
   it('surfaces a malformed value (caught by core decode) on the slice', () => {
-    // Non-minimal integer 0x04 0x02 0x00 0x01 is a complete, well-framed value
+    // Non-minimal integer 0x08 0x02 0x00 0x01 is a complete, well-framed value
     // that core decode() rejects as non-canonical.
     expect(() =>
-      streamDecoder().push(Uint8Array.of(0x04, 0x02, 0x00, 0x01))
+      streamDecoder().push(Uint8Array.of(0x08, 0x02, 0x00, 0x01))
     ).toThrow(/non-minimal integer/)
   })
 })

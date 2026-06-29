@@ -186,8 +186,7 @@ interpreted, and it's contents are not semantically interesting on
 their own, but exist for an evaluator to use.
 
 An actionable value is never equal to it's non-actionable counterpart
-as it has a different =actionable= bit in it's descriptor, and therefore it's
-canonical encoding is different.
+as it has a different =actionable= bit in it's descriptor byte.
 
 A consequence of this is that any actionable value, may be convered to
 it's non-actionable counterpart by just flipping that single bit.
@@ -255,10 +254,10 @@ A good implemention of this specification must implement:
 
 All encoded values begin with a 8 bit descriptor.
 
-| actionable flag (1 bit) | type tag (7 bit) | N-bit payload |
+| type tag (7 bits) | actionable flag (1 bit) | N-bit payload |
 
-The first bit is used to denote a value as actionable, and the last 7
-bits are reserved for the type tag.
+The first 7 bits are reserved for the type tag, and the final bit is 
+used to denote the value as actionable.
 
 We really only need 5 bits for this, as we only have 12 different
 values. But it's fine for now.
