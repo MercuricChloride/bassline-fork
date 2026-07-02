@@ -136,10 +136,6 @@ The regex for this is =/^(0|-?[1-9][0-9]*)$/=
 Their canonical form is a string of numeric ascii characters no leading zeros.
 There is exactly one spelling of every integer anywhere in the system.
 
-
-
-
-
 ** Text
 
 Well formed UTF-8 encoded text without any normalization.
@@ -367,7 +363,7 @@ After skipping whitespace, the first character selects the token:
   scalar but the closing quote and =\=; the escapes are =\" \\ \n \t \r=
   in a string and =\' \\ \n \t \r= in a symbol.
 
-- A digit, or a =+= / =-= immediately followed by a digit, begins a
+- A digit, or a =-= immediately followed by a digit, begins a
   number.
 
 - Anything else begins a bare symbol: a maximal run of non-delimiter
@@ -406,13 +402,10 @@ tokens.
   Bytes    := "#[" HexByte* "]"
   String   := '"' (char | escape)* '"'
   Symbol   := bare | "'" (char | escape)* "'"
-  Number   := sign? digit+          ; Integer
-  sign     := "+" | "-"
+  Number   := "-"? digit+          ; Integer
 #+END_example
 
 ** Outside the grammar
-
-*** Literal
 
 *** Reserved spelling for nil
 
@@ -421,8 +414,9 @@ symbol. To use nil as a symbol, it must be quoted: ='nil'=.
 
 *** Number form
 
-A token is a number only when it opens with a digit, or a sign on a
-digit; so =-= and =->= are symbols while =-5= is a number. A number
+A token is a number only when it opens with a digit, or a =-= on a
+digit; so =-= and =->= are symbols while =-5= is a number. There is no
+=+= sign for numbers meaning that =+5= is an ordinary symbol. A number
 must be followed by a delimiter, whitespace, or end of input: a number
 against a symbol character (=1-2=, =42px=, or =1.=) is a syntax error,
 not two tokens. There are no decimal literals: =1.5= is a syntax
