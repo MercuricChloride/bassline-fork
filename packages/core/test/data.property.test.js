@@ -1,20 +1,20 @@
 import { fc, test } from '@fast-check/vitest'
 import { describe, it, expect } from 'vitest'
-import { fresh, eq, encode, decode, ceKey } from '../src/data.js'
-
-const {
+import {
+  eq,
+  encode,
+  decode,
+  withMark,
   symbol,
-  float,
   int,
   nil,
-  bool,
   string,
   bytes,
   list,
   set,
   dict,
   record,
-} = fresh
+} from '../src/data.js'
 
 const hex = u8 =>
   [...u8]
@@ -22,22 +22,22 @@ const hex = u8 =>
     .join('')
     .toUpperCase()
 
+const ceHex = v => hex(encode(v))
+
 const { value } = fc.letrec(tie => ({
   value: fc.oneof(
     { maxDepth: 3 },
     fc.constant(nil()),
-    fc.boolean().map(bool),
     fc.bigInt().map(int),
-    fc.double().map(float),
     fc.string({ unit: 'grapheme' }).map(string),
     fc.string({ unit: 'grapheme' }).map(symbol),
     fc.uint8Array().map(bytes),
-    tie('value').map(v => v.copy(true)),
+    tie('value').map(v => withMark(v, true)),
     fc.array(tie('value'), { maxLength: 4 }).map(list),
-    fc.uniqueArray(tie('value'), { selector: ceKey, maxLength: 4 }).map(set),
+    fc.uniqueArray(tie('value'), { selector: ceHex, maxLength: 4 }).map(set),
     fc
       .uniqueArray(fc.tuple(tie('value'), tie('value')), {
-        selector: e => ceKey(e[0]),
+        selector: e => ceHex(e[0]),
         maxLength: 4,
       })
       .map(dict),
@@ -60,7 +60,9 @@ describe('round-trip', () => {
 })
 
 describe('high-byte ordering', () => {
-  // decode validates strictly-ascending CE order, so a wrong sort would throw.
+  // decode validates strictly-ascending CE order, so a wrong sort would
+  // throw. Bytestrings holding A0 also prove a payload byte never reads as
+  // END.
   test.prop([fc.uniqueArray(fc.uint8Array(), { selector: hex, maxLength: 8 })])(
     'byte-string sets re-decode',
     arrs => {
@@ -80,18 +82,21 @@ describe('high-byte ordering', () => {
   })
 })
 
-describe('NaN payload normalization', () => {
-  test.prop([fc.boolean(), fc.bigInt({ min: 0n, max: (1n << 52n) - 1n })])(
-    'any NaN payload encodes canonically',
-    (sign, mantissa) => {
-      const bits =
-        (sign ? 0x8000000000000000n : 0n) |
-        0x7ff0000000000000n |
-        (mantissa | 1n)
-      const dv = new DataView(new ArrayBuffer(8))
-      dv.setBigUint64(0, bits)
-      const v = float(dv.getFloat64(0))
-      expect(hex(encode(v))).toBe('0A7FF8000000000000')
+describe('length tiers', () => {
+  // 0..600 crosses both boundaries: 6/7 (inline to two-byte) and 254/255
+  // (two-byte to four-byte).
+  test.prop([fc.integer({ min: 0, max: 600 })])(
+    'every payload length round-trips',
+    n => {
+      const v = string('x'.repeat(n))
+      expect(eq(decode(encode(v)), v)).toBe(true)
+    }
+  )
+
+  test.prop([fc.bigInt({ min: -(10n ** 30n), max: 10n ** 30n })])(
+    'integers of any digit count round-trip',
+    n => {
+      const v = int(n)
       expect(eq(decode(encode(v)), v)).toBe(true)
     }
   )
@@ -114,16 +119,17 @@ describe('mutation resistance', () => {
   )
 })
 
-// Independent corpus: (value, expected CE hex) computed by hand from the doc's
-// encoding rules — ground truth separate from the implementation.
+// Independent corpus: (value, expected CE hex) computed by hand from the
+// doc's encoding rules — ground truth separate from the implementation.
 describe('independent CE corpus', () => {
   const corpus = [
-    ['256', int(256n), '08020100'],
-    ['-256', int(-256n), '0802FF00'],
+    ['256', int(256n), '23323536'],
+    ['-256', int(-256n), '242D323536'],
+    ['seven-digit int', int(1234567n), '270731323334353637'],
     [
       'high-byte set sorts 80 < A0',
-      set([bytes(Uint8Array.of(0x80)), bytes(Uint8Array.of(0xa0))]),
-      '18061001801001A0',
+      set([bytes(Uint8Array.of(0xa0)), bytes(Uint8Array.of(0x80))]),
+      '90518051A0A0',
     ],
     [
       'high-byte dict keys sort 00 < 80',
@@ -131,14 +137,12 @@ describe('independent CE corpus', () => {
         [bytes(Uint8Array.of(0x80)), nil()],
         [bytes(Uint8Array.of(0x00)), nil()],
       ]),
-      '14081001000210018002',
+      '80510010518010A0',
     ],
-    ['unicode é', string('é'), '0C02C3A9'],
-    ['emoji', string('\u{1F600}'), '0C04F09F9880'],
-    ['actionable nested', list([int(1n)]).copy(true), '1303080101'],
-    ['empty record', record([symbol('foo')]), '16050E03666F6F'],
-    ['NaN', float(NaN), '0A7FF8000000000000'],
-    ['-0.0', float(-0), '0A8000000000000000'],
+    ['unicode é', string('é'), '32C3A9'],
+    ['emoji', string('\u{1F600}'), '34F09F9880'],
+    ['actionable nested', withMark(list([int(1n)]), true), '682131A0'],
+    ['record, head only', record([symbol('foo')]), '7043666F6FA0'],
   ]
 
   it.each(corpus)('encodes %s and round-trips', (_name, v, want) => {

@@ -2,11 +2,20 @@
 // Reader for the Bassline Textual Syntax
 
 /** @import {Value} from "../data.js" */
-import { fresh } from '../data.js'
+import {
+  bytes,
+  dict,
+  int,
+  list,
+  nil,
+  record,
+  set,
+  string,
+  symbol,
+} from '../data.js'
 
 const WS = ' \t\n\r,'
-const DELIM = '[]{}():#\'"`'
-const SIGNS = '+-'
+const DELIM = '[]{}():#\'"`;'
 
 /** @type {(c: string) => boolean} */
 const isWs = c => WS.includes(c)
@@ -16,8 +25,6 @@ const isDigit = c => /[0-9]/.test(c)
 const isDelim = c => DELIM.includes(c)
 /** @type {(c: string) => boolean} */
 const isHex = c => /[0-9a-fA-F]/.test(c)
-/** @type {(c: string) => boolean} */
-const isSign = c => SIGNS.includes(c)
 /** @type {(c: unknown) => c is undefined} */
 const isEOF = c => c === undefined
 
@@ -101,6 +108,20 @@ export function readSpans(source) {
     values.push(span)
   }
 
+  // Skip whitespace and comments. A `;` begins a comment that runs to the
+  // end of the line; comments are trivia and never reach the value space.
+  function skipTrivia() {
+    while (pos < n) {
+      if (isWs(source[pos])) {
+        pos++
+      } else if (source[pos] === ';') {
+        while (pos < n && source[pos] !== '\n') pos++
+      } else {
+        break
+      }
+    }
+  }
+
   function readEscape() {
     const e = source[pos]
     pos++
@@ -177,7 +198,7 @@ export function readSpans(source) {
       const b = nibbles[offset + 1]
       out[i] = a * 16 + b
     }
-    return fresh.bytes(out, actionable)
+    return bytes(out, actionable)
   }
 
   // pos sits at the first character (a digit, or a sign on a digit).
@@ -186,33 +207,17 @@ export function readSpans(source) {
    * @param {boolean} actionable
    */
   function readNumber(start, actionable) {
-    let isDouble = false
-    if (isSign(source[pos])) pos++
+    if (source[pos] === '-') pos++
     while (isDigit(source[pos])) pos++
-    if (source[pos] === '.' && isDigit(source[pos + 1])) {
-      isDouble = true
-      pos++
-      while (isDigit(source[pos])) pos++
-    }
-    if (source[pos] === 'e' || source[pos] === 'E') {
-      let k = pos + 1
-      if (isSign(source[k])) k++
-      if (isDigit(source[k])) {
-        isDouble = true
-        pos = k + 1
-        while (isDigit(source[pos])) pos++
-      }
-    }
+    if (source[pos] === '.' && isDigit(source[pos + 1]))
+      fail(
+        pos,
+        'no decimal number literals: non-integer numbers are vocabulary'
+      )
     if (!isBoundary(source[pos]))
       fail(pos, 'number adjacent to a symbol character')
     const text = source.slice(start, pos)
-    if (isDouble) {
-      const val = parseFloat(text)
-      return fresh.float(val, actionable)
-    } else {
-      const val = BigInt(text)
-      return fresh.int(val, actionable)
-    }
+    return int(BigInt(text), actionable)
   }
 
   // pos sits at the first character; read a maximal bare run, then reclassify.
@@ -224,22 +229,8 @@ export function readSpans(source) {
   function readSymbol(start, actionable) {
     while (!isBoundary(source[pos])) pos++
     const text = source.slice(start, pos)
-    switch (text) {
-      case 'nil':
-        return fresh.nil(actionable)
-      case 'true':
-        return fresh.bool(true, actionable)
-      case 'false':
-        return fresh.bool(false, actionable)
-      case 'NaN':
-        return fresh.float(NaN, actionable)
-      case 'Infinity':
-        return fresh.float(Infinity, actionable)
-      case '-Infinity':
-        return fresh.float(-Infinity, actionable)
-      default:
-        return fresh.symbol(text, actionable)
-    }
+    if (text === 'nil') return nil(actionable)
+    return symbol(text, actionable)
   }
 
   /**
@@ -251,7 +242,7 @@ export function readSpans(source) {
     /** @type {Spanned[]} */
     const items = []
     while (true) {
-      while (isWs(source[pos])) pos++
+      skipTrivia()
       if (pos >= n) fail(pos, `unterminated, expected '${closer}'`)
       if (source[pos] === closer) {
         pos++
@@ -268,7 +259,7 @@ export function readSpans(source) {
   function readList(actionable) {
     const items = readUntil(']')
     return {
-      value: fresh.list(
+      value: list(
         items.map(s => s.value),
         actionable
       ),
@@ -283,7 +274,7 @@ export function readSpans(source) {
   function readSet(actionable) {
     const items = readUntil('}')
     return {
-      value: fresh.set(
+      value: set(
         items.map(s => s.value),
         actionable
       ),
@@ -299,7 +290,7 @@ export function readSpans(source) {
     const items = readUntil(')')
     if (items.length === 0) fail(pos, `Record cannot be empty!`)
     return {
-      value: fresh.record(
+      value: record(
         items.map(s => s.value),
         actionable
       ),
@@ -317,28 +308,28 @@ export function readSpans(source) {
     /** @type {Spanned[]} */
     const children = []
     while (true) {
-      while (isWs(source[pos])) pos++
+      skipTrivia()
       if (pos >= n) fail(pos, "unterminated, expected '}'")
       if (source[pos] === '}') {
         pos++
         break
       }
       const key = readValue()
-      while (isWs(source[pos])) pos++
+      skipTrivia()
       if (source[pos] === ':') pos++
       else fail(pos, "dictionary expected a separator ':'")
       const val = readValue()
       entries.push([key.value, val.value])
       children.push(key, val)
     }
-    return { value: fresh.dict(entries, actionable), children }
+    return { value: dict(entries, actionable), children }
   }
 
   /** @returns {Spanned} */
   function readValue() {
     const INVALID_CHARS = ':)]}'
     let actionable = false
-    while (isWs(source[pos])) pos++
+    skipTrivia()
     const start = pos
     while (source[pos] === '`') {
       pos++
@@ -369,10 +360,10 @@ export function readSpans(source) {
       ;({ value, children } = readRecord(actionable))
     } else if (c === '"') {
       pos++
-      value = fresh.string(readQuoted('"'), actionable)
+      value = string(readQuoted('"'), actionable)
     } else if (c === "'") {
       pos++
-      value = fresh.symbol(readQuoted("'"), actionable)
+      value = symbol(readQuoted("'"), actionable)
     } else if (c === '#') {
       if (k === '{') {
         pos += 2
@@ -385,7 +376,7 @@ export function readSpans(source) {
         fail(pos, "'#' must begin '#[' or '#{'")
       }
     } else {
-      const numberLike = isDigit(c) || (isSign(c) && isDigit(k))
+      const numberLike = isDigit(c) || (c === '-' && isDigit(k))
       value = numberLike
         ? readNumber(pos, actionable)
         : readSymbol(pos, actionable)
@@ -395,7 +386,7 @@ export function readSpans(source) {
   }
 
   while (true) {
-    while (isWs(source[pos])) pos++
+    skipTrivia()
     if (pos >= n) break
     push(readValue())
   }

@@ -1,5 +1,4 @@
 /** @import {Value} from "../data.js" */
-import { generic } from '../data.js'
 
 const DELIM = new Set([
   ' ',
@@ -17,15 +16,7 @@ const DELIM = new Set([
   "'",
   '"',
   '`',
-])
-
-const RESERVED = new Set([
-  'nil',
-  'true',
-  'false',
-  'NaN',
-  'Infinity',
-  '-Infinity',
+  ';',
 ])
 
 const isDigit = c => /[0-9]/.test(c)
@@ -34,7 +25,8 @@ const isDigit = c => /[0-9]/.test(c)
  * @param {string} s
  */
 function bareSafe(s) {
-  if (s.length === 0 || RESERVED.has(s)) return false
+  // nil is a reserved spelling
+  if (s.length === 0 || s === 'nil') return false
   if (isDigit(s[0]) || ((s[0] === '+' || s[0] === '-') && isDigit(s[1])))
     return false
   for (const ch of s) if (DELIM.has(ch)) return false
@@ -57,19 +49,6 @@ function escapeBody(s, quote) {
   return out
 }
 
-/**
- * A double formatted so it re-parses as the same double (never an integer).
- * @param {number} x
- */
-function formatFloat(x) {
-  if (Number.isNaN(x)) return 'NaN'
-  if (x === Infinity) return 'Infinity'
-  if (x === -Infinity) return '-Infinity'
-  if (Object.is(x, -0)) return '-0.0'
-  const s = String(x) // shortest round-tripping decimal
-  return /[.e]/i.test(s) ? s : s + '.0' // force a fractional part so it isn't an int
-}
-
 /** @param {Uint8Array} u8 */
 function hex(u8) {
   let s = ''
@@ -80,32 +59,35 @@ function hex(u8) {
 /**
  * The bare one-line rendering of each value kind. Frames recurse through `flat`
  * (not `flatten`) so nested actionable values keep their backtick prefix.
- * @type {(v: Value) => string}
+ * @param {Value} v
+ * @returns {string}
  */
-const flatten = generic({
-  nil: () => 'nil',
-  bool: v => (v.value ? 'true' : 'false'),
-  int: v => v.value.toString(),
-  float: v => formatFloat(v.value),
-  string: v => '"' + escapeBody(v.value, '"') + '"',
-  symbol: v =>
-    bareSafe(v.value) ? v.value : "'" + escapeBody(v.value, "'") + "'",
-  bytes: v => '#[' + hex(v.value) + ']',
-  list: v => '[' + v.value.map(x => flat(x)).join(' ') + ']',
-  set: v =>
-    '#{' +
-    Array.from(v.value.values())
-      .map(x => flat(x))
-      .join(' ') +
-    '}',
-  record: v => '(' + v.value.map(x => flat(x)).join(' ') + ')',
-  dict: v =>
-    '{' +
-    Array.from(v.value.values())
-      .map(([k, val]) => flat(k) + ': ' + flat(val))
-      .join(' ') +
-    '}',
-})
+function flatten(v) {
+  switch (v.kind) {
+    case 'nil':
+      return 'nil'
+    case 'int':
+      return v.value.toString()
+    case 'string':
+      return '"' + escapeBody(v.value, '"') + '"'
+    case 'symbol':
+      return bareSafe(v.value) ? v.value : "'" + escapeBody(v.value, "'") + "'"
+    case 'bytes':
+      return '#[' + hex(v.value) + ']'
+    case 'list':
+      return '[' + v.value.map(flat).join(' ') + ']'
+    case 'set':
+      return '#{' + v.value.map(flat).join(' ') + '}'
+    case 'record':
+      return '(' + v.value.map(flat).join(' ') + ')'
+    case 'dict':
+      return (
+        '{' +
+        v.value.map(([k, val]) => flat(k) + ': ' + flat(val)).join(' ') +
+        '}'
+      )
+  }
+}
 
 /**
  * One-line rendering of a value, prefixed with the actionable backtick.
@@ -129,20 +111,23 @@ export function print(value, width = 72, padding = 2) {
   const write = s => (str += s)
   const br = () => write('\n' + ' '.repeat(depth * padding))
 
-  const visit = generic(
-    {
-      list: v => compound(v, () => block('[', ']', v.value)),
-      set: v => compound(v, () => block('#{', '}', [...v.value.values()])),
-      dict: v =>
-        compound(v, () =>
-          block('{', '}', [...v.value.values()], ([k, val]) => {
+  /** @param {Value} v */
+  function visit(v) {
+    switch (v.kind) {
+      case 'list':
+        return compound(v, () => block('[', ']', v.value))
+      case 'set':
+        return compound(v, () => block('#{', '}', v.value))
+      case 'dict':
+        return compound(v, () =>
+          block('{', '}', v.value, ([k, val]) => {
             visit(k)
             write(': ')
             visit(val)
           })
-        ),
-      record: v =>
-        compound(v, () => {
+        )
+      case 'record':
+        return compound(v, () => {
           const [head, ...fields] = v.value
           write('(' + flat(head))
           depth++
@@ -153,10 +138,11 @@ export function print(value, width = 72, padding = 2) {
           depth--
           br()
           write(')')
-        }),
-    },
-    v => write(flat(v))
-  )
+        })
+      default:
+        return write(flat(v))
+    }
+  }
 
   visit(value)
   return str
@@ -175,17 +161,19 @@ export function print(value, width = 72, padding = 2) {
 
   /**
    * Renders a block of values with the given opening and closing delimiters.
+   * @template T
    * @param {string} open
    * @param {string} close
-   * @param {Iterable<Value>} items
-   * @param {(item: Value) => void} renderItem
+   * @param {Iterable<T>} items
+   * @param {(item: T) => void} [renderItem]
    */
-  function block(open, close, items, renderItem = visit) {
+  function block(open, close, items, renderItem) {
+    const render = renderItem ?? /** @type {(item: T) => void} */ (visit)
     write(open)
     depth++
     for (const item of items) {
       br()
-      renderItem(item)
+      render(item)
     }
     depth--
     br()

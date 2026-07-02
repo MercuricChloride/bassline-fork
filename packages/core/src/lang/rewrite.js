@@ -1,5 +1,5 @@
 /** @import { Value } from '../data.js' */
-import { assertValue } from '../data.js'
+import { assertValue, eq, map } from '../data.js'
 
 /**
  * Rewrite a value tree with a rule, bottom-up. Children are rewritten first,
@@ -14,16 +14,9 @@ export function rewrite(v, rule, opts = {}) {
   let steps = 0
   /** @param {Value} aNode */
   function rebuild(aNode) {
-    switch (aNode.kind) {
-      case 'dict':
-        return aNode.map(([k, v]) => [go(k), go(v)])
-      case 'record':
-      case 'list':
-      case 'set':
-        return aNode.map(go)
-      default:
-        return aNode
-    }
+    return aNode.kind === 'dict'
+      ? map(aNode, ([k, v]) => [go(k), go(v)])
+      : map(aNode, go)
   }
   /** @param {Value} node */
   function go(node) {
@@ -31,7 +24,7 @@ export function rewrite(v, rule, opts = {}) {
     const out = rule(rebuilt)
     assertValue(out, 'a rewrite rule must return a Bassline value')
 
-    if (fixpoint && !out.eq(rebuilt)) {
+    if (fixpoint && !eq(out, rebuilt)) {
       if (++steps > maxSteps)
         throw new Error('rewrite did not reach a fixpoint within maxSteps')
       return go(out)
@@ -40,8 +33,6 @@ export function rewrite(v, rule, opts = {}) {
   }
   return go(v)
 }
-
-// ================ rule combinators ================
 
 /**
  * Try each rule in order; the first that changes the node is returned, or the original node if none do.
@@ -52,7 +43,7 @@ export function rules(...rs) {
   return node => {
     for (const r of rs) {
       const out = r(node)
-      if (!out.eq(node)) return out
+      if (!eq(out, node)) return out
     }
     return node
   }

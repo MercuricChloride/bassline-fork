@@ -3,8 +3,16 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as F from '../src/files.js'
-import { fresh, eq } from '../src/data.js'
-const { bytes, int, float, string, symbol, record, set } = fresh
+import {
+  eq,
+  withMark,
+  bytes,
+  int,
+  string,
+  symbol,
+  record,
+  set,
+} from '../src/data.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'bassline-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -15,7 +23,7 @@ const eqAll = (xs, ys) =>
 const sampleDoc = [
   int(1n),
   string('two'),
-  record([symbol('point'), float(3.5), int(4n).copy(true)]),
+  record([symbol('point'), int(3n), withMark(int(4n), true)]),
   set([bytes(Uint8Array.of(0xa0)), bytes(Uint8Array.of(0x80))]),
 ]
 

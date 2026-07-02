@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest'
-import { fresh, eq, isData, encode, decode } from '../src/data.js'
+import {
+  eq,
+  isData,
+  encode,
+  decode,
+  withMark,
+  dictGet,
+  setHas,
+  nil,
+  int,
+  string,
+  symbol,
+  bytes,
+  list,
+  record,
+  dict,
+  set,
+} from '../src/data.js'
 
 const hex = u8 =>
   [...u8]
@@ -14,102 +31,89 @@ const bytesOf = s =>
       .split(/\s+/)
       .map(h => parseInt(h, 16))
   )
-const act = v => v.copy(true)
+const act = v => withMark(v, true)
 
-// (label, value, canonical-encoding hex) — hand-computed from the doc's encoding
-// rules: an 8-bit descriptor (7-bit tag in the high bits | actionable flag in the
-// low bit, i.e. byte = (tag << 1) | actionable), then the payload; frames carry a
-// byte-length varint and a sorted body.
+// (label, value, canonical-encoding hex) — hand-computed from the doc's rules:
+// one header byte [tag:4 | mark:1 | len:3]; scalar payloads follow (integers
+// as decimal digits); frames hold their encoded children and close with END
+// (A0).
 const VECTORS = [
-  ['nil', fresh.nil(), '02'],
-  ['false', fresh.bool(false), '04'],
-  ['true', fresh.bool(true), '06'],
-  ['0', fresh.int(0n), '08 01 00'],
-  ['1', fresh.int(1n), '08 01 01'],
-  ['-1', fresh.int(-1n), '08 01 FF'],
-  ['128', fresh.int(128n), '08 02 00 80'],
-  ['255', fresh.int(255n), '08 02 00 FF'],
-  ['256', fresh.int(256n), '08 02 01 00'],
-  ['1.0', fresh.float(1.0), '0A 3F F0 00 00 00 00 00 00'],
-  ['"hi" string', fresh.string('hi'), '0C 02 68 69'],
-  ['foo symbol', fresh.symbol('foo'), '0E 03 66 6F 6F'],
-  ['#[FF]', fresh.bytes(Uint8Array.of(0xff)), '10 01 FF'],
-  ['[1]', fresh.list([fresh.int(1n)]), '12 03 08 01 01'],
+  ['nil', nil(), '10'],
+  ['`nil', act(nil()), '18'],
+  ['0', int(0n), '21 30'],
+  ['1', int(1n), '21 31'],
+  ['-1', int(-1n), '22 2D 31'],
+  ['255', int(255n), '23 32 35 35'],
+  ['1234567 (two-byte length)', int(1234567n), '27 07 31 32 33 34 35 36 37'],
+  ['"hi" string', string('hi'), '32 68 69'],
+  ['foo symbol', symbol('foo'), '43 66 6F 6F'],
+  ['`x (actionable symbol)', act(symbol('x')), '49 78'],
+  ['#[FF]', bytes(Uint8Array.of(0xff)), '51 FF'],
+  ['[] (empty list)', list([]), '60 A0'],
+  ['[1]', list([int(1n)]), '60 21 31 A0'],
+  ['[1 2]', list([int(1n), int(2n)]), '60 21 31 21 32 A0'],
+  ['`[1] (actionable list)', act(list([int(1n)])), '68 21 31 A0'],
   [
-    '[1 2]',
-    fresh.list([fresh.int(1n), fresh.int(2n)]),
-    '12 06 08 01 01 08 01 02',
+    '[`1 2] (actionable element)',
+    list([act(int(1n)), int(2n)]),
+    '60 29 31 21 32 A0',
   ],
+  ['(foo 1)', record([symbol('foo'), int(1n)]), '70 43 66 6F 6F 21 31 A0'],
+  ['(foo) (head only)', record([symbol('foo')]), '70 43 66 6F 6F A0'],
+  ['{a: 1}', dict([[symbol('a'), int(1n)]]), '80 41 61 21 31 A0'],
   [
-    '{a: 1}',
-    fresh.dict([[fresh.symbol('a'), fresh.int(1n)]]),
-    '14 06 0E 01 61 08 01 01',
+    '{`a: 1} (actionable key)',
+    dict([[act(symbol('a')), int(1n)]]),
+    '80 49 61 21 31 A0',
   ],
   // built with keys out of order to exercise canonical sorting
   [
     '{b: 2, a: 1}',
-    fresh.dict([
-      [fresh.symbol('b'), fresh.int(2n)],
-      [fresh.symbol('a'), fresh.int(1n)],
+    dict([
+      [symbol('b'), int(2n)],
+      [symbol('a'), int(1n)],
     ]),
-    '14 0C 0E 01 61 08 01 01 0E 01 62 08 01 02',
+    '80 41 61 21 31 41 62 21 32 A0',
   ],
+  ['#{2 1}', set([int(2n), int(1n)]), '90 21 31 21 32 A0'],
+  // a marked and an unmarked member of different types: `nil's header byte
+  // (18) sorts before the int's (21) — the mark rides inside the type byte.
+  ['#{1 `nil} (mixed mark/type)', set([int(1n), act(nil())]), '90 18 21 31 A0'],
+  // an A0 payload byte must not read as END
   [
-    '#{2 1}',
-    fresh.set([fresh.int(2n), fresh.int(1n)]),
-    '18 06 08 01 01 08 01 02',
-  ],
-  // a marked and an unmarked member of different types: the actionable nil sorts
-  // by its type tag (lowest), not pushed to the end by its mark — type-major order.
-  [
-    '#{1 `nil} (mixed mark/type)',
-    fresh.set([fresh.int(1n), act(fresh.nil())]),
-    '18 04 03 08 01 01',
-  ],
-  [
-    '(foo 1)',
-    fresh.record([fresh.symbol('foo'), fresh.int(1n)]),
-    '16 08 0E 03 66 6F 6F 08 01 01',
-  ],
-  [
-    '(foo) (empty)',
-    fresh.record([fresh.symbol('foo')]),
-    '16 05 0E 03 66 6F 6F',
-  ],
-  ['`x (actionable symbol)', act(fresh.symbol('x')), '0F 01 78'],
-  [
-    '`[1] (actionable list)',
-    act(fresh.list([fresh.int(1n)])),
-    '13 03 08 01 01',
-  ],
-  [
-    '[`1 2] (actionable element)',
-    fresh.list([act(fresh.int(1n)), fresh.int(2n)]),
-    '12 06 09 01 01 08 01 02',
-  ],
-  [
-    '{`a: 1} (actionable key)',
-    fresh.dict([[act(fresh.symbol('a')), fresh.int(1n)]]),
-    '14 06 0F 01 61 08 01 01',
+    '#{#[A0]} (END byte as payload)',
+    set([bytes(Uint8Array.of(0xa0))]),
+    '90 51 A0 A0',
   ],
 ]
 
 // Each MUST be rejected by decode (the trust boundary for incoming bytes).
 const REJECTS = [
-  ['error/bad prefix 0x0', '00'],
-  ['zero-length integer', '08 00'],
-  ['non-minimal integer', '08 02 00 01'],
-  ['non-minimal varint', '0C 80 00'],
-  ['overlong UTF-8', '0C 02 C0 80'],
-  ['surrogate code point', '0C 03 ED A0 80'],
-  ['non-canonical NaN', '0A 7F F0 00 00 00 00 00 01'],
-  ['dict keys out of order', '14 0C 0E 01 62 08 01 02 0E 01 61 08 01 01'],
-  ['duplicate dict key', '14 0C 0E 01 61 08 01 01 0E 01 61 08 01 02'],
-  ['set members out of order', '18 06 08 01 02 08 01 01'],
-  ['duplicate set member', '18 06 08 01 01 08 01 01'],
-  ['frame length exceeds input', '12 09 08 01 01'],
-  ['frame length mismatch', '12 02 08 01 01'],
-  ['trailing garbage', '02 02'],
+  ['invalid tag 0x0', '00'],
+  ['invalid tag 0xb', 'B0'],
+  ['invalid tag 0xf', 'F0'],
+  ['END at the top level', 'A0'],
+  ['END with mark/length bits', 'A8'],
+  ['nil with a length', '11'],
+  ['frame header with length bits', '61 21 31 A0'],
+  ['unterminated frame', '60 21 31'],
+  ['record with no head', '70 A0'],
+  ['empty integer payload', '20'],
+  ['leading-zero integer', '22 30 31'],
+  ['negative-zero integer', '22 2D 30'],
+  ['plus-signed integer', '22 2B 35'],
+  ['non-digit integer', '21 41'],
+  ['non-minimal two-byte length', '27 05 31 32 33 34 35'],
+  ['non-minimal four-byte length', '37 FF 00 00 00 08'],
+  ['overlong UTF-8', '32 C0 80'],
+  ['surrogate code point', '33 ED A0 80'],
+  ['dict keys out of order', '80 41 62 21 32 41 61 21 31 A0'],
+  ['duplicate dict key', '80 41 61 21 31 41 61 21 32 A0'],
+  ['dict key missing value', '80 41 61 A0'],
+  ['set members out of order', '90 21 32 21 31 A0'],
+  ['duplicate set member', '90 21 31 21 31 A0'],
+  ['payload past end of input', '23 31 32'],
+  ['trailing garbage', '10 10'],
 ]
 
 describe('canonical encoding', () => {
@@ -124,137 +128,152 @@ describe('canonical encoding', () => {
   it.each(REJECTS)('rejects %s', (_label, byteStr) => {
     expect(() => decode(bytesOf(byteStr))).toThrow()
   })
+
+  it('uses the four-byte length form past 254', () => {
+    const v = string('a'.repeat(300))
+    const ce = encode(v)
+    expect(hex(ce.subarray(0, 6))).toBe('37 FF 00 00 01 2C')
+    expect(ce.length).toBe(306)
+    expect(eq(decode(ce), v)).toBe(true)
+  })
+
+  it('honors a local length limit', () => {
+    const ce = encode(string('a'.repeat(300)))
+    expect(() => decode(ce, { maxLength: 100 })).toThrow('length limit')
+    expect(() => decode(ce, { maxLength: 300 })).not.toThrow()
+  })
+
+  it('rejects nesting past the depth limit', () => {
+    const deep = bytesOf('60 '.repeat(5) + '10 ' + 'A0 '.repeat(5))
+    expect(() => decode(deep, { maxDepth: 3 })).toThrow('depth')
+    expect(() => decode(deep, { maxDepth: 10 })).not.toThrow()
+  })
 })
 
 describe('actionable', () => {
-  it('toActionable is idempotent', () => {
-    expect(eq(act(act(fresh.int(1n))), act(fresh.int(1n)))).toBe(true)
+  it('withMark is idempotent', () => {
+    expect(eq(act(act(int(1n))), act(int(1n)))).toBe(true)
   })
 
-  it('toStatic inverts toActionable (and is a no-op on a static value)', () => {
-    expect(eq(act(fresh.int(1n)).copy(false), fresh.int(1n))).toBe(true)
-    expect(eq(fresh.int(1n).copy(false), fresh.int(1n))).toBe(true)
+  it('withMark(v, false) inverts the mark (and is a no-op on a static value)', () => {
+    expect(eq(withMark(act(int(1n)), false), int(1n))).toBe(true)
+    expect(eq(withMark(int(1n), false), int(1n))).toBe(true)
   })
 
   it('changes the canonical encoding', () => {
-    expect(eq(act(fresh.int(1n)), fresh.int(1n))).toBe(false)
+    expect(eq(act(int(1n)), int(1n))).toBe(false)
   })
 
   it('makes data? false transitively', () => {
-    expect(isData(fresh.list([act(fresh.int(1n))]))).toBe(false)
-    expect(isData(fresh.list([fresh.int(1n)]))).toBe(true)
+    expect(isData(list([act(int(1n))]))).toBe(false)
+    expect(isData(list([int(1n)]))).toBe(true)
   })
 })
 
 describe('equality', () => {
   it('eq is total and works on actionable values', () => {
-    expect(eq(act(fresh.int(1n)), act(fresh.int(1n)))).toBe(true)
-    expect(eq(act(fresh.int(1n)), fresh.int(1n))).toBe(false)
+    expect(eq(act(int(1n)), act(int(1n)))).toBe(true)
+    expect(eq(act(int(1n)), int(1n))).toBe(false)
   })
 
-  it('distinguishes int from double', () => {
-    expect(eq(fresh.int(1n), fresh.float(1.0))).toBe(false)
+  it('distinguishes the int 1 from the string "1" (same payload bytes)', () => {
+    expect(eq(int(1n), string('1'))).toBe(false)
   })
 
   it('distinguishes a symbol from a same-spelled string', () => {
-    expect(eq(fresh.symbol('x'), fresh.string('x'))).toBe(false)
+    expect(eq(symbol('x'), string('x'))).toBe(false)
   })
 
   it('distinguishes {k: nil} from {}', () => {
-    expect(
-      eq(fresh.dict([[fresh.symbol('k'), fresh.nil()]]), fresh.dict([]))
-    ).toBe(false)
-  })
-})
-
-describe('doubles', () => {
-  it('treats -0.0 and +0.0 as distinct', () => {
-    expect(eq(fresh.float(-0), fresh.float(0))).toBe(false)
-    expect(hex(encode(fresh.float(-0)))).toBe('0A 80 00 00 00 00 00 00 00')
-  })
-
-  it('canonicalizes NaN', () => {
-    expect(hex(encode(fresh.float(NaN)))).toBe('0A 7F F8 00 00 00 00 00 00')
-    expect(eq(fresh.float(NaN), fresh.float(NaN))).toBe(true)
+    expect(eq(dict([[symbol('k'), nil()]]), dict([]))).toBe(false)
   })
 })
 
 describe('strings', () => {
   it('rejects lone surrogates at construction', () => {
-    expect(() => fresh.string('\uD800')).toThrow()
-    expect(() => fresh.symbol('\uDC00')).toThrow()
+    expect(() => string('\uD800')).toThrow()
+    expect(() => symbol('\uDC00')).toThrow()
   })
 })
 
 describe('dictionaries', () => {
   it('constructs faithfully', () => {
     expect(() =>
-      fresh.dict([
-        [fresh.symbol('a'), fresh.int(1n)],
-        [fresh.symbol('a'), fresh.int(2n)],
+      dict([
+        [symbol('a'), int(1n)],
+        [symbol('a'), int(2n)],
       ])
     ).not.toThrow()
   })
 
   it('deduplicates keys canonically', () => {
-    const d = fresh.dict([
-      [fresh.symbol('a'), fresh.int(1n)],
-      [fresh.symbol('a'), fresh.int(2n)],
+    const d = dict([
+      [symbol('a'), int(1n)],
+      [symbol('a'), int(2n)],
     ])
-    expect(d.length).toBe(1)
+    expect(d.value.length).toBe(1)
   })
 
   it('allows an actionable key', () => {
-    const d = fresh.dict([[act(fresh.symbol('a')), fresh.int(1n)]])
+    const d = dict([[act(symbol('a')), int(1n)]])
     expect(eq(decode(encode(d)), d)).toBe(true)
   })
 
   it('allows an actionable value, becoming non-Data', () => {
-    const d = fresh.dict([[fresh.symbol('a'), act(fresh.int(1n))]])
+    const d = dict([[symbol('a'), act(int(1n))]])
     expect(isData(d)).toBe(false)
-    expect(eq(d.get(fresh.symbol('a')), act(fresh.int(1n)))).toBe(true)
+    expect(eq(dictGet(d, symbol('a')), act(int(1n)))).toBe(true)
   })
 
   it('sorts canonically regardless of construction order', () => {
-    const a = fresh.dict([
-      [fresh.symbol('a'), fresh.int(1n)],
-      [fresh.symbol('b'), fresh.int(2n)],
+    const a = dict([
+      [symbol('a'), int(1n)],
+      [symbol('b'), int(2n)],
     ])
-    const b = fresh.dict([
-      [fresh.symbol('b'), fresh.int(2n)],
-      [fresh.symbol('a'), fresh.int(1n)],
+    const b = dict([
+      [symbol('b'), int(2n)],
+      [symbol('a'), int(1n)],
     ])
     expect(eq(a, b)).toBe(true)
   })
 
-  it('get returns undefined for a missing key', () => {
-    expect(
-      fresh.dict([[fresh.symbol('a'), fresh.int(1n)]]).get(fresh.symbol('z'))
-    ).toBe(undefined)
+  it('dictGet returns undefined for a missing key', () => {
+    expect(dictGet(dict([[symbol('a'), int(1n)]]), symbol('z'))).toBe(undefined)
   })
 })
 
 describe('sets', () => {
   it('constructs faithfully — a duplicate member is not rejected here', () => {
-    expect(() => fresh.set([fresh.int(1n), fresh.int(1n)])).not.toThrow()
+    expect(() => set([int(1n), int(1n)])).not.toThrow()
   })
 
   it('deduplicates members canonically', () => {
-    const s = fresh.set([fresh.int(1n), fresh.int(1n)])
-    expect(s.length).toBe(1)
+    const s = set([int(1n), int(1n)])
+    expect(s.value.length).toBe(1)
   })
 
   it('is order-insensitive', () => {
-    expect(
-      eq(
-        fresh.set([fresh.int(1n), fresh.int(2n)]),
-        fresh.set([fresh.int(2n), fresh.int(1n)])
-      )
-    ).toBe(true)
+    expect(eq(set([int(1n), int(2n)]), set([int(2n), int(1n)]))).toBe(true)
   })
 
-  it('has checks membership by value', () => {
-    expect(fresh.set([fresh.int(1n)]).has(fresh.int(1n))).toBe(true)
-    expect(fresh.set([fresh.int(1n)]).has(fresh.int(2n))).toBe(false)
+  it('setHas checks membership by value', () => {
+    expect(setHas(set([int(1n)]), int(1n))).toBe(true)
+    expect(setHas(set([int(1n)]), int(2n))).toBe(false)
+  })
+})
+
+describe('immutability', () => {
+  it('freezes frame internals so a cached CE cannot go stale', () => {
+    expect(Object.isFrozen(list([int(1n)]).value)).toBe(true)
+    expect(Object.isFrozen(record([symbol('r')]).value)).toBe(true)
+    expect(Object.isFrozen(set([int(1n)]).value)).toBe(true)
+    expect(Object.isFrozen(dict([]).value)).toBe(true)
+  })
+
+  it('values are frozen literals', () => {
+    expect(Object.isFrozen(int(1n))).toBe(true)
+    expect(Object.isFrozen(list([]))).toBe(true)
+    expect(Object.isFrozen(withMark(int(1n), true))).toBe(true)
+    expect(Object.isFrozen(decode(encode(record([symbol('r')]))))).toBe(true)
   })
 })

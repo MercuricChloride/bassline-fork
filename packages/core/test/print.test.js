@@ -1,45 +1,31 @@
 import { describe, it, expect } from 'vitest'
 import { print } from '../src/text/print.js'
 import { read } from '../src/text/reader.js'
-import { fresh, eq } from '../src/data.js'
-
-const {
-  bool,
+import {
+  eq,
+  withMark,
   bytes,
   nil,
   int,
-  float,
   string,
   symbol,
   list,
   record,
   dict,
   set,
-} = fresh
+} from '../src/data.js'
 
 const bs = (...n) => bytes(Uint8Array.of(...n))
-const act = v => v.copy(true)
+const act = v => withMark(v, true)
 
 describe('atom formatting', () => {
   it('formats each atom so it re-parses', () => {
     expect(print(nil())).toBe('nil')
-    expect(print(bool(true))).toBe('true')
     expect(print(int(42n))).toBe('42')
     expect(print(int(-7n))).toBe('-7')
     expect(print(string('hi'))).toBe('"hi"')
     expect(print(bytes(Uint8Array.of(0xde, 0xad)))).toBe('#[DEAD]')
     expect(print(bytes(new Uint8Array(0)))).toBe('#[]')
-  })
-
-  it('formats doubles as doubles, never integers', () => {
-    expect(print(float(1))).toBe('1.0')
-    expect(print(float(-5))).toBe('-5.0')
-    expect(print(float(3.14))).toBe('3.14')
-    expect(print(float(6.022e23))).toBe('6.022e+23')
-    expect(print(float(-0))).toBe('-0.0')
-    expect(print(float(NaN))).toBe('NaN')
-    expect(print(float(Infinity))).toBe('Infinity')
-    expect(print(float(-Infinity))).toBe('-Infinity')
   })
 
   it('escapes strings (double-quoted)', () => {
@@ -56,11 +42,14 @@ describe('atom formatting', () => {
     expect(print(symbol('a|b'))).toBe('a|b') // | is an ordinary symbol char now
     expect(print(symbol('a b'))).toBe("'a b'") // whitespace
     expect(print(symbol('a:b'))).toBe("'a:b'") // delimiter
+    expect(print(symbol('a;b'))).toBe("'a;b'") // ; starts a comment now
     expect(print(symbol('->'))).toBe('->') // <> are ordinary symbol chars now
     expect(print(symbol('a(b'))).toBe("'a(b'") // ( is a record delimiter
     expect(print(symbol('a"b'))).toBe("'a\"b'") // contains the string delimiter
-    expect(print(symbol('nil'))).toBe("'nil'") // reserved word
+    expect(print(symbol('nil'))).toBe("'nil'") // the one reserved word
     expect(print(symbol('null'))).toBe('null') // NOT reserved (nil is)
+    expect(print(symbol('true'))).toBe('true') // no longer reserved: a plain symbol
+    expect(print(symbol('NaN'))).toBe('NaN') // ditto
     expect(print(symbol('1x'))).toBe("'1x'") // number-like start
     expect(print(symbol('-5'))).toBe("'-5'") // would lex as a number
   })
@@ -123,17 +112,9 @@ describe('frame layout', () => {
 describe('round-trip: read(print(v)) eq v', () => {
   const samples = [
     nil(),
-    bool(true),
-    bool(false),
     int(0n),
     int(-255n),
     int(123456789012345678901234567890n),
-    float(1),
-    float(-0),
-    float(NaN),
-    float(Infinity),
-    float(-Infinity),
-    float(3.14159),
     string(''),
     string('quotes \' and " and \\ and \n newline'),
     string('unicode π 😀'),
@@ -142,6 +123,7 @@ describe('round-trip: read(print(v)) eq v', () => {
     symbol('a|b'), // | is an ordinary symbol char
     symbol('null'), // not reserved
     symbol('nil'), // reserved — quotes
+    symbol('true'), // not reserved anymore — prints bare, re-reads as a symbol
     bs(),
     bs(0, 1, 254, 255),
     list([int(1n), string('two'), symbol('three')]),

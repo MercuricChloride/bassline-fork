@@ -3,27 +3,19 @@ import { read, readSpans, ReaderError } from '../src/text/reader.js'
 import {
   encode,
   decode,
-  fresh,
   eq,
   isActionable,
-  BasslineSymbol,
-  BasslineNil,
-  BasslineList,
-} from '../src/data.js'
-
-const {
+  withMark,
   int,
   string,
   symbol,
   nil,
-  bool,
-  float,
   list,
   dict,
   set,
   record,
   bytes,
-} = fresh
+} from '../src/data.js'
 
 /**
  * Parse a source expected to hold exactly one value, and return it.
@@ -49,9 +41,7 @@ describe('documents', () => {
 describe('atoms', () => {
   it('parses each atom kind', () => {
     expect(eq(val('nil'), nil())).toBe(true)
-    expect(eq(val('true'), bool(true))).toBe(true)
     expect(eq(val('-7'), int(-7n))).toBe(true)
-    expect(eq(val('1.5'), float(1.5))).toBe(true)
     expect(eq(val('"hi"'), string('hi'))).toBe(true) // double quotes: a string
     expect(eq(val("'sym'"), symbol('sym'))).toBe(true) // single quotes: a symbol
     expect(eq(val('foo'), symbol('foo'))).toBe(true)
@@ -59,8 +49,14 @@ describe('atoms', () => {
   })
 
   it('distinguishes a quoted symbol from the reserved word', () => {
-    expect(val("'nil'")).toBeInstanceOf(BasslineSymbol)
-    expect(val('nil')).toBeInstanceOf(BasslineNil)
+    expect(val("'nil'").kind).toBe('symbol')
+    expect(val('nil').kind).toBe('nil')
+  })
+
+  it('reads former reserved words as plain symbols', () => {
+    for (const w of ['true', 'false', 'NaN', 'Infinity', '-Infinity']) {
+      expect(eq(val(w), symbol(w))).toBe(true)
+    }
   })
 })
 
@@ -98,7 +94,7 @@ describe('frames', () => {
 
   it('parses nesting', () => {
     const v = val('[1 [2] {a: "x"}]')
-    expect(v).toBeInstanceOf(BasslineList)
+    expect(v.kind).toBe('list')
     expect(
       eq(
         v,
@@ -112,21 +108,62 @@ describe('actionable', () => {
   it('parses an actionable value', () => {
     const v = val('`foo')
     expect(isActionable(v)).toBe(true)
-    expect(eq(v, symbol('foo').copy(true))).toBe(true)
+    expect(eq(v, withMark(symbol('foo'), true))).toBe(true)
   })
 
   it('parses an actionable frame', () => {
-    expect(eq(val('`[1 2]'), list([int(1n), int(2n)]).copy(true))).toBe(true)
-  })
-
-  it('allows structurally nested actionables', () => {
-    expect(eq(val('`[`a]'), list([symbol('a').copy(true)]).copy(true))).toBe(
+    expect(eq(val('`[1 2]'), withMark(list([int(1n), int(2n)]), true))).toBe(
       true
     )
   })
 
+  it('allows structurally nested actionables', () => {
+    expect(
+      eq(val('`[`a]'), withMark(list([withMark(symbol('a'), true)]), true))
+    ).toBe(true)
+  })
+
   it('accepts an actionable dict key (the Data firewall is gone)', () => {
     expect(eq(val('{`a: 1}'), dict([[symbol('a', true), int(1n)]]))).toBe(true)
+  })
+})
+
+describe('comments', () => {
+  it('skips a full-line comment', () => {
+    expect(read('; nothing here')).toEqual([])
+    expect(eq(val('; note\n42'), int(42n))).toBe(true)
+  })
+
+  it('skips a trailing comment', () => {
+    expect(eq(val('42 ; the answer'), int(42n))).toBe(true)
+  })
+
+  it('skips comments inside frames', () => {
+    expect(eq(val('[1 ; first\n 2]'), list([int(1n), int(2n)]))).toBe(true)
+    expect(eq(val('{a: ; key a\n 1}'), dict([[symbol('a'), int(1n)]]))).toBe(
+      true
+    )
+    expect(eq(val('(p ; head\n 1)'), record([symbol('p'), int(1n)]))).toBe(true)
+  })
+
+  it('a quoted symbol still holds a semicolon', () => {
+    expect(eq(val("';'"), symbol(';'))).toBe(true)
+  })
+
+  it('a bare semicolon ends a symbol', () => {
+    const vs = read('a;b')
+    expect(vs).toHaveLength(1)
+    expect(eq(vs[0], symbol('a'))).toBe(true)
+  })
+
+  it('ends a number at a semicolon', () => {
+    expect(eq(val('42;x'), int(42n))).toBe(true)
+  })
+
+  it('spans start after leading comments', () => {
+    const [s] = readSpans('; c\n 42')
+    expect(s.start).toBe(5)
+    expect(s.end).toBe(7)
   })
 })
 
@@ -147,6 +184,11 @@ describe('errors', () => {
 
   it('rejects a dictionary entry without a colon', () => {
     expect(() => read('{a 1}')).toThrow()
+  })
+
+  it('rejects a decimal literal', () => {
+    expect(() => read('1.5')).toThrow('decimal')
+    expect(() => read('-0.5')).toThrow('decimal')
   })
 
   it('carries pos/line/col on the ReaderError', () => {
