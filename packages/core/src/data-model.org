@@ -240,9 +240,9 @@ Every value begins with a single header byte:
 
 | tag (4 bits) | actionable flag (1 bit) | length (3 bits) |
 
-The high nibble is the type tag. Bit 3 is the actionable flag. The
-low three bits carry the payload length for scalars, and must be zero
-everywhere else.
+The first 4 bits carry the type tag. The fifth bit is the actionable
+flag. The last three bits carry the payload length for scalars, and
+must be zero everywhere else.
 
 | tag     | kind      | body                    |
 |---------+-----------+-------------------------|
@@ -265,24 +265,28 @@ particular never as null.
 
 ** Scalar lengths
 
-Scalars (tags =0x2= through =0x5=) state their payload length in bytes:
+Scalars (tags =0x2= through =0x5=) state their payload length in bytes.
 
-- lengths 0 through 6 are stored directly in the header's low bits
-- length 7 in the header means a second byte follows:
-  - values 7 through 254 are the length, literally
-  - value 255 means the length is in the following 4 bytes,
-    big-endian
+The length is encoded as a big-endian uint in 4 different sizes.
 
-Each form is mandatory in its range: an encoder must use the smallest
-form that fits, and a decoder must reject the others, so every length
-has exactly one spelling.
+The size of the length is tiered as follows
+
+| payload length      | tier   | length-repr |
+|---------------------+--------+-------------|
+| 7 > len >= 0        | small  | uint3       |
+| 255 > len >= 7      | medium | uint8       |
+| 2^32-1 > len >= 255 | large  | uint32      |
+
+Each form is mandatory in its range and an encoder must use the
+smallest form that fits. Decoders must reject the others such that
+every length has exactly one spelling.
 
 The four-byte ceiling capable of delimiting a scalar payload is
 deliberate. This gives us a maximum size of 4.3GB and realistically
 nothing should ever approach this limit. This was just chosen so we
 can include scalars that fit reasonable file sizes atomically, since
 modern files routinely are much larger than ~16KB, and it's tedious to
-deal with chunking for anything larger.
+be required to chunk anything over 16K.
 
 If you have some giant dataset it should be expressed as a vocabulary
 of these atoms. For example as a list of block bytestrings or
@@ -294,9 +298,54 @@ capable of expressing numbers as large as 4.3GB of raw data. 🤷
 
 Null has no payload and its length bits must be zero.
 
+*** Small payload
+
+Small payloads under 7 bytes have their length stored in the last 3
+bits of the header byte.
+
+So the header + payload would be:
+
+#+BEGIN_EXAMPLE
+       mark
+  ╔═══╦╩╦═══╗   ╔════════════════╗
+  ║ttt║m║lll║   ║payload         ║
+  ╚═╦═╩═╩═╦═╝   ╚════════════════╝
+   tag   length
+#+END_EXAMPLE
+
+*** Medium payload
+
+Medium payloads under 255 bytes have their header length bits set to 7.
+
+They are then followed by a byte specifying their length.
+
+So the header, length, payload would be:
+
+#+BEGIN_EXAMPLE
+       mark
+  ╔═══╦╩╦═══╗ ╔════════╗ ╔═══════╗
+  ║ttt║m║111║ ║LLLLLLLL║ ║payload║
+  ╚═╦═╩═╩═══╝ ╚═══╦════╝ ╚═══════╝
+    tag           ╚╸length
+#+END_EXAMPLE
+
+*** Large payload
+
+Large payloads occupy the 4 bytes following the header with length bits
+set to 7 and the trailing byte set to 255.
+
+So the header, length, payload would be:
+
+#+BEGIN_EXAMPLE
+                        4x
+  ╔═══╦═╦═══╗ ╔═══════╗ ╔════════╗ ╔═══════╗
+  ║ttt║m║111║ ║1111111║ ║LLLLLLLL║ ║payload║
+  ╚═══╩═╩═══╝ ╚═══════╝ ╚════════╝ ╚═══════╝
+#+END_EXAMPLE
+
 ** Integer payloads
 
-The integer payload is its decimal notation as UTF-8: an optional
+The integer payload is its decimal notation as UTF-8 / ASCII: an optional
 =-=, then digits with no leading zero. Zero is =0= and there is no
 =-0= and no =+=. This is the same spelling the textual syntax uses,
 so there is one integer notation in the whole system, and encoding an

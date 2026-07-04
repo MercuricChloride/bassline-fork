@@ -1,24 +1,18 @@
 // @ts-check
 
-// Every boundary into and out of the value space: construction from host
-// data, encoding to and decoding from canonical bytes, and identity (which
-// is defined by those bytes). Construction lives here deliberately — it is
-// an admission boundary like the byte decoder and the text reader, and
-// admission canonicalizes.
-//
-// ================ the header ================
-//
-// Every value begins with a single header byte:
-//
-//   [tag:4][mark:1][len:3]
-//
-// The high nibble is the type tag, bit 3 is the actionable mark, and the low
-// three bits carry the payload length for scalars. Frames carry no length:
-// their children follow, each self-delimiting, closed by the END byte.
-
+// This file acts as the boundary into and out of the value space.
+// So it has construction from host data, encoding and decoding from
+// canonical bytes, and identity, which is defined by those bytes.
 /** @import {Value, Values, ValueKind} from './forms.js' */
 import { isValue, assertValue } from './forms.js'
 
+// ================ the header ================
+//
+// Every value begins with a single header byte:
+// [tag:4][mark:1][len:3]
+// The first 4 bits carry the type tag. The fifth bit is the actionable
+// flag. The last three bits carry the payload length for scalars, and
+// must be zero everywhere else.
 export const NIL_TAG = 0x1
 export const INT_TAG = 0x2
 export const STRING_TAG = 0x3
@@ -31,7 +25,7 @@ export const SET_TAG = 0x9
 export const END_BYTE = 0xa0
 
 /** @param {number} b */
-export const headerTag = b => b >> 4
+export const headerTag = b => b >>> 4
 /** @param {number} b */
 export const headerMark = b => (b & 0x08) !== 0
 /** @param {number} b */
@@ -308,8 +302,7 @@ function compareBytes(a, b) {
 }
 
 /**
- * Total order over values by their CE bytes. It exists so canonical form is
- * defined — don't read meaning into it.
+ * Total order over values by their CE bytes. This is doesn't keep numeric order
  * @param {Value} a
  * @param {Value} b
  * @returns {number} A negative number if a < b, 0 if a == b, a positive number if a > b
@@ -367,7 +360,7 @@ export function eq(a, b) {
 
 // ================ decoding ================
 
-const CANONICAL_INT = /^(0|-?[1-9][0-9]*)$/
+export const CANONICAL_INT = /^(0|-?[1-9][0-9]*)$/
 
 export class BasslineDecoder {
   /**
@@ -378,7 +371,6 @@ export class BasslineDecoder {
     this.bytes = bytes
     this.pos = 0
     this.maxDepth = maxDepth
-    // A local policy limit on scalar payloads — boundary judgment, not grammar.
     this.maxLength = maxLength
   }
 
