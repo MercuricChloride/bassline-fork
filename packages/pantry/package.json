@@ -1,0 +1,20 @@
+{
+  "name": "@bassline/pantry",
+  "version": "0.1.0",
+  "description": "A home for values: hold, solve, run — custody, denotation, readings",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "pantry": "bin/pantry.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bassline/core": "workspace:*"
+  },
+  "license": "AGPL-3.0-only"
+}
