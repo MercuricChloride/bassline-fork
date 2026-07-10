@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import { once } from 'node:events'
 import net from 'node:net'
-import { fresh, eq, encode } from '@bassline/core/data'
+import {
+  nil,
+  int,
+  string,
+  list,
+  symbol,
+  record,
+  withMark,
+  eq,
+  encode,
+} from '@bassline/core/data'
 import { serve } from '../../src/stream/server.js'
 import { connect } from '../../src/stream/socket.js'
-
-const { nil, int, string, list, symbol, record } = fresh
 
 // Start a server and expose its port plus a promise for the first connection.
 const startServer = async () => {
@@ -33,7 +41,7 @@ describe('serve / connect over TCP', () => {
       string('hello'),
       list([int(1n), int(2n), int(3n)]),
       record([symbol('point'), int(3n), int(4n)]),
-      list([nil()]).copy(true), // actionable
+      withMark(list([nil()])), // actionable
     ]
 
     const { server, port, firstConn } = await startServer()

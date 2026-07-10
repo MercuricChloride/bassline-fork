@@ -1,14 +1,8 @@
 import { fc, test } from '@fast-check/vitest'
 import { describe, it, expect } from 'vitest'
-import { fresh, eq, encode, ceKey } from '@bassline/core/data'
-import { streamDecoder } from '../../src/stream/decoder.js'
-import { scanValue, peekVarint, NEED_MORE } from '../../src/stream/scan.js'
-
-const {
+import {
   nil,
-  bool,
   int,
-  float,
   string,
   symbol,
   bytes,
@@ -16,29 +10,28 @@ const {
   set,
   dict,
   record,
-} = fresh
+  withMark,
+  eq,
+  encode,
+} from '@bassline/core/data'
+import { streamDecoder } from '../../src/stream/decoder.js'
+import { ValueScanner, scanValue, NEED_MORE } from '../../src/stream/scan.js'
 
-// Recursive Value generator, as in core's data.property.test.js.
+// Recursive Value generator, as in core's tests. Set and dict inputs need no
+// uniqueness discipline: the constructors canonicalize.
 const { value } = fc.letrec(tie => ({
   value: fc.oneof(
     { maxDepth: 3 },
     fc.constant(nil()),
-    fc.boolean().map(bool),
     fc.bigInt().map(int),
-    fc.double().map(float),
     fc.string({ unit: 'grapheme' }).map(string),
     fc.string({ unit: 'grapheme' }).map(symbol),
     fc.uint8Array().map(bytes),
-    tie('value').map(v => v.copy(true)),
+    tie('value').map(v => withMark(v)),
     fc.array(tie('value'), { maxLength: 4 }).map(list),
-    fc.uniqueArray(tie('value'), { selector: ceKey, maxLength: 4 }).map(set),
-    fc
-      .uniqueArray(fc.tuple(tie('value'), tie('value')), {
-        selector: e => ceKey(e[0]),
-        maxLength: 4,
-      })
-      .map(dict),
-    fc.array(tie('value'), { maxLength: 3, minLength: 1 }).map(e => record(e))
+    fc.array(tie('value'), { maxLength: 4 }).map(set),
+    fc.array(fc.tuple(tie('value'), tie('value')), { maxLength: 4 }).map(dict),
+    fc.array(tie('value'), { minLength: 1, maxLength: 3 }).map(record)
   ),
 }))
 
@@ -103,7 +96,7 @@ describe('stream reassembly (property)', () => {
   )
 
   test.prop([value])('preserves the actionable mark through the stream', v => {
-    const a = v.copy(true)
+    const a = withMark(v)
     const [out] = drain([encode(a)])
     expect(out.actionable).toBe(true)
     expect(eq(out, a)).toBe(true)
@@ -119,9 +112,9 @@ describe('StreamDecoder.push', () => {
   })
 
   it('buffers a value whose payload has not fully arrived', () => {
-    const enc = encode(string('hello world')) // header (0x06 0x0b) + 11 bytes
+    const enc = encode(string('hello world')) // header (0x37 0x0b) + 11 bytes
     const dec = streamDecoder()
-    expect(dec.push(enc.subarray(0, 5))).toEqual([]) // header known, payload partial
+    expect(dec.push(enc.subarray(0, 5))).toEqual([]) // length known, payload partial
     expect(dec.buffered).toBe(5)
     const out = dec.push(enc.subarray(5))
     expect(out.length).toBe(1)
@@ -129,38 +122,87 @@ describe('StreamDecoder.push', () => {
     expect(dec.buffered).toBe(0)
   })
 
-  it('buffers across a split inside the length varint', () => {
-    // 200-byte string: varint is two bytes (0xc8 0x01). Split between them.
+  it('buffers across a split inside a medium length', () => {
+    // 200-byte string: header 0x37, then the length byte 0xc8. Split between them.
     const v = string('x'.repeat(200))
     const enc = encode(v)
     const dec = streamDecoder()
-    expect(dec.push(enc.subarray(0, 2))).toEqual([]) // descriptor + first varint byte
-    const out = dec.push(enc.subarray(2))
+    expect(dec.push(enc.subarray(0, 1))).toEqual([]) // header, length byte pending
+    const out = dec.push(enc.subarray(1))
     expect(out.length).toBe(1)
     expect(eq(out[0], v)).toBe(true)
   })
 
-  it('rejects a value larger than maxValueSize from its header alone', () => {
-    const enc = encode(bytes(new Uint8Array(100))) // 0x08 0x64 + 100 bytes
+  it('buffers across splits inside a large length', () => {
+    // 300-byte payload: header 0x57, escape 0xff, four big-endian length bytes.
+    const v = bytes(new Uint8Array(300))
+    const enc = encode(v)
+    const dec = streamDecoder()
+    expect(dec.push(enc.subarray(0, 2))).toEqual([]) // header + escape
+    expect(dec.push(enc.subarray(2, 4))).toEqual([]) // half the length word
+    const out = dec.push(enc.subarray(4))
+    expect(out.length).toBe(1)
+    expect(eq(out[0], v)).toBe(true)
+  })
+
+  it('completes a frame only at its closing END byte', () => {
+    const v = list([int(1n), list([string('ab')]), nil()])
+    const enc = encode(v)
+    const dec = streamDecoder()
+    expect(dec.push(enc.subarray(0, enc.length - 1))).toEqual([]) // all but END
+    const out = dec.push(enc.subarray(enc.length - 1))
+    expect(out.length).toBe(1)
+    expect(eq(out[0], v)).toBe(true)
+  })
+
+  it('rejects an over-large scalar from its announced length alone', () => {
+    const enc = encode(bytes(new Uint8Array(100))) // 0x57 0x64 + 100 bytes
     const dec = streamDecoder({ maxValueSize: 8 })
     expect(() => dec.push(enc.subarray(0, 2))).toThrow(/maxValueSize/)
   })
 
-  it('throws on a descriptor that cannot begin a value', () => {
+  it('rejects a frame once its buffered prefix exceeds maxValueSize', () => {
+    const items = Array.from({ length: 50 }, (_, i) => int(BigInt(i)))
+    const enc = encode(list(items))
+    const dec = streamDecoder({ maxValueSize: 16 })
+    expect(() => dec.push(enc.subarray(0, 32))).toThrow(/maxValueSize/)
+  })
+
+  it('rejects an over-large value even when it arrives whole', () => {
+    const enc = encode(bytes(new Uint8Array(100)))
+    const dec = streamDecoder({ maxValueSize: 8 })
+    expect(() => dec.push(enc)).toThrow(/maxValueSize/)
+  })
+
+  it('throws on a byte that cannot begin a value', () => {
     expect(() => streamDecoder().push(Uint8Array.of(0x00))).toThrow(
-      /bad descriptor/
+      /bad header/
     )
-    expect(() => streamDecoder().push(Uint8Array.of(0x1a))).toThrow(
-      /bad descriptor/
+    expect(() => streamDecoder().push(Uint8Array.of(0xb0))).toThrow(
+      /bad header/
+    )
+    // END carries no flag and no length, so 0xa1-0xaf never occur
+    expect(() => streamDecoder().push(Uint8Array.of(0xa5))).toThrow(
+      /bad header/
+    )
+  })
+
+  it('throws on END with no open frame', () => {
+    expect(() => streamDecoder().push(Uint8Array.of(0xa0))).toThrow(
+      /END with no open frame/
     )
   })
 
   it('surfaces a malformed value (caught by core decode) on the slice', () => {
-    // Non-minimal integer 0x08 0x02 0x00 0x01 is a complete, well-framed value
-    // that core decode() rejects as non-canonical.
-    expect(() =>
-      streamDecoder().push(Uint8Array.of(0x08, 0x02, 0x00, 0x01))
-    ).toThrow(/non-minimal integer/)
+    // "01" frames fine as a 2-byte int payload but isn't canonical decimal.
+    expect(() => streamDecoder().push(Uint8Array.of(0x22, 0x30, 0x31))).toThrow(
+      /non-canonical integer/
+    )
+    // A 1-byte payload spelled in the medium length form frames fine too,
+    // but core decode() rejects the non-minimal spelling.
+    expect(() => streamDecoder().push(Uint8Array.of(0x27, 0x01, 0x31))).toThrow(
+      /non-minimal length/
+    )
   })
 })
 
@@ -178,33 +220,45 @@ describe('StreamDecoder.end', () => {
   })
 })
 
-describe('scanValue / peekVarint', () => {
-  it('returns a value size once the header is readable', () => {
-    const enc = encode(int(1n)) // 0x04 0x01 0x01
-    expect(scanValue(enc)).toBe(3)
-    expect(scanValue(enc.subarray(0, 2))).toBe(3) // header complete, payload absent
-    expect(scanValue(enc.subarray(0, 1))).toBe(NEED_MORE) // varint not yet present
+describe('scanValue / ValueScanner', () => {
+  it('sizes a complete value and reports NEED_MORE otherwise', () => {
+    const enc = encode(int(1n)) // 0x21 0x31
+    expect(scanValue(enc)).toBe(2)
+    expect(scanValue(enc.subarray(0, 1))).toBe(NEED_MORE)
     expect(scanValue(new Uint8Array(0))).toBe(NEED_MORE)
   })
 
-  it('sizes fixed-width atoms', () => {
+  it('sizes zero-payload atoms', () => {
     expect(scanValue(encode(nil()))).toBe(1)
-    expect(scanValue(encode(bool(true)))).toBe(1)
-    expect(scanValue(encode(float(1.5)))).toBe(9)
+    expect(scanValue(encode(string('')))).toBe(1)
+    expect(scanValue(encode(bytes(new Uint8Array(0))))).toBe(1)
   })
 
-  it('reads a multi-byte varint and signals incompleteness', () => {
-    expect(peekVarint(Uint8Array.of(0x01), 0)).toEqual({ value: 1, size: 1 })
-    expect(peekVarint(Uint8Array.of(0x80, 0x01), 0)).toEqual({
-      value: 128,
-      size: 2,
-    })
-    expect(peekVarint(Uint8Array.of(0x80), 0)).toBe(NEED_MORE)
+  it('walks a frame to its END byte', () => {
+    const enc = encode(list([int(1n), list([nil()])]))
+    expect(scanValue(enc)).toBe(enc.length)
+    expect(scanValue(enc.subarray(0, enc.length - 1))).toBe(NEED_MORE)
   })
 
-  it('rejects a runaway (non-terminating) varint', () => {
-    expect(() => peekVarint(new Uint8Array(11).fill(0x80), 0)).toThrow(
-      /varint too long/
-    )
+  it('scans at an offset', () => {
+    const a = encode(int(7n))
+    const b = encode(string('hi'))
+    expect(scanValue(concatAll([a, b]), a.length)).toBe(b.length)
+  })
+
+  it('resumes across arbitrarily split feeds', () => {
+    const enc = encode(record([symbol('blob'), bytes(new Uint8Array(300))]))
+    const s = new ValueScanner()
+    for (let i = 0; i < enc.length - 1; i++) {
+      expect(s.feed(enc, i, i + 1)).toBe(NEED_MORE)
+    }
+    expect(s.feed(enc, enc.length - 1, enc.length)).toBe(enc.length)
+  })
+
+  it('announces a scalar payload before it arrives', () => {
+    const enc = encode(bytes(new Uint8Array(300))) // 0x57 0xff <4-byte len> …
+    const s = new ValueScanner()
+    expect(s.feed(enc, 0, 6)).toBe(NEED_MORE) // header + length only
+    expect(s.pending).toBe(300)
   })
 })

@@ -1,99 +1,145 @@
 //@ts-check
 // Find value boundaries in a bassline binary stream.
 //
-// Each value is fixed-size (nil/false/true = 1 byte, float = 9) or
-// `descriptor + varint(byteLen) + payload`. For frames the varint is the byte
-// length of the payload, so a value's size is known from its header without
-// recursing. Scanning is O(1) per value.
+// The encoding is self-delimiting but not length-prefixed: scalars announce
+// their payload size in a tiered header, while frames run until their closing
+// END byte. A value's extent is therefore discovered by walking it, not read
+// from its header. ValueScanner does that walk incrementally: feed it windows
+// of the stream and it consumes bytes — skipping scalar payloads, counting
+// frame opens and closes — until exactly one whole value has passed. It
+// touches each byte at most once and holds O(1) state, so chunking never
+// causes rescans and nothing is materialized.
+//
+// The scanner only frames; validity (length minimality, UTF-8, canonical
+// integers, dict/set order, depth policy) belongs to core `decode()` on the
+// sliced value. It does reject bytes that cannot occur where they stand,
+// since a byte stream can't resync after a framing error.
 
-import {
-  NIL_PREFIX,
-  FALSE_PREFIX,
-  TRUE_PREFIX,
-  INT_PREFIX,
-  FLOAT_PREFIX,
-  STRING_PREFIX,
-  SYMBOL_PREFIX,
-  BYTES_PREFIX,
-  LIST_PREFIX,
-  DICT_PREFIX,
-  RECORD_PREFIX,
-  SET_PREFIX,
-  tagOf,
-} from '@bassline/core/data'
+import { TAGS, END_BYTE, headerTag, headerLen } from '@bassline/core/data'
 
-/** Returned when the buffer doesn't yet hold a value's header (descriptor + varint). */
+/** Returned when the window ends before the value does. */
 export const NEED_MORE = Symbol('NEED_MORE')
 
-const FLOAT_BYTES = 8
+// Scanner states: what the next unread byte is expected to be.
+const HEADER = 0 // a value header, or END closing an open frame
+const LEN1 = 1 // the one-byte medium length, or the 0xff escape to LEN4
+const LEN4 = 2 // one of the four big-endian large-length bytes
+const PAYLOAD = 3 // scalar payload bytes, `skip` of them still owed
 
-/** A length varint past this many bytes is garbage; reject rather than buffer forever. */
-const MAX_VARINT_BYTES = 10
+export class ValueScanner {
+  constructor() {
+    this.depth = 0 // open, not-yet-closed frames
+    this.skip = 0 // announced payload bytes not yet consumed
+    this.state = HEADER
+    this.len4 = 0 // big-endian accumulator for LEN4
+    this.len4n = 0 // LEN4 bytes still owed
+  }
 
-/**
- * Read an unsigned LEB128 varint at `offset`, returning {@link NEED_MORE} on
- * underflow instead of throwing. Minimality isn't checked here; core `decode()`
- * re-validates the sliced value.
- * @param {Uint8Array} bytes
- * @param {number} offset
- * @returns {{ value: number, size: number } | typeof NEED_MORE}
- */
-export function peekVarint(bytes, offset) {
-  let result = 0
-  let mul = 1
-  let i = offset
-  while (true) {
-    if (i >= bytes.length) return NEED_MORE
-    if (i - offset >= MAX_VARINT_BYTES) {
-      throw new Error('varint too long')
+  /**
+   * Payload bytes announced by a scalar header but not yet seen. Added to the
+   * bytes already fed, this lower-bounds the value's final size, so a caller
+   * can refuse an over-large value before buffering its body.
+   */
+  get pending() {
+    return this.skip
+  }
+
+  /**
+   * Consume `bytes[from, to)` until one whole value has been seen. Returns
+   * the offset just past the value's last byte, or {@link NEED_MORE} after
+   * consuming the entire window; feed the next window to continue. Completing
+   * a value leaves the scanner pristine for the next one. Throws on a byte
+   * that cannot occur where it stands, after which the scanner is unusable.
+   * @param {Uint8Array} bytes
+   * @param {number} [from]
+   * @param {number} [to]
+   * @returns {number | typeof NEED_MORE}
+   */
+  feed(bytes, from = 0, to = bytes.length) {
+    let pos = from
+    while (true) {
+      if (this.state === PAYLOAD) {
+        const take = Math.min(this.skip, to - pos)
+        pos += take
+        this.skip -= take
+        if (this.skip > 0) return NEED_MORE
+        this.state = HEADER
+        if (this.depth === 0) return pos
+      }
+      if (pos >= to) return NEED_MORE
+      const b = bytes[pos++]
+      switch (this.state) {
+        case LEN1:
+          if (b === 0xff) {
+            this.state = LEN4
+            this.len4 = 0
+            this.len4n = 4
+          } else {
+            this.skip = b
+            this.state = PAYLOAD
+          }
+          break
+        case LEN4:
+          this.len4 = this.len4 * 256 + b
+          if (--this.len4n === 0) {
+            this.skip = this.len4
+            this.state = PAYLOAD
+          }
+          break
+        default: {
+          if (b === END_BYTE) {
+            if (this.depth === 0) throw new Error('END with no open frame')
+            this.depth--
+            if (this.depth === 0) return pos
+            break
+          }
+          const tag = headerTag(b)
+          const len3 = headerLen(b)
+          switch (tag) {
+            case TAGS.nil:
+              if (len3 !== 0) throw new Error('nil carries no payload')
+              if (this.depth === 0) return pos
+              break
+            case TAGS.int:
+            case TAGS.string:
+            case TAGS.symbol:
+            case TAGS.bytes:
+              if (len3 < 7) {
+                this.skip = len3
+                this.state = PAYLOAD
+              } else {
+                this.state = LEN1
+              }
+              break
+            case TAGS.list:
+            case TAGS.record:
+            case TAGS.dict:
+            case TAGS.set:
+              if (len3 !== 0)
+                throw new Error('a frame header carries no length')
+              this.depth++
+              break
+            default:
+              throw new Error(
+                'cannot frame value: bad header byte 0x' +
+                  b.toString(16).padStart(2, '0')
+              )
+          }
+        }
+      }
     }
-    const b = bytes[i++]
-    result += (b & 0x7f) * mul
-    if ((b & 0x80) === 0) return { value: result, size: i - offset }
-    mul *= 128
   }
 }
 
 /**
- * Byte length of the value at `offset` once its header is readable, else
- * {@link NEED_MORE}. The payload need not be present yet, so the caller must
- * check `offset + len <= bytes.length` before slicing. Returning the size from
- * the header alone lets the decoder reject an over-large value before buffering
- * its body. Throws on a descriptor that can't begin a value (tag `0x0` or `> 0xc`).
+ * Size in bytes of the first complete value at `offset`, or {@link NEED_MORE}
+ * when the window ends before the value does. A fresh walk each call — for
+ * incremental use across chunks, hold a {@link ValueScanner} instead.
  * @param {Uint8Array} bytes
  * @param {number} [offset]
  * @returns {number | typeof NEED_MORE}
  */
 export function scanValue(bytes, offset = 0) {
-  if (offset >= bytes.length) return NEED_MORE
-  const tag = tagOf(bytes[offset])
-
-  switch (tag) {
-    case NIL_PREFIX:
-    case FALSE_PREFIX:
-    case TRUE_PREFIX:
-      return 1
-
-    case FLOAT_PREFIX:
-      return 1 + FLOAT_BYTES
-
-    case INT_PREFIX:
-    case STRING_PREFIX:
-    case SYMBOL_PREFIX:
-    case BYTES_PREFIX:
-    case LIST_PREFIX:
-    case DICT_PREFIX:
-    case RECORD_PREFIX:
-    case SET_PREFIX: {
-      const v = peekVarint(bytes, offset + 1)
-      if (v === NEED_MORE) return NEED_MORE
-      return 1 + v.size + v.value
-    }
-
-    default:
-      throw new Error(
-        'cannot frame value: bad descriptor 0x' +
-          bytes[offset].toString(16).padStart(2, '0')
-      )
-  }
+  const end = new ValueScanner().feed(bytes, offset)
+  return end === NEED_MORE ? NEED_MORE : end - offset
 }

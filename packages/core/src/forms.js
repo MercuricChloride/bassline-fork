@@ -72,16 +72,6 @@ export function assertValue(x, msg = 'expected a Bassline value') {
 }
 
 /**
- * @template {FrameKind | AtomKind} K
- * @template T
- * @typedef {{
- * readonly kind: K
- * readonly value: T
- * readonly actionable: boolean
- * }} ValueType
- */
-
-/**
  * @typedef {{
  * readonly kind: "list"
  * readonly actionable: boolean
@@ -114,11 +104,43 @@ export function assertValue(x, msg = 'expected a Bassline value') {
  */
 
 /**
- * @typedef {ValueType<"nil", null>} BNil
- * @typedef {ValueType<"int", bigint>} BInt
- * @typedef {ValueType<"string", string>} BString
- * @typedef {ValueType<"symbol", string>} BSymbol
- * @typedef {ValueType<"bytes", Uint8Array>} BBytes
+ * @typedef {{
+ * readonly kind: "nil"
+ * readonly value: null
+ * readonly actionable: boolean
+ * }} BNil
+ */
+
+/**
+ * @typedef {{
+ * readonly kind: "int"
+ * readonly value: bigint
+ * readonly actionable: boolean
+ * }} BInt
+ */
+
+/**
+ * @typedef {{
+ * readonly kind: "string"
+ * readonly value: string
+ * readonly actionable: boolean
+ * }} BString
+ */
+
+/**
+ * @typedef {{
+ * readonly kind: "symbol"
+ * readonly value: string
+ * readonly actionable: boolean
+ * }} BSymbol
+ */
+
+/**
+ * @typedef {{
+ * readonly kind: "bytes"
+ * readonly value: Uint8Array
+ * readonly actionable: boolean
+ * }} BBytes
  */
 
 /**

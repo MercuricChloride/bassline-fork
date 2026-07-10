@@ -1,14 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { fresh, eq, encode } from '@bassline/core/data'
-import { encodeStream, decodeStream } from '../../src/stream/transform.js'
-
-const {
+import {
   nil,
-  bool,
   int,
-  float,
   string,
   symbol,
   bytes,
@@ -16,13 +11,15 @@ const {
   set,
   dict,
   record,
-} = fresh
+  withMark,
+  eq,
+  encode,
+} from '@bassline/core/data'
+import { encodeStream, decodeStream } from '../../src/stream/transform.js'
 
 const sample = [
   nil(),
-  bool(true),
   int(-7n),
-  float(3.5),
   string('héllo 😀'),
   symbol('tag'),
   bytes(Uint8Array.of(1, 2, 3, 255)),
@@ -32,7 +29,7 @@ const sample = [
     [symbol('a'), int(1n)],
     [symbol('b'), int(2n)],
   ]),
-  record([symbol('point'), int(3n), int(4n)]).copy(true), // actionable
+  withMark(record([symbol('point'), int(3n), int(4n)])), // actionable
 ]
 
 const concatAll = arrs => {
@@ -74,12 +71,12 @@ describe('encodeStream / decodeStream (node Transform)', () => {
     sample.forEach((v, i) => expect(eq(out[i], v)).toBe(true))
   })
 
-  it('emits error on a malformed descriptor', async () => {
+  it('emits error on a malformed header byte', async () => {
     const ds = decodeStream()
     ds.resume()
     const error = new Promise(res => ds.on('error', res))
     ds.end(Buffer.of(0x00))
-    expect(String(await error)).toMatch(/bad descriptor/)
+    expect(String(await error)).toMatch(/bad header/)
   })
 
   it('errors when the stream ends mid-value', async () => {
@@ -92,7 +89,7 @@ describe('encodeStream / decodeStream (node Transform)', () => {
   })
 
   it('honours maxValueSize from the value header alone', async () => {
-    const enc = encode(bytes(new Uint8Array(100))) // header 0x08 0x64 + 100 bytes
+    const enc = encode(bytes(new Uint8Array(100))) // header 0x57 0x64 + 100 bytes
     const ds = decodeStream({ maxValueSize: 8 })
     ds.resume()
     const error = new Promise(res => ds.on('error', res))
