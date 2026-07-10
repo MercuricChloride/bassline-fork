@@ -5,8 +5,7 @@ import {
   encode,
   decode,
   withMark,
-  dictGet,
-  setHas,
+  at,
   nil,
   int,
   string,
@@ -222,7 +221,7 @@ describe('dictionaries', () => {
   it('allows an actionable value, becoming non-Data', () => {
     const d = dict([[symbol('a'), act(int(1n))]])
     expect(isData(d)).toBe(false)
-    expect(eq(dictGet(d, symbol('a')), act(int(1n)))).toBe(true)
+    expect(eq(at(d, symbol('a')), act(int(1n)))).toBe(true)
   })
 
   it('sorts canonically regardless of construction order', () => {
@@ -238,7 +237,7 @@ describe('dictionaries', () => {
   })
 
   it('dictGet returns undefined for a missing key', () => {
-    expect(dictGet(dict([[symbol('a'), int(1n)]]), symbol('z'))).toBe(undefined)
+    expect(at(dict([[symbol('a'), int(1n)]]), symbol('z'))).toBe(undefined)
   })
 })
 
@@ -257,8 +256,11 @@ describe('sets', () => {
   })
 
   it('setHas checks membership by value', () => {
-    expect(setHas(set([int(1n)]), int(1n))).toBe(true)
-    expect(setHas(set([int(1n)]), int(2n))).toBe(false)
+    const a = int(1)
+    const b = int(2)
+    const s = set([a])
+    expect(at(s, a)).toBe(a)
+    expect(at(s, b)).toBeUndefined()
   })
 })
 

@@ -42,6 +42,7 @@ describe('atoms', () => {
   it('parses each atom kind', () => {
     expect(eq(val('nil'), nil())).toBe(true)
     expect(eq(val('-7'), int(-7n))).toBe(true)
+    expect(eq(val('+7'), symbol('+7'))).toBe(true) // no + sign: a symbol
     expect(eq(val('"hi"'), string('hi'))).toBe(true) // double quotes: a string
     expect(eq(val("'sym'"), symbol('sym'))).toBe(true) // single quotes: a symbol
     expect(eq(val('foo'), symbol('foo'))).toBe(true)
@@ -202,6 +203,80 @@ describe('errors', () => {
     expect(err.line).toBe(2)
     expect(err.col).toBe(5)
     expect(err.pos).toBe(7)
+  })
+})
+
+describe('duplicates', () => {
+  it('rejects a duplicate set member', () => {
+    expect(() => read('#{1 1}')).toThrow('duplicate set member')
+    expect(() => read('#{a b a}')).toThrow('duplicate set member')
+  })
+
+  it('rejects a duplicate dictionary key', () => {
+    expect(() => read('{a: 1 a: 2}')).toThrow('duplicate dictionary key')
+    expect(() => read('{a: 1 b: 2 a: 1}')).toThrow('duplicate dictionary key')
+  })
+
+  it('points at the repeated spelling', () => {
+    let err
+    try {
+      read('#{1 2 1}')
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(ReaderError)
+    expect(err.pos).toBe(6)
+  })
+
+  it('the mark is part of identity: x and `x are distinct members', () => {
+    expect(eq(val('#{x `x}'), set([symbol('x'), symbol('x', true)]))).toBe(true)
+  })
+
+  it('out-of-order dict keys are fine; text is written by people', () => {
+    const want = dict([
+      [symbol('a'), int(1n)],
+      [symbol('b'), int(2n)],
+    ])
+    expect(eq(val('{b: 2 a: 1}'), want)).toBe(true)
+  })
+})
+
+describe('mark attachment', () => {
+  it('rejects a repeated mark', () => {
+    expect(() => read('``x')).toThrow('repeated mark')
+  })
+
+  it('rejects a mark detached from its value', () => {
+    expect(() => read('` x')).toThrow('mark must immediately prefix')
+    expect(() => read('`,x')).toThrow('mark must immediately prefix')
+    expect(() => read('`')).toThrow('mark must immediately prefix')
+    expect(() => read('`; note')).toThrow('mark must immediately prefix')
+    expect(() => read('(a `)')).toThrow()
+  })
+
+  it('a marked quoted empty symbol is still expressible', () => {
+    expect(eq(val("`''"), symbol('', true))).toBe(true)
+  })
+})
+
+describe('depth', () => {
+  it('rejects nesting past maxDepth with a positioned error, not a stack overflow', () => {
+    let err
+    try {
+      read('['.repeat(2000))
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(ReaderError)
+    expect(err.message).toContain('maximum depth')
+    expect(err.pos).toBe(1024) // the 1025th opening bracket
+  })
+
+  it('accepts nesting up to the limit, and the limit is adjustable', () => {
+    const balanced = d => '['.repeat(d) + ']'.repeat(d)
+    expect(read(balanced(64))).toHaveLength(1)
+    expect(() => read(balanced(64), { maxDepth: 8 })).toThrow('maximum depth')
+    expect(read(balanced(9), { maxDepth: 9 })).toHaveLength(1)
   })
 })
 

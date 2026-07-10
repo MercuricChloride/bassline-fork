@@ -22,10 +22,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "pnpm -r clean && rm -rf node_modules",
-    "prepare": "husky",
-    "inspector:start": "pnpm --filter @bassline/web-inspector dev",
-    "daemon:start": "pnpm --filter @bassline/daemon start",
-    "sheet:start": "pnpm --filter @bassline/sheet dev"
+    "prepare": "husky"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

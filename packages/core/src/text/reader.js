@@ -5,6 +5,7 @@
 import {
   bytes,
   dict,
+  eq,
   int,
   list,
   nil,
@@ -71,10 +72,11 @@ export class ReaderError extends Error {
 /**
  * Read source text into a document (zero or more values).
  * @param {string} source
+ * @param {{maxDepth?: number}} [opts]
  * @returns {Value[]}
  */
-export function read(source) {
-  return readSpans(source).map(s => s.value)
+export function read(source, opts) {
+  return readSpans(source, opts).map(s => s.value)
 }
 
 /**
@@ -82,13 +84,15 @@ export function read(source) {
  * the projection `readSpans(source).map(s => s.value)`, so the values produced
  * are identical; only the span metadata is extra.
  * @param {string} source
+ * @param {{maxDepth?: number}} [opts]
  * @returns {Spanned[]}
  */
-export function readSpans(source) {
+export function readSpans(source, { maxDepth = 1024 } = {}) {
   if (typeof source !== 'string') throw new TypeError('read expects a string')
 
   const n = source.length
   let pos = 0
+  let depth = 0
   /** @type {Spanned[]} */
   const values = []
 
@@ -96,6 +100,7 @@ export function readSpans(source) {
    * @param {number} p
    * @param {string} msg
    * @throws {ReaderError}
+   * @returns {never}
    */
   function fail(p, msg) {
     throw new ReaderError(source, p, msg)
@@ -106,6 +111,37 @@ export function readSpans(source) {
    */
   function push(span) {
     values.push(span)
+  }
+
+  /**
+   * Enforce the depth limit around reading one frame's body.
+   * @template T
+   * @param {number} at the frame's opening position
+   * @param {() => T} readBody
+   * @returns {T}
+   */
+  function framed(at, readBody) {
+    if (++depth > maxDepth) fail(at, 'maximum depth exceeded')
+    const out = readBody()
+    depth--
+    return out
+  }
+
+  /**
+   * Fail at the first span whose value repeats an earlier one. Called only
+   * after a constructor's canonicalization dropped a duplicate.
+   * @param {Spanned[]} spans
+   * @param {string} what
+   * @returns {never}
+   */
+  function failDuplicate(spans, what) {
+    for (let i = 1; i < spans.length; i++) {
+      for (let j = 0; j < i; j++) {
+        if (eq(spans[j].value, spans[i].value))
+          fail(spans[i].start, `duplicate ${what}`)
+      }
+    }
+    return fail(pos, `duplicate ${what}`)
   }
 
   // Skip whitespace and comments. A `;` begins a comment that runs to the
@@ -273,13 +309,14 @@ export function readSpans(source) {
    */
   function readSet(actionable) {
     const items = readUntil('}')
-    return {
-      value: set(
-        items.map(s => s.value),
-        actionable
-      ),
-      children: items,
-    }
+    const value = set(
+      items.map(s => s.value),
+      actionable
+    )
+    // the constructor canonicalizes; a dropped member means the source
+    // spelled the same value twice
+    if (value.value.length !== items.length) failDuplicate(items, 'set member')
+    return { value, children: items }
   }
 
   /**
@@ -322,7 +359,13 @@ export function readSpans(source) {
       entries.push([key.value, val.value])
       children.push(key, val)
     }
-    return { value: dict(entries, actionable), children }
+    const value = dict(entries, actionable)
+    if (value.value.length !== entries.length)
+      failDuplicate(
+        children.filter((_, i) => i % 2 === 0),
+        'dictionary key'
+      )
+    return { value, children }
   }
 
   /** @returns {Spanned} */
@@ -331,9 +374,13 @@ export function readSpans(source) {
     let actionable = false
     skipTrivia()
     const start = pos
-    while (source[pos] === '`') {
+    if (source[pos] === '`') {
       pos++
       actionable = true
+      // the mark is one bit with one spelling, bound to the value it prefixes
+      if (source[pos] === '`') fail(pos, 'repeated mark')
+      if (isEOF(source[pos]) || isWs(source[pos]) || source[pos] === ';')
+        fail(pos, 'a mark must immediately prefix its value')
     }
     const c = source[pos]
     const k = source[pos + 1]
@@ -351,13 +398,13 @@ export function readSpans(source) {
 
     if (c === '[') {
       pos++
-      ;({ value, children } = readList(actionable))
+      ;({ value, children } = framed(start, () => readList(actionable)))
     } else if (c === '{') {
       pos++
-      ;({ value, children } = readDict(actionable))
+      ;({ value, children } = framed(start, () => readDict(actionable)))
     } else if (c === '(') {
       pos++
-      ;({ value, children } = readRecord(actionable))
+      ;({ value, children } = framed(start, () => readRecord(actionable)))
     } else if (c === '"') {
       pos++
       value = string(readQuoted('"'), actionable)
@@ -367,7 +414,7 @@ export function readSpans(source) {
     } else if (c === '#') {
       if (k === '{') {
         pos += 2
-        ;({ value, children } = readSet(actionable))
+        ;({ value, children } = framed(start, () => readSet(actionable)))
       } else if (k === '[') {
         pos += 2
         value = readBytes(actionable)

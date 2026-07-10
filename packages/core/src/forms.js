@@ -1,6 +1,8 @@
 // @ts-check
 
 /**
+ * Note! This is not a thorough or complete implementation rn.
+ * Too bad! I'll fix this up later fr.
  * @param {unknown} x
  * @returns {x is Value}
  */
@@ -25,6 +27,41 @@ export function isValue(x) {
 }
 
 /**
+ * @param {Value} x
+ * @returns {x is Values[AtomKind]}
+ */
+export function isAtom(x) {
+  assertValue(x, 'isAtom requires a Bassline value!')
+  switch (x.kind) {
+    case 'string':
+    case 'symbol':
+    case 'nil':
+    case 'int':
+    case 'bytes':
+      return true
+    default:
+      return false
+  }
+}
+
+/**
+ * @param {Value} x
+ * @returns {x is Values[FrameKind]}
+ */
+export function isFrame(x) {
+  assertValue(x, 'isFrame requires a BasslineValue!')
+  switch (x.kind) {
+    case 'list':
+    case 'record':
+    case 'dict':
+    case 'set':
+      return true
+    default:
+      return false
+  }
+}
+
+/**
  * @param {unknown} x
  * @param {string} [msg] - The error message to throw if x is not a Bassline value
  * @throws {TypeError} if x is not a Bassline value.
@@ -35,7 +72,7 @@ export function assertValue(x, msg = 'expected a Bassline value') {
 }
 
 /**
- * @template {FrameKind | ScalarKind} K
+ * @template {FrameKind | AtomKind} K
  * @template T
  * @typedef {{
  * readonly kind: K
@@ -101,12 +138,12 @@ export function assertValue(x, msg = 'expected a Bassline value') {
 /** @typedef {Values[keyof Values]} Value */
 
 /**
- * @typedef {"bytes" | "int" | "nil" | "string" | "symbol"} ScalarKind
+ * @typedef {"bytes" | "int" | "nil" | "string" | "symbol"} AtomKind
  * @typedef {"list" | "record" | "dict" | "set"} FrameKind
  * @typedef {keyof Values} ValueKind
  */
 
 /**
  * @typedef {Values[FrameKind]} Frame
- * @typedef {Values[ScalarKind]} Scalar
+ * @typedef {Values[AtomKind]} Atom
  */

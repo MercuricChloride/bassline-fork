@@ -5,6 +5,7 @@ const DELIM = new Set([
   '\t',
   '\n',
   '\r',
+  ',', // reads as whitespace
   '[',
   ']',
   '{',
@@ -27,8 +28,7 @@ const isDigit = c => /[0-9]/.test(c)
 function bareSafe(s) {
   // nil is a reserved spelling
   if (s.length === 0 || s === 'nil') return false
-  if (isDigit(s[0]) || ((s[0] === '+' || s[0] === '-') && isDigit(s[1])))
-    return false
+  if (isDigit(s[0]) || (s[0] === '-' && isDigit(s[1]))) return false
   for (const ch of s) if (DELIM.has(ch)) return false
   return true
 }

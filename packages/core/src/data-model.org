@@ -275,7 +275,7 @@ The size of the length is tiered as follows
 |---------------------+--------+-------------|
 | 7 > len >= 0        | small  | uint3       |
 | 255 > len >= 7      | medium | uint8       |
-| 2^32-1 > len >= 255 | large  | uint32      |
+| 2^32 > len >= 255   | large  | uint32      |
 
 Each form is mandatory in its range and an encoder must use the
 smallest form that fits. Decoders must reject the others such that
@@ -398,7 +398,9 @@ After skipping whitespace, the first character selects the token:
 
 - =[ ] { } ( ) := and =#{= are structural
 
--  =`= is to prefix a value and denote it as actionable
+-  =`= is to prefix a value and denote it as actionable. The mark must
+  immediately prefix its value: a repeated mark, or a mark separated
+  from its value, is a syntax error.
 
 - =;= begins a comment that runs to the end of the line. A comment is
   whitespace: it separates tokens and never reaches the value space.

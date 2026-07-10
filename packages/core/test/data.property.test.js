@@ -15,6 +15,7 @@ import {
   dict,
   record,
 } from '../src/data.js'
+import { read, print } from '../src/text/index.js'
 
 const hex = u8 =>
   [...u8]
@@ -24,13 +25,46 @@ const hex = u8 =>
 
 const ceHex = v => hex(encode(v))
 
+// Spellings that once broke, or nearly break, the textual syntax: reserved
+// words, delimiters, whitespace (the comma!), number look-alikes, escapes.
+// Mixed into the grapheme generators so the text round-trip stays honest.
+const spelling = fc.oneof(
+  fc.string({ unit: 'grapheme' }),
+  fc.constantFrom(
+    '',
+    'nil',
+    'a,b',
+    'has space',
+    'a:b',
+    'a;b',
+    "it's",
+    '"quoted"',
+    'back\\slash',
+    'new\nline',
+    '`x',
+    '#[',
+    '->',
+    '-',
+    '-5',
+    '007',
+    '-0',
+    '1.5',
+    '(',
+    ')',
+    '[',
+    ']',
+    '{',
+    '}'
+  )
+)
+
 const { value } = fc.letrec(tie => ({
   value: fc.oneof(
     { maxDepth: 3 },
     fc.constant(nil()),
     fc.bigInt().map(int),
-    fc.string({ unit: 'grapheme' }).map(string),
-    fc.string({ unit: 'grapheme' }).map(symbol),
+    spelling.map(string),
+    spelling.map(symbol),
     fc.uint8Array().map(bytes),
     tie('value').map(v => withMark(v, true)),
     fc.array(tie('value'), { maxLength: 4 }).map(list),
@@ -57,6 +91,33 @@ describe('round-trip', () => {
       expect(hex(encode(decode(ce)))).toBe(hex(ce))
     }
   )
+
+  test.prop([value])('read(print(v)) yields exactly v', v => {
+    const vs = read(print(v))
+    expect(vs.length).toBe(1)
+    expect(eq(vs[0], v)).toBe(true)
+  })
+})
+
+describe('encoding is total over depth', () => {
+  // The recursive encoder died near 3000 levels. Depth is capped here only
+  // because the per-node CE cache makes deep chains quadratic in time —
+  // this pins totality, not speed.
+  it('encodes values far deeper than the call stack', () => {
+    let v = int(1n)
+    for (let i = 0; i < 10_000; i++) v = list([v])
+    const ce = encode(v)
+    // one header and one END per level, two bytes for the innermost int
+    expect(ce.length).toBe(2 * 10_000 + 2)
+    expect(ce[0]).toBe(0x60)
+    expect(ce[ce.length - 1]).toBe(0xa0)
+  })
+
+  it('round-trips through decode within the decoder depth limit', () => {
+    let v = int(1n)
+    for (let i = 0; i < 1000; i++) v = list([v])
+    expect(eq(decode(encode(v)), v)).toBe(true)
+  })
 })
 
 describe('high-byte ordering', () => {

@@ -13,15 +13,18 @@ import { isValue, assertValue } from './forms.js'
 // The first 4 bits carry the type tag. The fifth bit is the actionable
 // flag. The last three bits carry the payload length for scalars, and
 // must be zero everywhere else.
-export const NIL_TAG = 0x1
-export const INT_TAG = 0x2
-export const STRING_TAG = 0x3
-export const SYMBOL_TAG = 0x4
-export const BYTES_TAG = 0x5
-export const LIST_TAG = 0x6
-export const RECORD_TAG = 0x7
-export const DICT_TAG = 0x8
-export const SET_TAG = 0x9
+/** Kind name → wire tag. The single authority for the tag numbering. */
+export const TAGS = Object.freeze({
+  nil: 0x1,
+  int: 0x2,
+  string: 0x3,
+  symbol: 0x4,
+  bytes: 0x5,
+  list: 0x6,
+  record: 0x7,
+  dict: 0x8,
+  set: 0x9,
+})
 export const END_BYTE = 0xa0
 
 /** @param {number} b */
@@ -100,6 +103,10 @@ export function symbol(value, actionable = false) {
 }
 
 /**
+ * The input is copied, so later writes to it can't reach the value. The
+ * payload inside the value is owned by the value: a typed array can't be
+ * frozen, so mutating it is undefined behavior (identity is cached from
+ * whatever the bytes were when first encoded).
  * @param {Uint8Array} value
  * @param {boolean} actionable
  */
@@ -169,17 +176,21 @@ export function dict(entries, actionable = false) {
 
 // ================ canonical encoding ================
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: true })
+export const ENC = new TextEncoder()
+export const DEC = new TextDecoder('utf-8', { fatal: true })
 
 /** @type {WeakMap<Value, Uint8Array>} */
 const CE_CACHE = new WeakMap()
 
 /**
+ * Values are frozen, so each node's encoding is computed once and cached;
+ * the returned array is always a private copy.
  * @param {Value} v
  * @returns {Uint8Array}
  */
 export function encode(v) {
+  const hit = CE_CACHE.get(v)
+  if (hit) return hit.slice()
   /** @type {number[]} */
   const sink = []
   encodeInto(v, sink)
@@ -187,56 +198,78 @@ export function encode(v) {
 }
 
 /**
+ * Emit v's encoding into the sink, from the cache when a node has been
+ * encoded before, caching every node it computes. Iterative on an explicit
+ * stack: identity must be total over the value space, so arbitrarily deep
+ * values encode without exhausting the call stack.
  * @param {Value} v
  * @param {number[]} sink
  */
 function encodeInto(v, sink) {
-  const mark = v.actionable ? 0x08 : 0
-  switch (v.kind) {
-    case 'nil':
-      sink.push((NIL_TAG << 4) | mark)
+  /** @type {Array<{node: Value, kids: readonly Value[], next: number, start: number}>} */
+  const stack = []
+
+  /**
+   * Splice a cached node, finish an atom in place, or open a frame by
+   * emitting its header and pushing it to have its children emitted.
+   * @param {Value} node
+   */
+  function begin(node) {
+    const hit = CE_CACHE.get(node)
+    if (hit) {
+      for (let i = 0; i < hit.length; i++) sink.push(hit[i])
       return
-    case 'int':
-      // The payload is the decimal notation itself. Bigint stringification
-      // is canonical by construction: no leading zeros, no -0, no +.
-      scalar(sink, (INT_TAG << 4) | mark, ENC.encode(v.value.toString()))
-      return
-    case 'string':
-      scalar(sink, (STRING_TAG << 4) | mark, ENC.encode(v.value))
-      return
-    case 'symbol':
-      scalar(sink, (SYMBOL_TAG << 4) | mark, ENC.encode(v.value))
-      return
-    case 'bytes':
-      scalar(sink, (BYTES_TAG << 4) | mark, v.value)
-      return
-    case 'list':
-      sink.push((LIST_TAG << 4) | mark)
-      for (const item of v.value) encodeInto(item, sink)
-      sink.push(END_BYTE)
-      return
-    case 'record':
-      sink.push((RECORD_TAG << 4) | mark)
-      for (const item of v.value) encodeInto(item, sink)
-      sink.push(END_BYTE)
-      return
-    // Note: sets & dicts shouldn't have to dedup — construction already
-    // canonicalized. I'm just being slightly paranoid about ordering.
-    case 'set':
-      sink.push((SET_TAG << 4) | mark)
-      for (const member of dedup(v.value)) encodeInto(member, sink)
-      sink.push(END_BYTE)
-      return
-    case 'dict':
-      sink.push((DICT_TAG << 4) | mark)
-      for (const [key, value] of dedupEntries(v.value)) {
-        encodeInto(key, sink)
-        encodeInto(value, sink)
+    }
+    const start = sink.length
+    const base = (TAGS[node.kind] << 4) | (node.actionable ? 0x08 : 0)
+    switch (node.kind) {
+      case 'nil':
+        sink.push(base)
+        break
+      case 'int':
+        // The payload is the decimal notation itself. Bigint stringification
+        // is canonical by construction: no leading zeros, no -0, no +.
+        scalar(sink, base, ENC.encode(node.value.toString()))
+        break
+      case 'string':
+      case 'symbol':
+        scalar(sink, base, ENC.encode(node.value))
+        break
+      case 'bytes':
+        scalar(sink, base, node.value)
+        break
+      // Note: sets & dicts shouldn't have to dedup — construction already
+      // canonicalized. I'm just being slightly paranoid about ordering.
+      case 'list':
+      case 'record':
+      case 'set':
+      case 'dict': {
+        sink.push(base)
+        const kids =
+          node.kind === 'set'
+            ? dedup(node.value)
+            : node.kind === 'dict'
+              ? dedupEntries(node.value).flat()
+              : node.value
+        stack.push({ node, kids, next: 0, start })
+        return
       }
+      default:
+        throw new Error('encode: invalid value!')
+    }
+    CE_CACHE.set(node, Uint8Array.from(sink.slice(start)))
+  }
+
+  begin(v)
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]
+    if (top.next < top.kids.length) {
+      begin(top.kids[top.next++])
+    } else {
       sink.push(END_BYTE)
-      return
-    default:
-      throw new Error('encode: invalid value!')
+      CE_CACHE.set(top.node, Uint8Array.from(sink.slice(top.start)))
+      stack.pop()
+    }
   }
 }
 
@@ -265,13 +298,17 @@ function scalar(sink, base, payload) {
   for (const b of payload) sink.push(b)
 }
 
-/** @param {Value} v */
+/**
+ * The shared cached encoding — never handed out, only compared against.
+ * @param {Value} v
+ */
 function cachedCE(v) {
   let b = CE_CACHE.get(v)
   if (!b) {
-    const encoded = encode(v)
-    CE_CACHE.set(v, encoded)
-    b = encoded
+    /** @type {number[]} */
+    const sink = []
+    encodeInto(v, sink) // caches every node it computes
+    b = /** @type {Uint8Array} */ (CE_CACHE.get(v))
   }
   return b
 }
@@ -437,31 +474,31 @@ export class BasslineDecoder {
     const mark = headerMark(b)
     const len3 = headerLen(b)
     switch (tag) {
-      case NIL_TAG:
+      case TAGS.nil:
         if (len3 !== 0) throw new Error('nil carries no payload')
         return mk('nil', null, mark)
-      case INT_TAG:
+      case TAGS.int:
         return this.decodeInt(this.readBytes(this.readLength(len3)), mark)
-      case STRING_TAG:
+      case TAGS.string:
         // fatal UTF-8 decode guarantees well-formedness
         return mk(
           'string',
           DEC.decode(this.readBytes(this.readLength(len3))),
           mark
         )
-      case SYMBOL_TAG:
+      case TAGS.symbol:
         return mk(
           'symbol',
           DEC.decode(this.readBytes(this.readLength(len3))),
           mark
         )
-      case BYTES_TAG:
+      case TAGS.bytes:
         // slice: don't alias the input buffer
         return mk('bytes', this.readBytes(this.readLength(len3)).slice(), mark)
-      case LIST_TAG:
-      case RECORD_TAG:
-      case DICT_TAG:
-      case SET_TAG:
+      case TAGS.list:
+      case TAGS.record:
+      case TAGS.dict:
+      case TAGS.set:
         if (len3 !== 0) throw new Error('a frame header carries no length')
         return this.decodeFrame(tag, mark, depth + 1)
       default:
@@ -494,19 +531,19 @@ export class BasslineDecoder {
       spans.push([start, this.pos])
     }
     switch (tag) {
-      case LIST_TAG:
+      case TAGS.list:
         return mk('list', /** @type {Value[]} */ (frozen(items)), mark)
-      case RECORD_TAG:
+      case TAGS.record:
         if (items.length === 0) throw new Error('record missing head')
         return mk(
           'record',
           /** @type {[Value, ...Value[]]} */ (frozen(items)),
           mark
         )
-      case SET_TAG:
+      case TAGS.set:
         this.assertAscending(spans, 'set member')
         return mk('set', /** @type {Value[]} */ (frozen(items)), mark)
-      case DICT_TAG: {
+      case TAGS.dict: {
         if (items.length % 2 !== 0) throw new Error('dict key missing value')
         this.assertAscending(
           spans.filter((_, i) => i % 2 === 0),

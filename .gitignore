@@ -1,56 +1,14 @@
-# Dependencies
-node_modules/
-bassline-web/node_modules/
-.pnp
-.pnp.js
-coverage/
-bassline-web/coverage/
-build/
-dist/
-dist-browser/
-dist-node/
-apps/visual/dist-electron/
-bassline-web/build/
-bassline-web/dist/
+# general things
 .DS_Store
+.claude
 
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-.pnpm-debug.log*
-.idea
-.vscode
-*.swp
-*.swo
-*~
-.cache/
-.vite/
-bassline-web/.cache/
-bassline-web/.vite/
-*.tsbuildinfo
-bassline-web/*.tsbuildinfo
-packages/*/dist/
-/docs/
-/.bassline
-/.bassline-dev
+# js things
+node_modules/
+coverage/
+dist/
 
-.npm
-bassline-web/.npm
-
-.eslintcache
-bassline-web/.eslintcache
-
-.stylelintcache
-bassline-web/.stylelintcache
-
-.node_repl_history
-bassline-web/.node_repl_history
-
-*.tgz
-
-.yarn-integrity
-bassline-web/.yarn-integrity
+# rust things
+target/
 
 .env
 .env.development
@@ -62,13 +20,5 @@ bassline-web/.yarn-integrity
 .env.production.local
 
 .mcp.json
-bassline-web/.env
-bassline-web/.env.development
-bassline-web/.env.production
-bassline-web/.env.test
 
-*.tmp
-*.temp
-/bassline-web/.react-router/
-
-apps/visual/release/
+packages/blrs/target

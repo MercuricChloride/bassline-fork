@@ -12,17 +12,23 @@
 /**
  * Read source text into a document (zero or more values).
  * @param {string} source
+ * @param {{maxDepth?: number}} [opts]
  * @returns {Value[]}
  */
-export function read(source: string): Value[];
+export function read(source: string, opts?: {
+    maxDepth?: number;
+}): Value[];
 /**
  * Like {@link read}, but each value is wrapped with its source span. `read` is
  * the projection `readSpans(source).map(s => s.value)`, so the values produced
  * are identical; only the span metadata is extra.
  * @param {string} source
+ * @param {{maxDepth?: number}} [opts]
  * @returns {Spanned[]}
  */
-export function readSpans(source: string): Spanned[];
+export function readSpans(source: string, { maxDepth }?: {
+    maxDepth?: number;
+}): Spanned[];
 export class ReaderError extends Error {
     /**
      * @param {string} source

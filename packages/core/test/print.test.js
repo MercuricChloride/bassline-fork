@@ -41,6 +41,7 @@ describe('atom formatting', () => {
     expect(print(symbol('+'))).toBe('+')
     expect(print(symbol('a|b'))).toBe('a|b') // | is an ordinary symbol char now
     expect(print(symbol('a b'))).toBe("'a b'") // whitespace
+    expect(print(symbol('a,b'))).toBe("'a,b'") // , reads as whitespace
     expect(print(symbol('a:b'))).toBe("'a:b'") // delimiter
     expect(print(symbol('a;b'))).toBe("'a;b'") // ; starts a comment now
     expect(print(symbol('->'))).toBe('->') // <> are ordinary symbol chars now
@@ -52,6 +53,7 @@ describe('atom formatting', () => {
     expect(print(symbol('NaN'))).toBe('NaN') // ditto
     expect(print(symbol('1x'))).toBe("'1x'") // number-like start
     expect(print(symbol('-5'))).toBe("'-5'") // would lex as a number
+    expect(print(symbol('+5'))).toBe('+5') // + is not a sign; lexes back as a symbol
   })
 
   it('quotes a symbol body on its own quote', () => {
@@ -120,6 +122,7 @@ describe('round-trip: read(print(v)) eq v', () => {
     string('unicode π 😀'),
     symbol('bare'),
     symbol('needs quoting: <>'),
+    symbol('a,b'), // , reads as whitespace — must re-read as one symbol
     symbol('a|b'), // | is an ordinary symbol char
     symbol('null'), // not reserved
     symbol('nil'), // reserved — quotes

@@ -1,8 +1,6 @@
 // @ts-check
 
-// Procedures over admitted values.
-
-/** @import {Value, Values} from './forms.js' */
+/** @import {Value, Values, Atom} from './forms.js' */
 import { assertValue } from './forms.js'
 import { eq, list, record, set, dict } from './codec.js'
 
@@ -26,6 +24,25 @@ export function* walk(v) {
         yield* walk(value)
       }
       break
+  }
+}
+
+/**
+ *
+ * @param {Value} v
+ * @yields {Atom}
+ * @returns {Generator<Atom, void>}
+ */
+export function* atoms(v) {
+  for (const val of walk(v)) {
+    switch (val.kind) {
+      case 'nil':
+      case 'int':
+      case 'string':
+      case 'symbol':
+      case 'bytes':
+        yield val
+    }
   }
 }
 
@@ -88,10 +105,38 @@ export function withMark(v, actionable = true) {
 }
 
 /**
+ * @overload
+ * @param {Values['dict']} v
+ * @param {(x: [Value, Value]) => [Value, Value]} fn
+ * @returns {Values['dict']}
+ */
+
+/**
+ * @overload
+ * @param {Values['list']} v
+ * @param {(x: Value) => Value} fn
+ * @returns {Values['list']}
+ */
+
+/**
+ * @overload
+ * @param {Values['set']} v
+ * @param {(x: Value) => Value} fn
+ * @returns {Values['set']}
+ */
+
+/**
+ * @overload
+ * @param {Values['record']} v
+ * @param {(x: Value) => Value} fn
+ * @returns {Values['record']}
+ */
+
+/**
  * Rebuild a frame by applying fn over its constituents — dict constituents
  * are [key, value] pairs — preserving the mark. Atoms come back unchanged.
  * @param {Value} v
- * @param {(x: Value | [Value, Value]) => Value | [Value, Value]} fn
+ * @param {((x: Value) => Value) | ((x: [Value, Value]) => [Value, Value])} fn
  * @returns {Value}
  */
 export function map(v, fn) {
@@ -112,22 +157,60 @@ export function map(v, fn) {
 }
 
 /**
- * The value under `key`, or undefined when the dictionary doesn't speak of it.
- * @param {Values['dict']} d
+ * The value under `key`, or undefined when the dict / set doesn't speak of it.
+ * @param {Values[('dict' | 'set')]} v
  * @param {Value} key
+ * @throws {TypeError} when v isn't a dict / set
  */
-export function dictGet(d, key) {
-  for (const [k, value] of d.value) {
-    if (eq(k, key)) return value
+export function at(v, key) {
+  switch (v.kind) {
+    case 'dict':
+      for (const [k, value] of v.value) {
+        if (eq(k, key)) return value
+      }
+      return undefined
+    case 'set':
+      for (const value of v.value) {
+        if (eq(value, key)) return value
+      }
+      return undefined
+    default:
+      throw new TypeError('at requires a dictionary or set!')
   }
-  return undefined
 }
 
 /**
- * Membership by value.
- * @param {Values['set']} s
- * @param {Value} v
+ * @overload
+ * @param {Values['dict']} v
+ * @param {Value} key
+ * @param {Value} Value
+ * @returns {Values['dict']}
  */
-export function setHas(s, v) {
-  return s.value.some(member => eq(member, v))
+
+/**
+ * @overload
+ * @param {Values['set']} v
+ * @param {Value} value
+ * @returns {Values['set']}
+ */
+
+/**
+ * Associate value  `key`, or undefined when the dict / set doesn't speak of it.
+ * @param {Values[('dict' | 'set')]} v
+ * @param {[Value] | [Value, Value]} args
+ * @throws {TypeError} when v isn't a dict / set
+ */
+export function assoc(v, ...args) {
+  switch (v.kind) {
+    case 'dict': {
+      const [key, val] = args
+      return dict([...v.value, [key, val]])
+    }
+    case 'set': {
+      const [val] = args
+      return set([...v.value, val])
+    }
+    default:
+      throw new TypeError('assoc requires a dictionary or set!')
+  }
 }
