@@ -3,12 +3,7 @@
   "version": "2.7.0",
   "description": "Partial Information Programming",
   "type": "module",
-  "types": "src/bassline.d.ts",
   "exports": {
-    ".": {
-      "types": "./src/bassline.d.ts",
-      "default": "./src/bassline.js"
-    },
     "./data": {
       "types": "./types/src/data.d.ts",
       "default": "./src/data.js"

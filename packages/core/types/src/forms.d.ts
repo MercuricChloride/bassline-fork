@@ -1,4 +1,6 @@
 /**
+ * Note! This is not a thorough or complete implementation rn.
+ * Too bad! I'll fix this up later fr.
  * @param {unknown} x
  * @returns {x is Value}
  */
@@ -20,11 +22,6 @@ export function isFrame(x: Value): x is Values[FrameKind];
  * @returns {asserts x is Value}
  */
 export function assertValue(x: unknown, msg?: string): asserts x is Value;
-export type ValueType<K extends FrameKind | AtomKind, T> = {
-    readonly kind: K;
-    readonly value: T;
-    readonly actionable: boolean;
-};
 export type BList = {
     readonly kind: "list";
     readonly actionable: boolean;
@@ -45,11 +42,31 @@ export type BSet = {
     readonly actionable: boolean;
     readonly value: Value[];
 };
-export type BNil = ValueType<"nil", null>;
-export type BInt = ValueType<"int", bigint>;
-export type BString = ValueType<"string", string>;
-export type BSymbol = ValueType<"symbol", string>;
-export type BBytes = ValueType<"bytes", Uint8Array>;
+export type BNil = {
+    readonly kind: "nil";
+    readonly value: null;
+    readonly actionable: boolean;
+};
+export type BInt = {
+    readonly kind: "int";
+    readonly value: bigint;
+    readonly actionable: boolean;
+};
+export type BString = {
+    readonly kind: "string";
+    readonly value: string;
+    readonly actionable: boolean;
+};
+export type BSymbol = {
+    readonly kind: "symbol";
+    readonly value: string;
+    readonly actionable: boolean;
+};
+export type BBytes = {
+    readonly kind: "bytes";
+    readonly value: Uint8Array;
+    readonly actionable: boolean;
+};
 export type Values = {
     nil: BNil;
     int: BInt;
