@@ -60,7 +60,8 @@ func encodeInto*[W](value: Value, w: var W) =
     let s = string(value.num)
     w.write s.toOpenArrayByte(0, s.high)
   of bText, bSym:
-    w.write value.text.toOpenArrayByte(0, value.text.high)
+    let s = string(value.text)
+    w.write s.toOpenArrayByte(0, s.high)
   of bBytes:
     w.write value.bytes
   of bList, bRecord:

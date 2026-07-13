@@ -15,9 +15,9 @@ func `$`*(v: Value): string =
   of bNum:
     prefix & $v.num
   of bSym:
-    prefix & v.text
+    prefix & $v.text
   of bText:
-    prefix & "\"" & v.text & "\""
+    prefix & "\"" & $v.text & "\""
   of bBytes:
     prefix & "#[" & v.bytes.mapIt($it.toHex).join & "]"
   of bList:

@@ -1,9 +1,8 @@
 {.experimental: "strictFuncs".}
 
 import std/[sequtils, algorithm]
-import decimal
-
-export decimal
+import strflavors
+export strflavors
 
 type
   BlKind* = enum
@@ -17,14 +16,14 @@ type
   Sorted*[Kind; T] = distinct seq[T]
 
   Value* = object
-    marked*: bool
-    case kind*: BlKind
+    marked: bool
+    case kind: BlKind
     of bNil:
       discard
     of bNum:
       num: DecimalString
     of bText, bSym:
-      text: string
+      text: Utf8String
     of bBytes:
       bytes: seq[byte]
     of bList, bRecord:
@@ -85,11 +84,13 @@ func payloadLength*(value: Value): int =
 # ================ ACCESSORS ================
 
 func num*(v: Value): lent DecimalString = v.num
-func text*(v: Value): lent string = v.text
+func text*(v: Value): lent Utf8String = v.text
 func bytes*(v: Value): lent seq[byte] = v.bytes
 func items*(v: Value): lent seq[Value] = v.items
 func elements*(v: Value): lent Sorted[SetOrder, Value] = v.elements
 func entries*(v: Value): lent Sorted[DictOrder, (Value, Value)] = v.entries
+func kind*(v: Value): BlKind = v.kind
+func marked*(v: Value): bool = v.marked
 
 # ================ ORDERING ================
 
@@ -178,11 +179,11 @@ func nilValue*(marked = false): Value =
 func num*(text: string; marked = false): Value =
   Value(kind: bNum, marked: marked, num: text.toDecimal)
 
-func text*(text: string; marked = false): Value =
-  Value(kind: bText, text: text, marked: marked)
+func text*[T](text: T; marked = false): Value =
+  Value(kind: bText, text: text.toValidUtf8, marked: marked)
 
-func sym*(text: string; marked = false): Value =
-  Value(kind: bSym, text: text, marked: marked)
+func sym*[T](text: T, marked = false): Value =
+  Value(kind: bSym, text: text.toValidUtf8, marked: marked)
 
 func bytes*(bytes: sink seq[byte]; marked = false): Value =
   Value(kind: bBytes, bytes: bytes, marked: marked)
