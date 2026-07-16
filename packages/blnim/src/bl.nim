@@ -1,16 +1,24 @@
 import std/parseopt
-import cmd/[serve, file, send]
+import cmd/[listen, file, send, hash, cat, keygen, sign, verify, put, get]
 
 proc printHelp() =
   echo """
 bl -- bassline cli
 
 Usage:
-  bl serve [--port:N] [--address:H] [--echo]
-                                 land values from TCP and print them
+  bl listen [on] [--echo]        land values (TCP dest or file to
+                                 follow) and write them to stdout
   bl file <path>                 write a file or directory to stdout
                                  as a value
-  bl send <dest>                 send values from stdin to a landing
+  bl send [dest]                 send values from stdin to a landing
+                                 (default 127.0.0.1:8455)
+  bl hash                        name each stdin value by content
+  bl cat [file ...]              print values as text
+  bl keygen [--out:PATH]         make a signing key (a value, mode 600)
+  bl sign [--key:PATH]           wrap each stdin value with attestation
+  bl verify                      check signed values, emit the inner
+  bl put [--store:PATH]          hold stdin values, emit their names
+  bl get [--store:PATH]          resolve digest names to content
   bl <command> --help            command-specific help
   bl -h | --help
   bl -v | --version
@@ -37,14 +45,35 @@ proc main() =
         quit 1
     of cmdArgument:
       case p.key
-      of "serve":
-        serve.run(p.remainingArgs())
+      of "listen":
+        listen.run(p.remainingArgs())
         return
       of "file":
         file.run(p.remainingArgs())
         return
       of "send":
         send.run(p.remainingArgs())
+        return
+      of "hash":
+        hash.run(p.remainingArgs())
+        return
+      of "cat":
+        cat.run(p.remainingArgs())
+        return
+      of "keygen":
+        keygen.run(p.remainingArgs())
+        return
+      of "sign":
+        sign.run(p.remainingArgs())
+        return
+      of "verify":
+        verify.run(p.remainingArgs())
+        return
+      of "put":
+        put.run(p.remainingArgs())
+        return
+      of "get":
+        get.run(p.remainingArgs())
         return
       else:
         echo "unknown command: ", p.key

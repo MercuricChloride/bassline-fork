@@ -1,8 +1,9 @@
-import std/[parseopt, os]
+import std/os
 import zippy
 import zippy/tarballs
 import ../blnim/misc/common
 import ../blnim/codec/encode
+import util
 
 const help = """
 bl file <path> [--zip]
@@ -46,7 +47,12 @@ proc valueOfPath(path: string; zip: bool): Value =
       for kind, entryPath in walkDir(path):
         case kind
         of pcFile, pcDir:
-          entries.add valueOfPath(entryPath, zip = false)
+          try:
+            entries.add valueOfPath(entryPath, zip = false)
+          except IOError as e:
+            # sockets, fifos, unreadables: walkDir calls them files,
+            # but we say shutup, nerd!
+            stderr.writeLine "-- skipping " & entryPath & ": " & e.msg
         else:
           discard  # symlinks and the like we just skip for now
       directory(entries, info(path))
@@ -62,34 +68,35 @@ proc run*(args: seq[string]) =
   var
     path = ""
     zip = false
-  var p = initOptParser(args, shortNoVal = {'h'}, longNoVal = @["help", "zip"])
-  while true:
-    p.next()
-    case p.kind
-    of cmdEnd:
-      break
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
+                                longNoVal = @["help", "zip"]):
+    case kind
     of cmdShortOption, cmdLongOption:
-      case p.key
+      case key
       of "h", "help":
         echo help
         return
       of "zip":
-        if p.val != "":
-          quit "--zip takes no value, got: " & p.val
+        if val != "":
+          quit "--zip takes no value, got: " & val
         zip = true
       else:
-        quit "unknown file option: " & p.key & "\n\n" & help
-    of cmdArgument:
+        quit "unknown file option: " & key & "\n\n" & help
+    else:
       if path != "":
         quit "file takes exactly one path\n\n" & help
-      path = p.key
+      path = key
 
   if path == "":
     quit "file needs a path\n\n" & help
   if not fileExists(path) and not dirExists(path):
     quit "no such file or directory: " & path
 
-  let ce = encode(valueOfPath(path, zip))
+  let ce =
+    try:
+      encode(valueOfPath(path, zip))
+    except IOError as e:
+      quit "can't read " & path & " -- " & e.msg
   if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
     quit "short write to stdout"
   stdout.flushFile()
