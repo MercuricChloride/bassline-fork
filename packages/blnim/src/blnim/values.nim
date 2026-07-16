@@ -222,8 +222,8 @@ func dict*(entries: sink seq[(Value, Value)]; marked = false): Value =
     if cmp(es[i - 1][0], es[i][0]) == 0:
       raise newException(ValueError, "dict: duplicate key")
   Value(
-    kind: bDict, 
-    marked: marked, 
+    kind: bDict,
+    marked: marked,
     entries: Sorted[DictOrder, (Value, Value)](es)
   )
 

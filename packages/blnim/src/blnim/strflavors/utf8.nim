@@ -1,6 +1,10 @@
+import utils
+
 type
   Utf8String* = distinct string
   InvalidUtf8Str* = object of CatchableError
+
+strDefaults(Utf8String)
 
 func isCont(b: byte): bool =
   (b and 0xC0) == 0x80
@@ -62,11 +66,3 @@ func toValidUtf8*(bytes: openArray[byte]): Utf8String =
 
 func toValidUtf8*(str: Utf8String): Utf8String = str
 func toValidUtf8*(str: string): Utf8String = str.toOpenArrayByte(0, str.high).toValidUtf8
-
-func len*(s: Utf8String): int = 
-  string(s).len
-func `==`*(a, b: Utf8String): bool = 
-  string(a) == string(b)
-func `cmp`*(a, b: Utf8String): int = 
-  cmp(string(a), string(b))
-func `$`*(s: Utf8String): string = string(s)

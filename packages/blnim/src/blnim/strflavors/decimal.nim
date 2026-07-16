@@ -1,8 +1,12 @@
 {.experimental: "strictFuncs".}
 
+import utils
+
 type
   DecimalString* = distinct string
   InvalidDecStr* = object of CatchableError
+
+strDefaults(DecimalString)
 
 func isDecimal*(str: string): bool =
   ## Canonical integer spelling per data-model.org: optional '-',
@@ -25,12 +29,3 @@ func toDecimal*(str: string): DecimalString =
     DecimalString(str)
   else:
     raise newException(InvalidDecStr, "not a canonical decimal integer: " & str)
-
-func `$`*(str: DecimalString): string =
-  string(str)
-
-func len*(str: DecimalString): int =
-  string(str).len
-
-func cmp*(a, b: DecimalString): int =
-  string(a).cmp(string(b))
