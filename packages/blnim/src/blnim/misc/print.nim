@@ -5,6 +5,14 @@ import std/sequtils
 import ../values
 export values
 
+func escaped(s: string): string =
+  ## printer escapes two characters, " & '
+  for c in s:
+    case c
+    of '"': result.add "\\\""
+    of '\\': result.add "\\\\"
+    else: result.add c
+
 func `$`*(v: Value): string =
   let prefix = if v.marked: "`" else: ""
 
@@ -16,7 +24,7 @@ func `$`*(v: Value): string =
   of bSym:
     prefix & $v.text
   of bText:
-    prefix & "\"" & $v.text & "\""
+    prefix & "\"" & escaped($v.text) & "\""
   of bBytes:
     prefix & "#[" & v.bytes.mapIt($it.toHex).join & "]"
   of bList:

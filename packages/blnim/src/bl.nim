@@ -1,48 +1,57 @@
-import std/[parseopt]
-
-# This is a stub for now!
+import std/parseopt
+import cmd/[serve, file, send]
 
 proc printHelp() =
   echo """
-bl cli
-Options:
-  -h, --help          Show this help message
-  -v, --version       Show version info
-  -g, --greet:<name>  Greet a specific user
+bl -- bassline cli
+
+Usage:
+  bl serve [--port:N] [--address:H] [--echo]
+                                 land values from TCP and print them
+  bl file <path>                 write a file or directory to stdout
+                                 as a value
+  bl send <dest>                 send values from stdin to a landing
+  bl <command> --help            command-specific help
+  bl -h | --help
+  bl -v | --version
 """
 
 proc main() =
-  var filename = ""
-  var greetName = ""
-
   var p = initOptParser()
   while true:
     p.next()
     case p.kind
-    of cmdEnd: break
+    of cmdEnd:
+      break
     of cmdShortOption, cmdLongOption:
       case p.key
       of "h", "help":
         printHelp()
         return
       of "v", "version":
-        echo "v1.0"
+        echo "bl 0.1.0"
         return
-      of "g", "greet":
-        greetName = p.val
       else:
-        echo "Unknown option: ", p.key
-        return
+        echo "unknown option: ", p.key
+        printHelp()
+        quit 1
     of cmdArgument:
-      filename = p.key
+      case p.key
+      of "serve":
+        serve.run(p.remainingArgs())
+        return
+      of "file":
+        file.run(p.remainingArgs())
+        return
+      of "send":
+        send.run(p.remainingArgs())
+        return
+      else:
+        echo "unknown command: ", p.key
+        printHelp()
+        quit 1
 
-  if filename == "":
-    echo "Error: Missing required filename argument."
-    printHelp()
-  else:
-    if greetName != "":
-      echo "Hello, ", greetName, "!"
-    echo "Processing file: ", filename
+  printHelp()
 
 when isMainModule:
   main()

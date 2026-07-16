@@ -12,3 +12,4 @@ binDir        = "bin"
 # Dependencies
 
 requires "nim >= 2.2.10"
+requires "zippy >= 0.10.19"

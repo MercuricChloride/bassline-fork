@@ -188,6 +188,12 @@ func sym*[T](text: T, marked = false): Value =
 func bytes*(bytes: sink seq[byte]; marked = false): Value =
   Value(kind: bBytes, bytes: bytes, marked: marked)
 
+func bytes*(s: string; marked = false): Value =
+  var buf = newSeq[byte](s.len)
+  if s.len > 0:
+    copyMem(addr buf[0], addr s[0], s.len)
+  Value(kind: bBytes, bytes: buf, marked: marked)
+
 func list*(items: sink seq[Value]; marked = false): Value =
   Value(kind: bList, items: items, marked: marked)
 

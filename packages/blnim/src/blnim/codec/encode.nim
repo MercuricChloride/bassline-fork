@@ -25,6 +25,15 @@ func write*(buf: var seq[byte], b: byte) =
 func write*(buf: var seq[byte], bytes: openArray[byte]) =
   buf.add bytes
 
+func write*(w: var string; b: byte) =
+  w.add char(b)
+
+func write*(w: var string; bytes: openArray[byte]) =
+  if bytes.len > 0:
+    let start = w.len
+    w.setLen(start + bytes.len)
+    copyMem(addr w[start], addr bytes[0], bytes.len)
+
 func encodeInto*[W](value: Value, w: var W) =
   ## Writes the CE bytes of `value` to any writer providing
   ## `write(var W, byte)` and `write(var W, openArray[byte])`.
@@ -77,5 +86,10 @@ func encodeInto*[W](value: Value, w: var W) =
       val.encodeInto w
     w.write END_BYTE
 
+
+
 func encode*(value: Value): seq[byte] =
+  value.encodeInto(result)
+
+func encodeToString*(value: Value): string =
   value.encodeInto(result)
