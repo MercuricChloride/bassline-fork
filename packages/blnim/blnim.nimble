@@ -6,12 +6,9 @@ description   = "Bassline nim implementation"
 license       = "AGPL-3.0-or-later"
 srcDir        = "src"
 installExt    = @["nim"]
-bin           = @["blnim"]
+bin           = @["bl"]
 binDir        = "bin"
 
 # Dependencies
 
 requires "nim >= 2.2.10"
-
-task bench, "Run codec benchmarks":
-  exec "nim r -d:release benchmarks/bench.nim"

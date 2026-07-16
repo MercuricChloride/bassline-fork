@@ -1,8 +1,8 @@
 {.experimental: "strictFuncs".}
 
 import std/[sequtils, algorithm]
-import strflavors
-export strflavors
+import strflavors/[decimal, utf8]
+export decimal, utf8
 
 type
   BlKind* = enum
@@ -221,7 +221,11 @@ func dict*(entries: sink seq[(Value, Value)]; marked = false): Value =
   for i in 1 ..< es.len:
     if cmp(es[i - 1][0], es[i][0]) == 0:
       raise newException(ValueError, "dict: duplicate key")
-  Value(kind: bDict, marked: marked, entries: Sorted[DictOrder, (Value, Value)](es))
+  Value(
+    kind: bDict, 
+    marked: marked, 
+    entries: Sorted[DictOrder, (Value, Value)](es)
+  )
 
 func mark*(v: sink Value): Value =
   result = v

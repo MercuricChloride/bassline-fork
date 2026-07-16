@@ -1,12 +1,10 @@
-import blnim/[decode, encode, print, hash]
 import std/[parseopt]
+
+# This is a stub for now!
 
 proc printHelp() =
   echo """
-bassline-cli v1.0
-Usage:
-  mycli [options] <filename>
-
+bl cli
 Options:
   -h, --help          Show this help message
   -v, --version       Show version info

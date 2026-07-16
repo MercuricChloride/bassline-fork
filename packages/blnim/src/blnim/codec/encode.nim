@@ -1,7 +1,6 @@
 {.experimental: "strictFuncs".}
 
-import values
-
+import ../values
 export values
 
 type

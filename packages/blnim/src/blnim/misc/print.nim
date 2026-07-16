@@ -2,8 +2,7 @@
 
 from std/strutils import join, toHex
 import std/sequtils
-import values
-
+import ../values
 export values
 
 func `$`*(v: Value): string =

@@ -1,14 +1,10 @@
 {.experimental: "strictFuncs".}
 
 import std/hashes
-import encode
+import ../codec/encode
 
 export encode
 export hashes
-
-# a writer sink for encodeInto: hashes the CE bytes as they
-# stream past, so hash is CE identity without materializing
-# the encoding
 
 type HashWriter = object
   h: Hash

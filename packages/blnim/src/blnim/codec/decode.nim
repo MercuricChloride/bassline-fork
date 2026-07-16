@@ -1,6 +1,6 @@
 {.experimental: "strictFuncs".}
 
-import values
+import ../values
 export values
 
 type 
@@ -58,27 +58,28 @@ func decodeValue(bytes: openArray[byte]; pos: var int; depth: int): Value =
     let 
       len = readLength(bytes, pos, lenBits)
       t: 0x2 .. 0x5 = tag
+      start = pos
+      stop = pos + len
     need(bytes, pos, len)
-    let payload = bytes[pos ..< pos + len]
     pos += len
     case t
     of 0x2:
       try:
-        num(toString(payload), marked)
+        num(toString(bytes[start ..< stop]), marked)
       except InvalidDecStr:
         fail "integer payload isn't canonical decimal notation"
     of 0x3:
       try:  
-        text(payload.toValidUtf8, marked)
+        text(toValidUtf8(bytes[start ..< stop]), marked)
       except InvalidUtf8Str:
         fail "Text payload malformed"
     of 0x4:
       try:
-        sym(payload.toValidUtf8, marked)
+        sym(toValidUtf8(bytes[start ..< stop]), marked)
       except InvalidUtf8Str:
         fail "Symbol payload malformed"
     of 0x5:
-      values.bytes(payload, marked)
+      values.bytes(bytes[start ..< stop], marked)
   of 0x6 .. 0x9:
     if lenBits != 0:
       fail "frame header with nonzero length bits"
