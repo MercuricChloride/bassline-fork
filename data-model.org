@@ -1,7 +1,9 @@
+:PROPERTIES:
+:ID:       BBCF2BA5-37D0-4094-A5E1-4D77FCAA3CA0
+:END:
 #+title: Bassline Data Model
 
 * Overview
-
 This document describes the canonical data model for Bassline as well
 as the rationale driving these decisions.
 
@@ -24,6 +26,7 @@ contents, it lets the contents of the data focus on expressing
 "dialects", semantically rich vocabulary, without inappropriately
 mixing the two.
 
+
 * Design Goals
 
 All Bassline programs communicate and operate using this model as a
@@ -45,6 +48,7 @@ The data model is syntax free, so any syntax you can provide that
 supports what we describe is fair game, with one exception: identity
 of values. Values acquire identity through exactly one canonical
 encoding (CE).
+
 
 ** What the data model includes and doesn't include
 
@@ -86,6 +90,7 @@ Two kinds that other formats include and we deliberately leave out:
   should be expressed as vocabulary. For example =(dec 15 -1)=
   for 15 x 10^-1 or a rational number as =(rat 42 54)=.
 
+
 * The Value Space
 
 A *value* is either an *atom* or a *frame*.
@@ -105,11 +110,11 @@ Note that atoms have internal structure at the representation level, but
 atomhood is about the value space. That is to say an atom has no constituents that
 are themselves values.
 
-* Atoms
+** Atoms
 
 Each of these atoms is a distinct type.
 
-** Nil
+*** Nil
 
 An explicitly asserted absence, and NOT a default value for something.
 
@@ -127,7 +132,8 @@ The model distinguishes between three epistemic states:
 
    A value isn't present, and thus doesn't have a denotation.
 
-** Integers
+
+*** Integers
 
 Arbitrary-precision signed integers with value equality.
 
@@ -136,38 +142,45 @@ The regex for this is =/^(0|-?[1-9][0-9]*)$/=
 Their canonical form is a string of numeric ascii characters no leading zeros.
 There is exactly one spelling of every integer anywhere in the system.
 
-** Text
+
+*** Text
 
 Well formed UTF-8 encoded text without any normalization.
 
-** Symbols
+
+*** Symbols
 
 Similar to strings, but denotes a symbol rather than contents to show.
 By making this its own data type, it prevents things from needing to implement
 recognition over stringly typed values.
 
-** Bytestrings
+
+*** Bytestrings
 
 A sequence of raw bytes, gives us a binary datatype.
 
-* Frames
+
+** Frames
 
 While these frames can technically be used to represent each other,
 they each exist for a distinct purpose and are considered distinct
 types.
 
-** Lists (Ordered Framing)
+
+*** Lists (Ordered Framing)
 
 A sequence of values organized by position.
 
-** Records (Ordered Labeled framing)
+
+*** Records (Ordered Labeled framing)
 
 A Record is a list-like value.
 
 It has a HEAD which is a VALUE, and a list of FIELD VALUES, possibly
 empty. The HEAD denotes the topic the fields are discussing.
 
-** Dictionaries (Unordered Associative Framing)
+
+*** Dictionaries (Unordered Associative Framing)
 
 An "unordered" set of associations from a KEY to a VAL. Both KEY and VAL
 are values.
@@ -180,13 +193,15 @@ CE bytes of its keys.
 
 Duplicate KEYs or non-ascending keys in a dictionary is a decoding error.
 
-** Sets (Unordered Unique framing)
+
+*** Sets (Unordered Unique framing)
 
 An "unordered" collection of unique values. Duplicate values is a parse
 error.
 
 The canonical form of a set is sorted lexicographically by the CE bytes of
 its members, with the same caveat as dictionaries.
+
 
 * Actionable Values
 
@@ -218,6 +233,7 @@ different grammatical forms that the sender can use and the receiver
 can differentiate. Giving us an explicit instruction form for
 messages.
 
+
 ** Actionable evaluation is outside of values
 
 Evaluation is not part of the data model, we simply have a way of
@@ -225,10 +241,12 @@ expressing values that "want" evaluation but are still values. Any
 evaluation of an actionable value is totally disjoint from the value
 space and exits it.
 
+
 * Equality
 
 Canonical equality is defined by bitwise equality of two values'
 canonically encoded forms.
+
 
 * Canonical Encoding (CE)
 
@@ -262,6 +280,7 @@ must be zero everywhere else.
 A header with tag =0x0= is invalid and the decoder must crash. The
 purpose of this is that zeroed memory never decodes as a value, and in
 particular never as null.
+
 
 ** Scalar lengths
 
@@ -298,6 +317,7 @@ capable of expressing numbers as large as 4.3GB of raw data. 🤷
 
 Null has no payload and its length bits must be zero.
 
+
 *** Small payload
 
 Small payloads under 7 bytes have their length stored in the last 3
@@ -312,6 +332,7 @@ So the header + payload would be:
   ╚═╦═╩═╩═╦═╝   ╚════════════════╝
    tag   length
 #+END_EXAMPLE
+
 
 *** Medium payload
 
@@ -329,6 +350,7 @@ So the header, length, payload would be:
     tag           ╚╸length
 #+END_EXAMPLE
 
+
 *** Large payload
 
 Large payloads occupy the 4 bytes following the header with length bits
@@ -343,6 +365,7 @@ So the header, length, payload would be:
   ╚═══╩═╩═══╝ ╚═══════╝ ╚════════╝ ╚═══════╝
 #+END_EXAMPLE
 
+
 ** Integer payloads
 
 The integer payload is its decimal notation as UTF-8 / ASCII: an optional
@@ -350,6 +373,7 @@ The integer payload is its decimal notation as UTF-8 / ASCII: an optional
 =-0= and no =+=. This is the same spelling the textual syntax uses,
 so there is one integer notation in the whole system, and encoding an
 integer is just writing it down.
+
 
 ** Frames
 
@@ -371,6 +395,7 @@ byte is the open bracket, END is the close bracket.
 - END is a single exact byte =0xA0=
 - =0xA1= through =0xAF= is invalid as END carries no flag and no length.
 
+
 ** What a decoder must reject
 
 - a header with tag =0x0=, or =0xb= through =0xf=
@@ -386,9 +411,14 @@ byte is the open bracket, END is the close bracket.
 - nesting past the decoder's depth limit (implementations should have
   one)
 
+
 * A textual syntax
+:PROPERTIES:
+:ID:       D0D01E4C-4D77-4F11-AEFF-2D45098597D7
+:END:
 
 This describes a textual syntax for working with this encoding.
+
 
 ** Tokens
 
@@ -430,6 +460,7 @@ splits a symbol from what follows, so =foo: bar= and =foo:bar= both read
 as the three tokens =foo : bar=, which is what lets dictionary entries
 be written =key: value=.
 
+
 ** Grammar
 
 The lower four productions (=Bytes=, =String=, =Symbol=, =Number=) are
@@ -456,14 +487,20 @@ tokens.
   Number   := "-"? digit+          ; Integer
 #+END_example
 
+
 ** Outside the grammar
+
 
 *** Reserved spelling for nil
 
 A bare symbol equal to =nil= denotes nil; any other bare run is a
 symbol. To use nil as a symbol, it must be quoted: ='nil'=.
 
+
 *** Number form
+:PROPERTIES:
+:ID:       35E8A819-9893-49E4-85C5-2F5EDE6F3911
+:END:
 
 A token is a number only when it opens with a digit, or a =-= on a
 digit; so =-= and =->= are symbols while =-5= is a number. There is no

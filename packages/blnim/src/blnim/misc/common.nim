@@ -19,8 +19,3 @@ type
   Digest* {.blRecord: "digest".} = object
     algo*: Sym
     hash*: seq[byte]
-
-func toBytes*(s: string): seq[byte] =
-  result = newSeq[byte](s.len)
-  if s.len > 0:
-    copyMem(addr result[0], addr s[0], s.len)

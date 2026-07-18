@@ -203,14 +203,16 @@ func text*[T](text: T; marked = false): Value =
 func sym*[T](text: T, marked = false): Value =
   Value(kind: bSym, text: text.toValidUtf8, marked: marked)
 
+func toBytes*(s: string): seq[byte] =
+  result = newSeq[byte](s.len)
+  if s.len > 0:
+    copyMem(addr result[0], addr s[0], s.len)
+
 func bytes*(bytes: sink seq[byte]; marked = false): Value =
   Value(kind: bBytes, bytes: bytes, marked: marked)
 
 func bytes*(s: string; marked = false): Value =
-  var buf = newSeq[byte](s.len)
-  if s.len > 0:
-    copyMem(addr buf[0], addr s[0], s.len)
-  Value(kind: bBytes, bytes: buf, marked: marked)
+  Value(kind: bBytes, bytes: s.toBytes, marked: marked)
 
 func list*(items: sink seq[Value]; marked = false): Value =
   Value(kind: bList, items: items, marked: marked)
