@@ -10,10 +10,10 @@
 ## and "proper"
 
 import std/[os, options, strutils]
-import ../blnim/codec/[decode, digest]
+import ../blnim/codec/[decode, digest, encode]
 import ../blnim/misc/common
 import util
-export options, decode, digest, common
+export options, decode, digest, encode, common
 
 type
   Store* = object
@@ -40,29 +40,21 @@ func safeAlgo*(algo: string): bool =
   ## tame alphabet may pass.
   algo.len > 0 and allCharsInSet(algo, {'a'..'z', '0'..'9', '-'})
 
-func toDigestParts*(v: Value): Option[(string, seq[byte])] =
-  ## Recognizes (digest <algo> #[hash]).
-  if v.kind == bRecord and v.items.len == 3 and
-     v.items[0] == sym"digest" and v.items[1].kind == bSym and
-     v.items[2].kind == bBytes:
-    some(($v.items[1].text, v.items[2].bytes))
-  else:
-    none (string, seq[byte])
-
 proc pathFor(s: Store; algo: string; hash: openArray[byte]): string =
   s.root / algo / hexName(hash)
 
-proc put*(s: Store; v: Value): Value =
-  ## Holds v, returns its name: idempotent, convergent -- the same
-  ## value from anyone lands as the same file.
-  let hash = sha256(v)
-  let dest = s.pathFor("sha256", hash)
+proc put*[T: ValueLike](s: Store; x: T): Digest =
+  ## Holds x as a value, returns its name: idempotent, convergent --
+  ## the same value from anyone lands as the same file.
+  let v = toValue(x)
+  let d = digest(v)
+  let dest = s.pathFor("sha256", d.hash)
   if not fileExists(dest):
     createDir(dest.parentDir)
     let tmp = dest & ".tmp" & $getCurrentProcessId()
     writeFile(tmp, encodeToString(v))
     moveFile(tmp, dest)
-  digest("sha256", hash)
+  d
 
 proc load*(s: Store; algo: string; hash: seq[byte]): Option[string] =
   ## The stored CE bytes for a name, or none if the store doesn't
@@ -79,3 +71,8 @@ proc load*(s: Store; algo: string; hash: seq[byte]): Option[string] =
       raise newException(StoreError, "corrupt: " & path &
                          " no longer matches its name")
   some raw
+
+proc load*(s: Store; d: Digest): Option[string] =
+  ## The stored CE bytes for a typed name. The Sym -> path-string
+  ## cast lives here, at the boundary, and nowhere else.
+  s.load($d.algo, d.hash)

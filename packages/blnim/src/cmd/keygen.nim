@@ -47,7 +47,7 @@ proc run*(args: seq[string]) =
   let kp = keypairFromSeed(seed)
 
   createDir(outPath.parentDir)
-  writeFile(outPath, encodeToString(keypair(Scheme, kp.seed, kp.public)))
+  writeFile(outPath, encodeToString(kp))
   setFilePermissions(outPath, {fpUserRead, fpUserWrite})
   stderr.writeLine "-- wrote " & outPath
   stderr.writeLine "-- public " & $bytes(@(kp.public))

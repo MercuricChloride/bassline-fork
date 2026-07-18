@@ -23,5 +23,4 @@ proc run*(args: seq[string]) =
     else:
       quit "hash takes no arguments\n\n" & help
 
-  runFilter(proc (v: Value): Option[Value] =
-    some digest("sha256", sha256(v)))
+  runFilter(proc (v: Value): Option[Digest] = some digest v)

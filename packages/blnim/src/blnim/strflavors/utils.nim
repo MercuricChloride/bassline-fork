@@ -14,4 +14,4 @@ template strDefaults*(T) =
   func `$`*(s: T): string {.inject.} =
     s.string
 
-  func toString*(s: T): string {.inject.} = $s
+  func toString*(s: T): string {.inject.} = string(s)

@@ -20,11 +20,10 @@ Options:
           file record whose info gains zip: tarball
 """
 
-proc info(path: string; zip = ""): Value =
-  var entries = @[(sym"name", text(lastPathPart(path)))]
+proc info(path: string; zip = ""): BlFileInfo =
+  result.name = some lastPathPart(path)
   if zip != "":
-    entries.add (sym"zip", sym(zip))
-  dict(entries)
+    result.zip = some Sym(zip)
 
 proc tarball(path: string): Value =
   let tmp = getTempDir() / "bl-tarball-" & $getCurrentProcessId() & ".tar.gz"
@@ -33,7 +32,10 @@ proc tarball(path: string): Value =
       createTarball(path, tmp)
     except CatchableError as e:
       quit "can't tarball " & path & " -- " & e.msg
-    common.file(readFile(tmp), info(path, zip = "tarball"))
+    BlFile(
+      contents: readFile(tmp).toBytes,
+      info: some info(path, zip = "tarball")
+    ).toValue
   finally:
     if fileExists(tmp):
       removeFile(tmp)
@@ -54,15 +56,17 @@ proc valueOfPath(path: string; zip: bool): Value =
             # but we say shutup, nerd!
             stderr.writeLine "-- skipping " & entryPath & ": " & e.msg
         else:
-          discard  # symlinks and the like we just skip for now
-      directory(entries, info(path))
+          discard # symlinks and the like we just skip for now
+      toValue Directory(entries: entries, info: some info(path))
   else:
     let contents = readFile(path)
     if zip:
-      common.file(compress(contents, dataFormat = dfGzip),
-                  info(path, zip = "gzip"))
+      BlFile(
+        contents: compress(contents, dataFormat = dfGzip).toBytes,
+        info: some info(path, zip = "gzip")
+      ).toValue
     else:
-      common.file(contents, info(path))
+      toValue BlFile(contents: toBytes(contents), info: some info(path))
 
 proc run*(args: seq[string]) =
   var

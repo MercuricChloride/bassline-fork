@@ -6,7 +6,7 @@
 
 import checksums/sha2
 import encode
-export encode
+import ../misc/common
 
 type Sha256Writer = object
   ctx: ShaStateStatic[Sha_256]
@@ -33,3 +33,7 @@ func sha256*(bytes: openArray[byte]): array[32, byte] =
   w.write(bytes)
   let d = w.ctx.digest()
   copyMem(addr result[0], addr d[0], 32)
+
+func digest*[T: ValueLike](x: T): Digest =
+  ## A value's name by content
+  Digest(algo: Sym"sha256", hash: @(sha256 toValue(x)))

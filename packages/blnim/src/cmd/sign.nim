@@ -1,5 +1,5 @@
 import std/os
-import ../blnim/misc/clave
+import ../blnim/misc/[clave, common]
 import ../blnim/codec/decode
 import util
 import keygen
@@ -17,16 +17,12 @@ Default key: ~/.bl/key.blb (bl keygen)
 proc loadKeypair(path: string): Keypair =
   if not fileExists(path):
     quit "no key at " & path & " (run bl keygen)"
-  let raw = readFile(path)
-  var bs = newSeq[byte](raw.len)
-  if raw.len > 0:
-    copyMem(addr bs[0], addr raw[0], raw.len)
   let v =
     try:
-      decode(bs)
+      decode(readFile(path))
     except DecodeError as e:
       quit path & " isn't a value: " & e.msg
-  let kp = toKeypair(v)
+  let kp = fromValue(v, Keypair)
   if kp.isNone:
     quit path & " doesn't hold a (keypair " & Scheme & " ...) value"
   kp.get

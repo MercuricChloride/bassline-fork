@@ -31,5 +31,4 @@ proc run*(args: seq[string]) =
       quit "put takes no arguments\n\n" & help
 
   let s = openStore(root)
-  runFilter(proc (v: Value): Option[Value] =
-    some s.put(v))
+  runFilter(proc (v: Value): Option[Digest] = some s.put(v))

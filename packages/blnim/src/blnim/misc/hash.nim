@@ -1,11 +1,11 @@
 {.experimental: "strictFuncs".}
 
 ## This module is probably poorly named! Too bad!
-## 
+##
 ## This is table & set plumbing, not a deterministic universal hash.
 ## This is because the nim table hasher it isn't stable across
-## nim versions or writer chunking patterns. 
-## 
+## nim versions or writer chunking patterns.
+##
 ## If you need a hashed digest of a value, use codec/digest to get it's
 ## sha256 over the ce bytes.
 

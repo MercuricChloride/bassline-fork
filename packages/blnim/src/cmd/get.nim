@@ -31,19 +31,19 @@ proc run*(args: seq[string]) =
       quit "get takes no arguments\n\n" & help
 
   let s = openStore(root)
-  runFilter(proc (v: Value): Option[Value] =
-    let parts = toDigestParts(v)
-    if parts.isNone:
-      return some v
-    let (algo, hash) = parts.get
-    let raw =
-      try:
-        s.load(algo, hash)
-      except StoreError as e:
-        quit e.msg
-    if raw.isNone:
-      quit "not in store: " & $v
-    var bs = newSeq[byte](raw.get.len)
-    if bs.len > 0:
-      copyMem(addr bs[0], addr raw.get[0], bs.len)
-    some decode(bs))
+  runFilter(
+    proc (v: Value): Option[Value] =
+      let d = fromValue(v, Digest)
+      if d.isNone:
+        return some v
+      let raw =
+        try:
+          s.load(d.get)
+        except StoreError as e:
+          quit e.msg
+
+      if raw.isNone:
+        quit "not in store: " & $v
+
+      some decode raw.get
+  )

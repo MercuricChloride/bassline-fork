@@ -56,7 +56,6 @@ func toString*(s: openArray[byte]): string =
   result = newString(s.len)
   for i in 0 ..< s.len:
     result[i] = char(s[i])
-func toString*(s: Utf8String): string = string(s)
 
 func toValidUtf8*(bytes: openArray[byte]): Utf8String =
   if bytes.isValidUtf8:

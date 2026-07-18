@@ -88,19 +88,21 @@ proc eachValue*(input: File; action: proc (v: Value)) =
   if sd.buffered > 0:
     quit "input ends mid-value (" & $sd.buffered & " incomplete bytes)"
 
-proc runFilter*(f: proc (v: Value): Option[Value]) =
-  ## Lifts a value function into a stdin -> stdout stream filter.
-  ## None drops the value indicating refusal; 
-  ## everything else is one value in, one out. 
+proc runFilter*[T: ValueLike](f: proc (v: Value): Option[T]) =
+  ## Lifts a function from values to ValueLikes into a
+  ## stdin -> stdout stream filter.
+  ## None drops the value indicating refusal;
+  ## everything else is one value in, one out.
   ## Flushes stdout per value.
   ## A filter in a live pipeline must pass each value on now, not when
   ## its stdio buffer happens to fill.
   ## ie:
   ## bl listen | bl x | ...
+  mixin toValue
   eachValue(stdin, proc (v: Value) =
     let o = f(v)
     if o.isSome:
-      let ce = encode(o.get)
+      let ce = encode o.get.toValue
       if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
         quit "short write to stdout"
       stdout.flushFile())

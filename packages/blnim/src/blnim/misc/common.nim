@@ -1,17 +1,26 @@
 {.experimental: "strictFuncs".}
 
-import std/options
-import ../values
-export values, options
+import ../dialect
+export dialect
 
-func file*[T](contents: T; info = nilValue()): Value =
-  ## (file #[contents] info)
-  record(sym"file", bytes(contents), info)
+type
+  BlFileInfo* {.blDict.} = object
+    name*: Option[string]
+    zip*: Option[Sym]
 
-func directory*(files: sink seq[Value]; info = nilValue()): Value =
-  ## (directory #{files} info)
-  record(sym"directory", set(files), info)
+  BlFile* {.blRecord: "file".} = object
+    contents*: seq[byte]
+    info*: Option[BlFileInfo]
 
-func digest*(alg: string; hash: openArray[byte]): Value =
-  ## (digest <alg> #[hash])
-  record(sym"digest", sym(alg), bytes(@hash))
+  Directory* {.blRecord: "directory".} = object
+    entries* {.blSet.}: seq[Value]
+    info*: Option[BlFileInfo]
+
+  Digest* {.blRecord: "digest".} = object
+    algo*: Sym
+    hash*: seq[byte]
+
+func toBytes*(s: string): seq[byte] =
+  result = newSeq[byte](s.len)
+  if s.len > 0:
+    copyMem(addr result[0], addr s[0], s.len)

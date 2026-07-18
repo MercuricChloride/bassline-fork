@@ -7,7 +7,7 @@ const help = """
 bl listen [on] [--echo] [--max-value:BYTES]
 
 Lands values and writes them to stdout to be piped into
-filters; bl listen | bl cat prints them. 
+filters; bl listen | bl cat prints them.
 
 `on` is either a TCP dest (port, :port, or host:port -- default 127.0.0.1:8455) or a file
 path, which is followed: existing values are emitted, then appends

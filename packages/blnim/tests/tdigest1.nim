@@ -17,7 +17,7 @@ suite "digest":
     for v in [nilValue(), num"42", text"hello", mark(sym"f"),
               bytes(@[byte 1, 2, 3]),
               text(repeat('e', 70_000)),
-              common.file("hi"),
+              toValue(BlFile(contents: toBytes"hi")),
               set(num"3", num"1", num"2"),
               dict(@[(sym"a", num"1"), (sym"b", list())]),
               mark(list(sym"q", record(sym"add", num"1", num"2")))]:
@@ -28,5 +28,5 @@ suite "digest":
 
   test "digest record shape":
     let v = num"1"
-    check digest("sha256", sha256(v)) ==
+    check toValue(Digest(algo: Sym"sha256", hash: @(sha256(v)))) ==
           record(sym"digest", sym"sha256", bytes(@(sha256(v))))

@@ -86,10 +86,10 @@ func encodeInto*[W](value: Value, w: var W) =
       val.encodeInto w
     w.write END_BYTE
 
+func encode*[T: ValueLike](x: T): seq[byte] =
+  mixin toValue
+  encodeInto(x.toValue, result)
 
-
-func encode*(value: Value): seq[byte] =
-  value.encodeInto(result)
-
-func encodeToString*(value: Value): string =
-  value.encodeInto(result)
+func encodeToString*[T: ValueLike](x: T): string =
+  mixin toValue
+  encodeInto(x.toValue, result)

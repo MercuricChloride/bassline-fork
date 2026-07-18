@@ -6,15 +6,13 @@ proc printHelp() =
 bl -- bassline cli
 
 Usage:
-  bl listen [on] [--echo]        land values (TCP dest or file to
-                                 follow) and write them to stdout
+  bl listen [on] [--echo]        open a landing for values to stdout
   bl file <path>                 write a file or directory to stdout
                                  as a value
   bl send [dest]                 send values from stdin to a landing
-                                 (default 127.0.0.1:8455)
   bl hash                        name each stdin value by content
   bl cat [file ...]              print values as text
-  bl keygen [--out:PATH]         make a signing key (a value, mode 600)
+  bl keygen [--out:PATH]         generate a keypair value
   bl sign [--key:PATH]           wrap each stdin value with attestation
   bl verify                      check signed values, emit the inner
   bl put [--store:PATH]          hold stdin values, emit their names

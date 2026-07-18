@@ -23,11 +23,13 @@ proc run*(args: seq[string]) =
     else:
       quit "verify takes no arguments\n\n" & help
 
-  runFilter(proc (v: Value): Option[Value] =
-    if not isSigned(v):
-      some v
-    else:
-      let inner = verifySigned(v)
-      if inner.isNone:
+  runFilter(
+    proc (v: Value): Option[Value] =
+      let s = v.fromValue: Signed
+      if s.isNone:
+        some v # doesn't claim to be signed
+      elif s.get.holds:
+        some s.get.value
+      else:
         quit "signature verification failed"
-      inner)
+  )

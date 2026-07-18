@@ -1,6 +1,6 @@
 {.experimental: "strictFuncs".}
 
-import std/[sequtils, algorithm]
+import std/[sequtils, algorithm, options]
 import strflavors/[decimal, utf8]
 export decimal, utf8
 
@@ -32,6 +32,12 @@ type
       elements: Sorted[SetOrder, Value]
     of bDict:
       entries: Sorted[DictOrder, (Value, Value)]
+
+  ValueLike* = concept x
+    ## anything that can speak as a value and be made from a value;
+    ## toValue is total, fromValue is partial
+    toValue(x) is Value
+    fromValue(default(Value), typeof(x)) is Option[typeof(x)]
 
 const
   scalarKinds: set[BlKind] = {bNil, bNum, bText, bSym, bBytes}
@@ -91,6 +97,10 @@ func elements*(v: Value): lent Sorted[SetOrder, Value] = v.elements
 func entries*(v: Value): lent Sorted[DictOrder, (Value, Value)] = v.entries
 func kind*(v: Value): BlKind = v.kind
 func marked*(v: Value): bool = v.marked
+func head*(v: Value): Value =
+  v.items[0]
+func tail*(v: Value): seq[Value] =
+  v.items[1..high(v.items)]
 
 # ================ ORDERING ================
 
@@ -173,11 +183,19 @@ func `<=`*(a, b: Value): bool = cmp(a, b) <= 0
 
 # ================ CONSTRUCTORS ================
 
+
+func toValue*(v: Value): Value = v
+func fromValue*(v: Value; t: typedesc[Value]): Option[Value] = some v
+
 func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)
 
 func num*(text: string; marked = false): Value =
   Value(kind: bNum, marked: marked, num: text.toDecimal)
+
+func num*(d: DecimalString; marked = false): Value =
+  ## Already canonical
+  Value(kind: bNum, marked: marked, num: d)
 
 func text*[T](text: T; marked = false): Value =
   Value(kind: bText, text: text.toValidUtf8, marked: marked)

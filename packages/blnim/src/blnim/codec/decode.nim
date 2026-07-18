@@ -1,6 +1,7 @@
 {.experimental: "strictFuncs".}
 
 import ../values
+import ../misc/common
 export values
 
 type 
@@ -127,3 +128,6 @@ func decode*(bytes: openArray[byte]; maxDepth = 64): Value =
   result = decodeValue(bytes, pos, maxDepth)
   if pos != bytes.len:
     fail "trailing bytes after value"
+
+func decode*(str: string, maxDepth = 64): Value =
+  decode(str.toBytes, maxDepth)

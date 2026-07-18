@@ -6,16 +6,15 @@ removeDir(root)
 
 suite "content-addressed store":
   let s = openStore(root)
-  let doc = common.file("hello", dict(@[(sym"name", text"hello.txt")]))
+  let doc = toValue(BlFile(contents: toBytes"hello",
+                         info: some BlFileInfo(name: some "hello.txt")))
 
   test "put returns the name; load round trips the CE bytes":
     let name = s.put(doc)
-    let parts = toDigestParts(name)
-    check parts.isSome
-    let (algo, hash) = parts.get
-    check algo == "sha256"
-    check hash == @(sha256(doc))
-    let raw = s.load(algo, hash)
+    check name == digest(doc)
+    check name.algo == "sha256"
+    check name.hash == @(sha256(doc))
+    let raw = s.load(name)
     check raw.isSome
     check raw.get == encodeToString(doc)
 
@@ -35,7 +34,6 @@ suite "content-addressed store":
 
   test "a file that no longer matches its name is an error":
     let name = s.put(text"fragile")
-    let (algo, hash) = toDigestParts(name).get
     # sneak corruption in behind the store's back
     let target = encodeToString(text"fragile")
     for path in walkFiles(root / "sha256" / "*"):
@@ -43,7 +41,7 @@ suite "content-addressed store":
         writeFile(path, "garbage")
         break
     expect StoreError:
-      discard s.load(algo, hash)
+      discard s.load(name)
 
   test "path-hostile algo names are refused":
     check not safeAlgo("../../../etc")
