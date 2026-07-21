@@ -28,7 +28,7 @@ func isDecimal*(str: string): bool =
     return false
   true
 
-func toDecimal*(str: DecimalString): DecimalString = str
+func toDecimal*(str: DecimalString): DecimalString {.inline.} = str
 func toDecimal*(str: string): DecimalString =
   if str.isDecimal:
     DecimalString(str)

@@ -63,5 +63,5 @@ func toValidUtf8*(bytes: openArray[byte]): Utf8String =
   else:
     raise newException(InvalidUtf8Str, "malformed utf8 bytes")
 
-func toValidUtf8*(str: Utf8String): Utf8String = str
+func toValidUtf8*(str: Utf8String): Utf8String {.inline.} = str
 func toValidUtf8*(str: string): Utf8String = str.toOpenArrayByte(0, str.high).toValidUtf8
