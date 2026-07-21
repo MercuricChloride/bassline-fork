@@ -3,7 +3,7 @@
 import ../values
 export values
 
-type 
+type
   DecodeError* = object of CatchableError
 
 func fail(msg: string) {.noreturn.} =
@@ -55,7 +55,7 @@ func decodeValue(bytes: openArray[byte]; pos: var int; depth: int): Value =
     nilValue(marked)
 
   of 0x2 .. 0x5:
-    let 
+    let
       len = readLength(bytes, pos, lenBits)
       t: 0x2 .. 0x5 = tag
       start = pos
@@ -69,7 +69,7 @@ func decodeValue(bytes: openArray[byte]; pos: var int; depth: int): Value =
       except InvalidDecStr:
         fail "integer payload isn't canonical decimal notation"
     of 0x3:
-      try:  
+      try:
         text(toValidUtf8(bytes[start ..< stop]), marked)
       except InvalidUtf8Str:
         fail "Text payload malformed"

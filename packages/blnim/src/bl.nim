@@ -1,5 +1,5 @@
 import std/parseopt
-import cmd/[listen, file, send, hash, cat, keygen, sign, verify, put, get]
+import cmd/[listen, file, send, hash, cat, keygen, sign, verify, put, get, read]
 
 proc printHelp() =
   echo """
@@ -12,6 +12,7 @@ Usage:
   bl send [dest]                 send values from stdin to a landing
   bl hash                        name each stdin value by content
   bl cat [file ...]              print values as text
+  bl read [file ...]             read text values, write canonical bytes
   bl keygen [--out:PATH]         generate a keypair value
   bl sign [--key:PATH]           wrap each stdin value with attestation
   bl verify                      check signed values, emit the inner
@@ -57,6 +58,9 @@ proc main() =
         return
       of "cat":
         cat.run(p.remainingArgs())
+        return
+      of "read":
+        read.run(p.remainingArgs())
         return
       of "keygen":
         keygen.run(p.remainingArgs())

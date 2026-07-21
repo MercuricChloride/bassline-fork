@@ -9,8 +9,13 @@ type
 strDefaults(DecimalString)
 
 func isDecimal*(str: string): bool =
-  ## Canonical integer spelling per data-model.org: optional '-',
-  ## then digits with no leading zero; zero is "0"; no "-0", no "+".
+  ## Canonical integer spelling per the data model
+  ## 
+  ## optional '-' for negative non-zero values
+  ## 
+  ## then digits with no leading zero
+  ## 
+  ## zero is just "0"
   let start = if str.len > 0 and str[0] == '-': 1 else: 0
   if str.len == start:
     return false

@@ -10,9 +10,8 @@ type
     bNum, bText, bSym, bBytes,  # scalar types
     bList, bRecord, bDict, bSet # frame types
 
-  SetOrder* = object
-  DictOrder* = object
-
+  SetOrder = object
+  DictOrder = object
   Sorted*[Kind; T] = distinct seq[T]
 
   Value* = object
@@ -34,35 +33,32 @@ type
       entries: Sorted[DictOrder, (Value, Value)]
 
   ValueLike* = concept x
-    ## anything that can speak as a value and be made from a value;
+    ## anything that can speak as a value or be made from a value
+    ## 
     ## toValue is total, fromValue is partial
     toValue(x) is Value
-    fromValue(default(Value), typeof(x)) is Option[typeof(x)]
+    fromValue(Value, typeof(x)) is Option[typeof(x)]
 
-const
-  scalarKinds: set[BlKind] = {bNil, bNum, bText, bSym, bBytes}
-  frameKinds: set[BlKind] = {bList, bRecord, bDict, bSet}
-  END_BYTE*: byte = 0xA0
-
+const END_BYTE*: byte = 0xA0
 # ================ SORTED ================
 # We use a distinct type so we don't have to worry about
 # improper usage polluting our values
-# TODO: I haven't fully locked this down yet
 
-iterator items*[K; T](s: Sorted[K, T]): lent T =
-  for x in seq[T](s):
-    yield x
+template sorted(ty, el: typedesc) =
+  iterator items*(v: ty): lent el {.borrow.}
+  func len*(v: ty): int {.borrow.}
+  func `[]`*[I: SomeOrdinal](v: ty, i: I): lent el =
+    seq[el](v)[i]
 
-func len*[K; T](s: Sorted[K, T]): int =
-  seq[T](s).len
-
-func `[]`*[K; T](s: Sorted[K, T]; i: int): lent T =
-  seq[T](s)[i]
+sorted(Sorted[SetOrder, Value], Value)
+sorted(Sorted[DictOrder, (Value, Value)], (Value, Value))
 
 # ================ RECOGNITION ================
 
-func isScalar*(value: Value): bool = scalarKinds.contains(value.kind)
-func isFrame*(value: Value): bool = frameKinds.contains(value.kind)
+func isKind*(v: Value, k: BlKind): bool = v.kind == k
+func isKind*(v: Value, k: set[BlKind]): bool = k.contains(v.kind)
+func isScalar*(v: Value): bool = v.isKind({bNil, bNum, bText, bSym, bBytes})
+func isFrame*(v: Value): bool = v.isKind({bList, bRecord, bDict, bSet})
 
 func tag*(value: Value): 1..9 =
   case value.kind
@@ -89,15 +85,16 @@ func payloadLength*(value: Value): int =
 
 # ================ ACCESSORS ================
 
+func kind*(v: Value): BlKind = v.kind
+func marked*(v: Value): bool = v.marked
 func num*(v: Value): lent DecimalString = v.num
 func text*(v: Value): lent Utf8String = v.text
 func bytes*(v: Value): lent seq[byte] = v.bytes
-func items*(v: Value): lent seq[Value] = v.items
+
 func elements*(v: Value): lent Sorted[SetOrder, Value] = v.elements
 func entries*(v: Value): lent Sorted[DictOrder, (Value, Value)] = v.entries
-func kind*(v: Value): BlKind = v.kind
-func marked*(v: Value): bool = v.marked
-func head*(v: Value): Value =
+func items*(v: Value): lent seq[Value] = v.items
+func head*(v: Value): lent Value =
   v.items[0]
 func tail*(v: Value): seq[Value] =
   v.items[1..high(v.items)]
@@ -191,17 +188,17 @@ func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)
 
 func num*(text: string; marked = false): Value =
-  Value(kind: bNum, marked: marked, num: text.toDecimal)
+  Value(kind: bNum, marked: marked, num: toDecimal(text))
 
 func num*(d: DecimalString; marked = false): Value =
   ## Already canonical
   Value(kind: bNum, marked: marked, num: d)
 
 func text*[T](text: T; marked = false): Value =
-  Value(kind: bText, text: text.toValidUtf8, marked: marked)
+  Value(kind: bText, text: toValidUtf8(text), marked: marked)
 
 func sym*[T](text: T, marked = false): Value =
-  Value(kind: bSym, text: text.toValidUtf8, marked: marked)
+  Value(kind: bSym, text: toValidUtf8(text), marked: marked)
 
 func toBytes*(s: string): seq[byte] =
   result = newSeq[byte](s.len)
@@ -260,3 +257,27 @@ func mark*(v: sink Value): Value =
 func unmark*(v: sink Value): Value =
   result = v
   result.marked = false
+
+## ================ iterators ================
+iterator children*(v: Value): lent Value =
+  ## Iterates a value as though it was a list
+  ## 
+  ## So iteration of a dictionary yields key then yields val
+  ## sequentially
+  case v.kind
+  of bList, bRecord:
+    for item in v.items: yield item
+  of bDict:
+    for (k, v) in v.entries: 
+      yield k
+      yield v
+  of bSet:
+    for item in v.elements: yield item
+  else:
+    discard
+
+iterator allChildren*(v: Value): lent Value {.closure.} =
+  for child in v.children:
+    yield child
+    for deep in child.allChildren:
+      yield v

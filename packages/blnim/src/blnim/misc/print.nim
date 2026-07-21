@@ -3,15 +3,14 @@
 from std/strutils import join, toHex
 import std/sequtils
 import ../values
+import read
 export values
 
-func escaped(s: string): string =
-  ## printer escapes two characters, " & '
+func escaped(s: string; q: char): string =
   for c in s:
-    case c
-    of '"': result.add "\\\""
-    of '\\': result.add "\\\\"
-    else: result.add c
+    if c == q or c == '\\':
+      result.add '\\'
+    result.add c
 
 func `$`*(v: Value): string =
   let prefix = if v.marked: "`" else: ""
@@ -22,9 +21,13 @@ func `$`*(v: Value): string =
   of bNum:
     prefix & $v.num
   of bSym:
-    prefix & $v.text
+    let name = $v.text
+    if isBareSpelling(name):
+      prefix & name
+    else:
+      prefix & "'" & escaped(name, '\'') & "'"
   of bText:
-    prefix & "\"" & escaped($v.text) & "\""
+    prefix & "\"" & escaped($v.text, '"') & "\""
   of bBytes:
     prefix & "#[" & v.bytes.mapIt($it.toHex).join & "]"
   of bList:

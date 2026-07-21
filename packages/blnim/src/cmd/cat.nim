@@ -4,8 +4,8 @@ import util
 const help = """
 bl cat [file ...]
 
-Prints values as text, one per line, from .blb files or stdin.
-Note: This doesn't conform with the textual syntax!
+Prints values from .blb files or stdin in the bassline text format
+You can read the output of this with bl read
 """
 
 proc run*(args: seq[string]) =
