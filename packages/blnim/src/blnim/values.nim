@@ -280,4 +280,4 @@ iterator allChildren*(v: Value): lent Value {.closure.} =
   for child in v.children:
     yield child
     for deep in child.allChildren:
-      yield v
+      yield deep

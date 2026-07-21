@@ -326,10 +326,10 @@ bits of the header byte.
 So the header + payload would be:
 
 #+BEGIN_EXAMPLE
-       mark
-  ╔═══╦╩╦═══╗   ╔════════════════╗
-  ║ttt║m║lll║   ║payload         ║
-  ╚═╦═╩═╩═╦═╝   ╚════════════════╝
+        mark
+  ╔════╦╩╦═══╗   ╔════════════════╗
+  ║tttt║m║lll║   ║payload         ║
+  ╚═╦══╩═╩═╦═╝   ╚════════════════╝
    tag   length
 #+END_EXAMPLE
 
@@ -344,10 +344,10 @@ So the header, length, payload would be:
 
 #+BEGIN_EXAMPLE
        mark
-  ╔═══╦╩╦═══╗ ╔════════╗ ╔═══════╗
-  ║ttt║m║111║ ║LLLLLLLL║ ║payload║
-  ╚═╦═╩═╩═══╝ ╚═══╦════╝ ╚═══════╝
-    tag           ╚╸length
+  ╔════╦╩╦═══╗ ╔════════╗ ╔═══════╗
+  ║tttt║m║lll║ ║LLLLLLLL║ ║payload║
+  ╚═╦══╩═╩═╦═╝ ╚═══╦════╝ ╚═══════╝
+    tag            ╚╸length
 #+END_EXAMPLE
 
 
@@ -359,10 +359,10 @@ set to 7 and the trailing byte set to 255.
 So the header, length, payload would be:
 
 #+BEGIN_EXAMPLE
-                        4x
-  ╔═══╦═╦═══╗ ╔═══════╗ ╔════════╗ ╔═══════╗
-  ║ttt║m║111║ ║1111111║ ║LLLLLLLL║ ║payload║
-  ╚═══╩═╩═══╝ ╚═══════╝ ╚════════╝ ╚═══════╝
+                          4x
+  ╔════╦═╦═══╗ ╔════════╗ ╔════════╗ ╔═══════╗
+  ║tttt║m║111║ ║11111111║ ║LLLLLLLL║ ║payload║
+  ╚════╩═╩═══╝ ╚════════╝ ╚════════╝ ╚═══════╝
 #+END_EXAMPLE
 
 
