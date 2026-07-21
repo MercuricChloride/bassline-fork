@@ -34,7 +34,7 @@ type
 
   ValueLike* = concept x
     ## anything that can speak as a value or be made from a value
-    ## 
+    ##
     ## toValue is total, fromValue is partial
     toValue(x) is Value
     fromValue(Value, typeof(x)) is Option[typeof(x)]
@@ -261,14 +261,14 @@ func unmark*(v: sink Value): Value =
 ## ================ iterators ================
 iterator children*(v: Value): lent Value =
   ## Iterates a value as though it was a list
-  ## 
+  ##
   ## So iteration of a dictionary yields key then yields val
   ## sequentially
   case v.kind
   of bList, bRecord:
     for item in v.items: yield item
   of bDict:
-    for (k, v) in v.entries: 
+    for (k, v) in v.entries:
       yield k
       yield v
   of bSet:
