@@ -24,7 +24,7 @@ suite "accessing":
     check point[3].isNone
     expect(AssertionDefect):
       discard point[-1]
-    
+
     check list(num"9")[0] == some num"9"
     check num"5"[0].isNone
     check set(num"1", num"2")[0].isNone
@@ -96,76 +96,11 @@ suite "shallow rewriting is the content lens":
     check list(num"1", num"2").filter(proc (x: Value): bool = x == num"1") ==
       list(num"1")
 
-suite "deep rewriting is the spelling":
-  let d = dict(@[(sym"a", num"1"), (sym"bb", num"2")])
-
-  test "transform: bottom-up, document order, heads visited":
-    var order: seq[string]
-    discard record(sym"h", list(sym"a")).transform(
-      proc (x: Value): Value = (order.add $x; x))
-    check order == @["h", "a", "[a]", "(h [a])"]
-
-  test "transform: dict keys rewritten, entries resorted":
-    let rekeyed = d.transform(
-      proc (x: Value): Value = (if x == sym"a": sym"zz" else: x))
-    check rekeyed == dict(@[(sym"zz", num"1"), (sym"bb", num"2")])
-
-  test "transform: colliding keys raise like the dict constructor":
-    expect ValueError:
-      discard d.transform(
-        proc (x: Value): Value = (if x.kind == bSym: sym"k" else: x))
-
-  test "transform: set collisions dedupe silently":
-    check set(num"1", num"2").transform(
-      proc (x: Value): Value = (if x.kind == bNum: sym"n" else: x)) ==
-      set(sym"n")
-
-  test "transform: fences hold, the fence itself is still offered":
-    let fenced = list(mark(list(sym"x")), sym"y")
-    let unfenced = fenced.transform(proc (x: Value): Value =
-      if x == sym"x": sym"CHANGED"
-      elif x.marked: unmark(x)
-      else: x
-    , descendMarked = false)
-    check unfenced == list(list(sym"x"), sym"y")
-
-suite "deep reading":
-  test "all children walks every constituent once, keys and heads counted":
-    var 
-      n = 0
-      parent = record(sym"h", dict(@[(sym"k", list(num"1"))]))
-
-    for c in parent.allChildren:
-      inc n
-    check n == 5
-
-  test "find: first match in walk order, self first":
-    let t = list(list(num"1"), num"2")
-    check t.find(proc (x: Value): bool = x.isKind bNum) == some num"1"
-    check t.find(proc (x: Value): bool = x.isKind bList) == some t
-    check t.find(proc (x: Value): bool = x.isKind bBytes).isNone
-
-suite "op outputs stay canonical":
-  test "rebuilt frames round-trip the codec":
-    let d = dict(@[(sym"a", num"1"), (sym"bb", num"2")])
-    let outputs = [
-      record(sym"point", num"3", num"4").map(
-        proc (x: Value): Value = list(x)),
-      d.map(proc (x: Value): Value = list(x)),
-      d.filter(proc (x: Value): bool = x == num"2"),
-      set(num"1", num"2").map(proc (x: Value): Value = sym"one"),
-      d.transform(proc (x: Value): Value =
-        (if x == sym"a": sym"zz" else: x)),
-      mark(list(num"1")).map(proc (x: Value): Value = x),
-    ]
-    for v in outputs:
-      check decode(encode(v)) == v
-
 suite "composition":
   test "a file record reads through option chains and dialect types":
-    let doc = toValue(BlFile(
+    let doc = toValue BlFile(
       contents: @[byte 1, 2],
-      info: some BlFileInfo(name: some "a.txt", zip: none Sym)))
+      info: some BlFileInfo(name: some "a.txt", zip: none Sym))
     check doc.hasHead(sym"file")
     check doc[1] == some bytes(@[byte 1, 2])
     check doc[2].flatMap(

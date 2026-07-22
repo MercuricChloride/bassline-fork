@@ -51,7 +51,15 @@ const END_BYTE*: byte = 0xA0
 
 template implSorted(ty, el: typedesc) =
   iterator items*(v: ty): lent el {.borrow.}
+
+  func toOpenArray*(v: ty, first: int, last: int): openArray[el] {.borrow.}
+
+  func low*(v: ty): int {.borrow.}
+
+  func high*(v: ty): int {.borrow.}
+
   func len*(v: ty): int {.borrow.}
+
   func `[]`*[I: SomeOrdinal](v: ty, i: I): lent el =
     seq[el](v)[i]
 
