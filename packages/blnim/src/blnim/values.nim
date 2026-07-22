@@ -1,15 +1,17 @@
 {.experimental: "strictFuncs".}
 
-import std/[sequtils, algorithm, options]
-import strflavors/[decimal, utf8]
-export decimal, utf8
+import std / [sequtils, algorithm, options, hashes]
+import strflavors
+
+export strflavors
 
 type
-  Sorted*[Kind; T] = distinct seq[T]
 
   SetOrder = object
 
   DictOrder = object
+
+  Sorted*[Kind; T] = distinct seq[T]
 
   BlKind* = enum
     bNil,                       # nil
