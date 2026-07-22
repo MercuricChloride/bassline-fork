@@ -5,14 +5,16 @@ import strflavors/[decimal, utf8]
 export decimal, utf8
 
 type
+  Sorted*[Kind; T] = distinct seq[T]
+
+  SetOrder = object
+
+  DictOrder = object
+
   BlKind* = enum
     bNil,                       # nil
     bNum, bText, bSym, bBytes,  # scalar types
     bList, bRecord, bDict, bSet # frame types
-
-  SetOrder = object
-  DictOrder = object
-  Sorted*[Kind; T] = distinct seq[T]
 
   Value* = object
     marked: bool
@@ -40,25 +42,24 @@ type
     fromValue(Value, typeof(x)) is Option[typeof(x)]
 
 const END_BYTE*: byte = 0xA0
+
 # ================ SORTED ================
 # We use a distinct type so we don't have to worry about
 # improper usage polluting our values
 
-template sorted(ty, el: typedesc) =
+template implSorted(ty, el: typedesc) =
   iterator items*(v: ty): lent el {.borrow.}
   func len*(v: ty): int {.borrow.}
   func `[]`*[I: SomeOrdinal](v: ty, i: I): lent el =
     seq[el](v)[i]
 
-sorted(Sorted[SetOrder, Value], Value)
-sorted(Sorted[DictOrder, (Value, Value)], (Value, Value))
 
-# ================ RECOGNITION ================
+implSorted(Sorted[SetOrder, Value], Value)
 
-func isKind*(v: Value, k: BlKind): bool = v.kind == k
-func isKind*(v: Value, k: set[BlKind]): bool = k.contains(v.kind)
-func isScalar*(v: Value): bool = v.isKind({bNil, bNum, bText, bSym, bBytes})
-func isFrame*(v: Value): bool = v.isKind({bList, bRecord, bDict, bSet})
+implSorted(Sorted[DictOrder, (Value, Value)], (Value, Value))
+
+
+# ================ ACCESSORS ================
 
 func tag*(value: Value): 1..9 =
   case value.kind
@@ -72,6 +73,39 @@ func tag*(value: Value): 1..9 =
   of bDict: 8
   of bSet: 9
 
+
+func kind*(v: Value): BlKind = v.kind
+
+
+func marked*(v: Value): bool = v.marked
+
+
+func num*(v: Value): lent DecimalString = v.num
+
+
+func text*(v: Value): lent Utf8String = v.text
+
+
+func bytes*(v: Value): lent seq[byte] = v.bytes
+
+
+func elements*(v: Value): lent Sorted[SetOrder, Value] = v.elements
+
+
+func entries*(v: Value): lent Sorted[DictOrder, (Value, Value)] = v.entries
+
+
+func items*(v: Value): lent seq[Value] = v.items
+
+
+func head*(v: Value): lent Value =
+  v.items[0]
+
+
+func tail*(v: Value): seq[Value] =
+  v.items[1..high(v.items)]
+
+
 func payloadLength*(value: Value): int =
   case value.kind
   of bNum:
@@ -83,25 +117,61 @@ func payloadLength*(value: Value): int =
   else:
     0
 
-# ================ ACCESSORS ================
 
-func kind*(v: Value): BlKind = v.kind
-func marked*(v: Value): bool = v.marked
-func num*(v: Value): lent DecimalString = v.num
-func text*(v: Value): lent Utf8String = v.text
-func bytes*(v: Value): lent seq[byte] = v.bytes
+iterator children*(v: Value): lent Value =
+  ## Iterates a value as though it was a list
+  ##
+  ## So iteration of a dictionary yields key then yields val
+  ## sequentially
+  case v.kind
+  of bList, bRecord:
+    for item in v.items: yield item
+  of bDict:
+    for (k, v) in v.entries:
+      yield k
+      yield v
+  of bSet:
+    for item in v.elements: yield item
+  else:
+    discard
 
-func elements*(v: Value): lent Sorted[SetOrder, Value] = v.elements
-func entries*(v: Value): lent Sorted[DictOrder, (Value, Value)] = v.entries
-func items*(v: Value): lent seq[Value] = v.items
-func head*(v: Value): lent Value =
-  v.items[0]
-func tail*(v: Value): seq[Value] =
-  v.items[1..high(v.items)]
+
+iterator allChildren*(v: Value): lent Value {.closure.} =
+  for child in v.children:
+    yield child
+    for deep in child.allChildren:
+      yield deep
+
+
+# ================ RECOGNITION ================
+
+func isKind*(v: Value, k: BlKind): bool = v.kind == k
+
+
+func isKind*(v: Value, k: set[BlKind]): bool = k.contains(v.kind)
+
+
+func isScalar*(v: Value): bool = v.isKind({bNil, bNum, bText, bSym, bBytes})
+
+
+func isFrame*(v: Value): bool = v.isKind({bList, bRecord, bDict, bSet})
+
 
 # ================ ORDERING ================
 
 func cmp*(a, b: Value): int
+  ## A comparison that's faithful to a lexicographic CE byte order.
+  ##
+  ## The CE encoding gives all values a header byte like:
+  ## [tag:4][mark:1][len:3]
+  ##
+  ## cmp does the same ordering by: tag, mark, payload length, payload
+  ##
+  ## NOTE!
+  ##
+  ## Because frames are delimited with END_BYTE (0xA0) and since
+  ## that byte is > all other CE header bytes it means that:
+  ## a shorter frame is > a longer frame
 
 func cmp*(a, b: seq[byte]): int =
   for i in 0 ..< min(a.len, b.len):
@@ -109,6 +179,7 @@ func cmp*(a, b: seq[byte]): int =
     if c != 0:
       return c
   cmp(a.len, b.len)
+
 
 func cmp*(a, b: seq[Value]): int =
   for i in 0 ..< min(a.len, b.len):
@@ -119,6 +190,7 @@ func cmp*(a, b: seq[Value]): int =
   # the end byte (0xA0) is > all other header bytes
   # so a > b if a is a prefix of b
   cmp(b.len, a.len)
+
 
 func cmp*(a, b: seq[(Value, Value)]): int =
   for i in 0 ..< min(a.len, b.len):
@@ -136,14 +208,8 @@ func cmp*(a, b: seq[(Value, Value)]): int =
   # so a > b if a is a prefix of b
   cmp(b.len, a.len)
 
+
 func cmp*(a, b: Value): int =
-  ## cmp is a comparison that's faithful to CE byte order
-  ## The CE encoding gives all values a header byte like:
-  ## [tag:4][mark:1][len:3]
-  ## cmp does the same ordering by:
-  ## tag, mark, payload length, payload
-  ## This implies if cmp(a, b) == 0
-  ## then the values consist of the same CE bytes
   let byTag = cmp(a.tag, b.tag)
   if byTag != 0:
     return byTag
@@ -172,71 +238,104 @@ func cmp*(a, b: Value): int =
   of bDict:
     cmp(seq[(Value, Value)](a.entries), seq[(Value, Value)](b.entries))
 
+
+func cmpKeys(a, b: (Value, Value)): int =
+  cmp(a[0], b[0])
+
+
 func `==`*(a, b: Value): bool = cmp(a, b) == 0
+
 func `>`*(a, b: Value): bool = cmp(a, b) > 0
+
 func `>=`*(a, b: Value): bool = cmp(a, b) >= 0
+
 func `<`*(a, b: Value): bool = cmp(a, b) < 0
+
 func `<=`*(a, b: Value): bool = cmp(a, b) <= 0
 
-# ================ CONSTRUCTORS ================
 
+# ================ CONVERSIONS ================
 
 func toValue*(v: Value): Value = v
+
+
 func fromValue*(v: Value; t: typedesc[Value]): Option[Value] = some v
+
+
+func mark*(v: sink Value): Value =
+  result = v
+  result.marked = true
+
+
+func unmark*(v: sink Value): Value =
+  result = v
+  result.marked = false
+
+
+# ================ CONSTRUCTORS ================
 
 func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)
 
+
 func num*(text: string; marked = false): Value =
   Value(kind: bNum, marked: marked, num: toDecimal(text))
 
+
 func num*(d: DecimalString; marked = false): Value =
-  ## Already canonical
   Value(kind: bNum, marked: marked, num: d)
+
 
 func text*[T](text: T; marked = false): Value =
   Value(kind: bText, text: toValidUtf8(text), marked: marked)
 
+
 func sym*[T](text: T, marked = false): Value =
   Value(kind: bSym, text: toValidUtf8(text), marked: marked)
+
 
 func toBytes*(s: string): seq[byte] =
   result = newSeq[byte](s.len)
   if s.len > 0:
     copyMem(addr result[0], addr s[0], s.len)
 
+
 func bytes*(bytes: sink seq[byte]; marked = false): Value =
   Value(kind: bBytes, bytes: bytes, marked: marked)
+
 
 func bytes*(s: string; marked = false): Value =
   Value(kind: bBytes, bytes: s.toBytes, marked: marked)
 
+
 func list*(items: sink seq[Value]; marked = false): Value =
   Value(kind: bList, items: items, marked: marked)
 
+
 func list*(items: varargs[Value]): Value =
   list(@items, false)
+
 
 func record*(items: sink seq[Value]; marked = false): Value =
   if items.len == 0:
     raise newException(ValueError, "record: missing head")
   Value(kind: bRecord, items: items, marked: marked)
 
+
 func record*(items: varargs[Value]): Value =
   record(@items, false)
+
 
 func set*(elements: sink seq[Value]; marked = false): Value =
   var es = elements
   es.sort(cmp)
-
   var unique = es.deduplicate(true)
   Value(kind: bSet, marked: marked, elements: Sorted[SetOrder, Value](unique))
+
 
 func set*(elements: varargs[Value]): Value =
   set(@elements, false)
 
-func cmpKeys(a, b: (Value, Value)): int =
-  cmp(a[0], b[0])
 
 func dict*(entries: sink seq[(Value, Value)]; marked = false): Value =
   var es = entries
@@ -249,35 +348,3 @@ func dict*(entries: sink seq[(Value, Value)]; marked = false): Value =
     marked: marked,
     entries: Sorted[DictOrder, (Value, Value)](es)
   )
-
-func mark*(v: sink Value): Value =
-  result = v
-  result.marked = true
-
-func unmark*(v: sink Value): Value =
-  result = v
-  result.marked = false
-
-## ================ iterators ================
-iterator children*(v: Value): lent Value =
-  ## Iterates a value as though it was a list
-  ##
-  ## So iteration of a dictionary yields key then yields val
-  ## sequentially
-  case v.kind
-  of bList, bRecord:
-    for item in v.items: yield item
-  of bDict:
-    for (k, v) in v.entries:
-      yield k
-      yield v
-  of bSet:
-    for item in v.elements: yield item
-  else:
-    discard
-
-iterator allChildren*(v: Value): lent Value {.closure.} =
-  for child in v.children:
-    yield child
-    for deep in child.allChildren:
-      yield deep
