@@ -245,11 +245,15 @@ func cmpKeys(a, b: (Value, Value)): int =
 
 func `==`*(a, b: Value): bool = cmp(a, b) == 0
 
+
 func `>`*(a, b: Value): bool = cmp(a, b) > 0
+
 
 func `>=`*(a, b: Value): bool = cmp(a, b) >= 0
 
+
 func `<`*(a, b: Value): bool = cmp(a, b) < 0
+
 
 func `<=`*(a, b: Value): bool = cmp(a, b) <= 0
 
