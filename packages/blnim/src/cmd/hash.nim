@@ -10,8 +10,7 @@ Reads values from stdin and writes each one's name by content:
 """
 
 proc run*(args: seq[string]) =
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key
@@ -23,4 +22,7 @@ proc run*(args: seq[string]) =
     else:
       quit "hash takes no arguments\n\n" & help
 
-  runFilter(proc (v: Value): Option[Digest] = some digest v)
+  runFilter(
+    proc(v: Value): Option[Digest] =
+      some digest v
+  )

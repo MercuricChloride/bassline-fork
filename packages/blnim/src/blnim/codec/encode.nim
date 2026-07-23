@@ -4,15 +4,21 @@ import ../values
 export values
 
 type
-  PayloadSize = enum sm, md, lg
+  PayloadSize = enum
+    sm
+    md
+    lg
+
   InvalidPayloadSize* = object of CatchableError
 
 const MAX_PAYLOAD_SIZE: uint32 = high(uint32)
 
 func payloadSize(len: int): PayloadSize =
   case len
-  of 0 .. 6: sm
-  of 7 .. 254: md
+  of 0 .. 6:
+    sm
+  of 7 .. 254:
+    md
   else:
     if len <= int(MAX_PAYLOAD_SIZE):
       lg
@@ -25,10 +31,10 @@ func write*(buf: var seq[byte], b: byte) =
 func write*(buf: var seq[byte], bytes: openArray[byte]) =
   buf.add bytes
 
-func write*(w: var string; b: byte) =
+func write*(w: var string, b: byte) =
   w.add char(b)
 
-func write*(w: var string; bytes: openArray[byte]) =
+func write*(w: var string, bytes: openArray[byte]) =
   if bytes.len > 0:
     let start = w.len
     w.setLen(start + bytes.len)
@@ -49,7 +55,8 @@ func encodeInto*[W](value: Value, w: var W) =
 
   # then comes the length byte(s) if any
   case payloadSize(len)
-  of sm: discard
+  of sm:
+    discard
   of md:
     # medium sizes fit into a single byte
     w.write byte(len)
@@ -63,7 +70,8 @@ func encodeInto*[W](value: Value, w: var W) =
     w.write byte(len and 0xFF)
 
   case value.kind
-  of bNil: discard
+  of bNil:
+    discard
   of bNum:
     let s = string(value.num)
     w.write s.toOpenArrayByte(0, s.high)

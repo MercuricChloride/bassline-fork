@@ -6,8 +6,7 @@ type ReadError* = object of CatchableError
 
 const
   Ws = {' ', '\t', '\n', '\r', ','}
-  Delims* = Ws + {'[', ']', '{', '}', '(', ')', ':',
-                  '#', '\'', '"', '`', ';'}
+  Delims* = Ws + {'[', ']', '{', '}', '(', ')', ':', '#', '\'', '"', '`', ';'}
 
 func isBareSpelling*(s: string): bool =
   ## whether a symbol may be spelled without quotes
@@ -16,13 +15,13 @@ func isBareSpelling*(s: string): bool =
   for c in s:
     if c in Delims:
       return false
-  if s[0] in {'0'..'9'}:
+  if s[0] in {'0' .. '9'}:
     return false
-  if s.len > 1 and s[0] == '-' and s[1] in {'0'..'9'}:
+  if s.len > 1 and s[0] == '-' and s[1] in {'0' .. '9'}:
     return false
   true
 
-func fail(s: string; pos: int; msg: string) {.noreturn.} =
+func fail(s: string, pos: int, msg: string) {.noreturn.} =
   var
     line = 1
     bol = 0
@@ -30,10 +29,10 @@ func fail(s: string; pos: int; msg: string) {.noreturn.} =
     if s[i] == '\n':
       inc line
       bol = i + 1
-  raise newException(ReadError,
-    "line " & $line & ", col " & $(pos - bol + 1) & ": " & msg)
+  raise
+    newException(ReadError, "line " & $line & ", col " & $(pos - bol + 1) & ": " & msg)
 
-func skipWs(s: string; pos: var int) =
+func skipWs(s: string, pos: var int) =
   while pos < s.len:
     if s[pos] == ';':
       while pos < s.len and s[pos] != '\n':
@@ -43,14 +42,18 @@ func skipWs(s: string; pos: var int) =
     else:
       break
 
-func nibble(s: string; pos: int; c: char): byte =
+func nibble(s: string, pos: int, c: char): byte =
   case c
-  of '0'..'9': byte(ord(c) - ord('0'))
-  of 'a'..'f': byte(ord(c) - ord('a') + 10)
-  of 'A'..'F': byte(ord(c) - ord('A') + 10)
-  else: fail(s, pos, "not a hex digit in bytes: " & c)
+  of '0' .. '9':
+    byte(ord(c) - ord('0'))
+  of 'a' .. 'f':
+    byte(ord(c) - ord('a') + 10)
+  of 'A' .. 'F':
+    byte(ord(c) - ord('A') + 10)
+  else:
+    fail(s, pos, "not a hex digit in bytes: " & c)
 
-func quotedScan(s: string; pos: var int; q: char): string =
+func quotedScan(s: string, pos: var int, q: char): string =
   ## body of a "string" or 'symbol' where pos is on the opening quote.
   ## Escapes are \q \\ \n \t \r
   let what = if q == '"': "string" else: "symbol"
@@ -66,20 +69,26 @@ func quotedScan(s: string; pos: var int; q: char): string =
       if pos + 1 >= s.len:
         fail(s, pos, "unterminated " & what)
       let e = s[pos + 1]
-      if e == q: result.add q
-      elif e == '\\': result.add '\\'
-      elif e == 'n': result.add '\n'
-      elif e == 't': result.add '\t'
-      elif e == 'r': result.add '\r'
-      else: fail(s, pos, "unknown escape \\" & e & " in " & what)
+      if e == q:
+        result.add q
+      elif e == '\\':
+        result.add '\\'
+      elif e == 'n':
+        result.add '\n'
+      elif e == 't':
+        result.add '\t'
+      elif e == 'r':
+        result.add '\r'
+      else:
+        fail(s, pos, "unknown escape \\" & e & " in " & what)
       pos += 2
     else:
       result.add c
       inc pos
 
-func value(s: string; pos: var int): Value
+func value(s: string, pos: var int): Value
 
-func datum(s: string; pos: var int): Value =
+func datum(s: string, pos: var int): Value =
   case s[pos]
   of '[':
     inc pos
@@ -93,7 +102,6 @@ func datum(s: string; pos: var int): Value =
         break
       items.add value(s, pos)
     list(items)
-
   of '(':
     inc pos
     var items: seq[Value]
@@ -108,7 +116,6 @@ func datum(s: string; pos: var int): Value =
         break
       items.add value(s, pos)
     record(items)
-
   of '{':
     inc pos
     var entries: seq[(Value, Value)]
@@ -130,7 +137,6 @@ func datum(s: string; pos: var int): Value =
       dict(entries)
     except ValueError:
       fail(s, pos, "duplicate dict key")
-
   of '#':
     if pos + 1 >= s.len:
       fail(s, pos, "lone #")
@@ -163,42 +169,37 @@ func datum(s: string; pos: var int): Value =
         elif c in Ws:
           inc pos
         else:
-          hex.add c  # validated pairwise below
+          hex.add c # validated pairwise below
           inc pos
       if hex.len mod 2 != 0:
         fail(s, pos, "bytes need an even count of hex digits")
       var bs = newSeq[byte](hex.len div 2)
       for i in 0 ..< bs.len:
-        bs[i] = nibble(s, pos, hex[2 * i]) shl 4 or
-                nibble(s, pos, hex[2 * i + 1])
+        bs[i] = nibble(s, pos, hex[2 * i]) shl 4 or nibble(s, pos, hex[2 * i + 1])
       bytes(bs)
     else:
       fail(s, pos, "expected [ or { after #")
-
   of '"':
     let raw = quotedScan(s, pos, '"')
     try:
       text(raw)
     except InvalidUtf8Str:
       fail(s, pos, "malformed UTF-8 in string")
-
   of '\'':
     let raw = quotedScan(s, pos, '\'')
     try:
       sym(raw)
     except InvalidUtf8Str:
       fail(s, pos, "malformed UTF-8 in symbol")
-
   of ')', ']', '}', ':':
     fail(s, pos, "unexpected " & s[pos])
-
   else:
     let start = pos
     while pos < s.len and s[pos] notin Delims:
       inc pos
     let tok = s[start ..< pos]
-    if tok[0] in {'0'..'9'} or
-       (tok.len > 1 and tok[0] == '-' and tok[1] in {'0'..'9'}):
+    if tok[0] in {'0' .. '9'} or
+        (tok.len > 1 and tok[0] == '-' and tok[1] in {'0' .. '9'}):
       if not isDecimal(tok):
         fail(s, start, "not a canonical number: " & tok)
       num(tok)
@@ -210,7 +211,7 @@ func datum(s: string; pos: var int): Value =
       except InvalidUtf8Str:
         fail(s, start, "malformed UTF-8 in symbol")
 
-func value(s: string; pos: var int): Value =
+func value(s: string, pos: var int): Value =
   skipWs(s, pos)
   if pos >= s.len:
     fail(s, pos, "expected a value")
@@ -239,6 +240,5 @@ func readValue*(text: string): Value =
   ## read exactly one value
   let vs = readDocument(text)
   if vs.len != 1:
-    raise newException(ReadError,
-      "expected exactly one value, got " & $vs.len)
+    raise newException(ReadError, "expected exactly one value, got " & $vs.len)
   vs[0]

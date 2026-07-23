@@ -19,8 +19,9 @@ proc run*(args: seq[string]) =
   var
     outPath = defaultKeyPath()
     force = false
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help", "force"]):
+  for kind, key, val in cmdOpts(
+    args, shortNoVal = {'h'}, longNoVal = @["help", "force"]
+  ):
     case kind
     of cmdShortOption, cmdLongOption:
       case key

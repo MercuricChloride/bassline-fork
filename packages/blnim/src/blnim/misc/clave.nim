@@ -59,13 +59,13 @@ func keypairFromSeed*(seed: Seed): Keypair =
   result.secret = secret
   result.public = public
 
-func sign*[T: ValueLike](kp: Keypair; x: T): monocypher.Signature =
+func sign*[T: ValueLike](kp: Keypair, x: T): monocypher.Signature =
   crypto_eddsa_sign(kp.secret, encode(toValue(x)))
 
 func toValue*(kp: Keypair): Value =
   KeypairShape(seed: kp.seed, public: kp.public).toValue
 
-func fromValue*(v: Value; t: typedesc[Keypair]): Option[Keypair] =
+func fromValue*(v: Value, t: typedesc[Keypair]): Option[Keypair] =
   ## Recognizes (keypair eddsa-blake2b #[32] #[32]).
   let kv = fromValue(v, KeypairShape)
   if kv.isSome:
@@ -73,12 +73,11 @@ func fromValue*(v: Value; t: typedesc[Keypair]): Option[Keypair] =
   else:
     none Keypair
 
-func signedValue*[T: ValueLike](kp: Keypair; x: T): Value =
+func signedValue*[T: ValueLike](kp: Keypair, x: T): Value =
   ## x as a value, wrapped with its attestation.
   let v = toValue(x)
   let sig = Signature(sig: sign(kp, v), public: kp.public)
   toValue(Signed(value: v, signature: sig))
 
 func holds*(s: Signed): bool =
-  crypto_eddsa_check(s.signature.sig, s.signature.public,
-                     encode(s.value))
+  crypto_eddsa_check(s.signature.sig, s.signature.public, encode(s.value))

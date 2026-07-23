@@ -6,18 +6,26 @@ import blnim/codec/[stream, encode]
 
 # a corpus exercising every kind, the mark bit, and all length tiers
 let corpus = @[
-  nilValue(), nilValue(true),
-  num"0", num"-123456789012345",
-  sym"x", mark(sym"f"),
-  text"", text"hello",
-  text(repeat('a', 6)), text(repeat('b', 7)),
-  text(repeat('c', 254)), text(repeat('d', 255)), text(repeat('e', 70_000)),
+  nilValue(),
+  nilValue(true),
+  num"0",
+  num"-123456789012345",
+  sym"x",
+  mark(sym"f"),
+  text"",
+  text"hello",
+  text(repeat('a', 6)),
+  text(repeat('b', 7)),
+  text(repeat('c', 254)),
+  text(repeat('d', 255)),
+  text(repeat('e', 70_000)),
   bytes(newSeqWith(300, byte 0xEE)),
-  list(), record(sym"h", num"1"),
+  list(),
+  record(sym"h", num"1"),
   set(num"3", num"1", num"2"),
   dict(@[(sym"a", num"1"), (sym"b", list(text"x", nilValue()))]),
   mark(list(sym"q", record(sym"add", num"1", num"2"))),
-  list(list(list(num"9")))
+  list(list(list(num"9"))),
 ]
 
 func concatEncoded(values: seq[Value]): seq[byte] =
@@ -31,7 +39,7 @@ proc drain(sd: var StreamDecoder): seq[Value] =
       break
     result.add v.get
 
-proc streamed(bytes: seq[byte]; chunk: int): seq[Value] =
+proc streamed(bytes: seq[byte], chunk: int): seq[Value] =
   var sd = initStreamDecoder()
   var i = 0
   while i < bytes.len:
@@ -82,17 +90,17 @@ suite "stream equals batch under any chunking":
 
 suite "stream rejections":
   test "malformation is fatal wherever it sits":
-    check streamRejects @[byte 0x00]                     # invalid tag 0x0
-    check streamRejects @[byte 0xB0]                     # invalid tag 0xB
-    check streamRejects @[byte 0xA0]                     # END at top level
-    check streamRejects @[byte 0x60, 0xA8]               # END with flag bits
-    check streamRejects @[byte 0x13]                     # nil with length bits
-    check streamRejects @[byte 0x70, 0xA0]               # record with no head
-    check streamRejects @[byte 0x80, 0x21, 0x31, 0xA0]   # dict key sans value
+    check streamRejects @[byte 0x00] # invalid tag 0x0
+    check streamRejects @[byte 0xB0] # invalid tag 0xB
+    check streamRejects @[byte 0xA0] # END at top level
+    check streamRejects @[byte 0x60, 0xA8] # END with flag bits
+    check streamRejects @[byte 0x13] # nil with length bits
+    check streamRejects @[byte 0x70, 0xA0] # record with no head
+    check streamRejects @[byte 0x80, 0x21, 0x31, 0xA0] # dict key sans value
     check streamRejects @[byte 0x90, 0x21, 0x32, 0x21, 0x31, 0xA0] # set order
     check streamRejects @[byte 0x37, 0x03, 0x61, 0x62, 0x63] # non-canonical len
-    check streamRejects @[byte 0x31, 0xFF]               # malformed utf-8
-    check streamRejects @[byte 0x21, 0x61]               # non-decimal num
+    check streamRejects @[byte 0x31, 0xFF] # malformed utf-8
+    check streamRejects @[byte 0x21, 0x61] # non-decimal num
 
   test "a good value lands before the bad byte kills the stream":
     var sd = initStreamDecoder()
@@ -131,11 +139,11 @@ suite "stream rejections":
     var sd = initStreamDecoder(maxValueBytes = 16)
     expect DecodeError:
       for i in 0 ..< 20:
-        sd.feed([byte 0x60])  # ever-deeper unclosed lists... of lists
+        sd.feed([byte 0x60]) # ever-deeper unclosed lists... of lists
         discard sd.next()
 
   test "a value exactly at the limit is accepted":
-    let v = text(repeat('a', 14))  # header + medium byte + 14 = 16
+    let v = text(repeat('a', 14)) # header + medium byte + 14 = 16
     check encode(v).len == 16
     var sd = initStreamDecoder(maxValueBytes = 16)
     sd.feed(encode(v))

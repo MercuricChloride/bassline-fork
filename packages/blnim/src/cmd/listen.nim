@@ -22,30 +22,40 @@ proc emit(v: Value) =
   let ce = encode(v)
   if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
     quit "short write to stdout"
-  stdout.flushFile()  # so downstream sees each value promptly
+  stdout.flushFile() # so downstream sees each value promptly
 
-proc listenTcp(host: string; port: Port; echoBack: bool; maxValue: int) =
-  proc onValue(conn: Conn; value: Value) {.async.} =
+proc listenTcp(host: string, port: Port, echoBack: bool, maxValue: int) =
+  proc onValue(conn: Conn, value: Value) {.async.} =
     emit(value)
     if echoBack:
       await conn.send(value)
+
   proc onOpen(conn: Conn) =
     stderr.writeLine "-- open " & conn.address
+
   proc onClose(conn: Conn) =
     stderr.writeLine "-- close " & conn.address
-  proc onError(conn: Conn; e: ref Exception) =
+
+  proc onError(conn: Conn, e: ref Exception) =
     stderr.writeLine "-- error " & conn.address & ": " & e.msg
 
   let l =
     try:
-      landing(port, onValue, onOpen = onOpen, onClose = onClose,
-              onError = onError, address = host, maxValueBytes = maxValue)
+      landing(
+        port,
+        onValue,
+        onOpen = onOpen,
+        onClose = onClose,
+        onError = onError,
+        address = host,
+        maxValueBytes = maxValue,
+      )
     except OSError as e:
       quit "can't land on " & host & ":" & $int(port) & " -- " & e.msg
   stderr.writeLine "-- landing on " & host & ":" & $int(l.localPort)
   waitFor l.serve()
 
-proc listenFile(path: string; maxValue: int) =
+proc listenFile(path: string, maxValue: int) =
   ## A file is a landing surface too: anyone appending to it is
   ## sending. Emits what's there, then follows.
   if not fileExists(path):
@@ -72,15 +82,14 @@ proc listenFile(path: string; maxValue: int) =
         emit(v.get)
     else:
       sleep(100)
-      f.setFilePos(f.getFilePos())  # fseek clears stdio's EOF latch
+      f.setFilePos(f.getFilePos()) # fseek clears stdio's EOF latch
 
 proc run*(args: seq[string]) =
   var
     target = ""
     echoBack = false
     maxValue = DefaultMaxValueBytes
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["echo", "help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["echo", "help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key

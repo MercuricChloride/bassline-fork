@@ -13,8 +13,7 @@ place. A name the store doesn't hold is fatal.
 
 proc run*(args: seq[string]) =
   var root = defaultStoreRoot()
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key
@@ -32,7 +31,7 @@ proc run*(args: seq[string]) =
 
   let s = openStore(root)
   runFilter(
-    proc (v: Value): Option[Value] =
+    proc(v: Value): Option[Value] =
       let d = fromValue(v, Digest)
       if d.isNone:
         return some v

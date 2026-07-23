@@ -20,5 +20,3 @@ target/
 .env.production.local
 
 .mcp.json
-
-packages/blrs/target

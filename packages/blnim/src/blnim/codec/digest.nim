@@ -11,13 +11,14 @@ import ../misc/common
 type Sha256Writer = object
   ctx: ShaStateStatic[Sha_256]
 
-func write(w: var Sha256Writer; b: byte) =
+func write(w: var Sha256Writer, b: byte) =
   w.ctx.update([char(b)])
 
-func write(w: var Sha256Writer; bytes: openArray[byte]) =
+func write(w: var Sha256Writer, bytes: openArray[byte]) =
   if bytes.len > 0:
-    w.ctx.update(cast[ptr UncheckedArray[char]](addr bytes[0])
-                 .toOpenArray(0, bytes.len - 1))
+    w.ctx.update(
+      cast[ptr UncheckedArray[char]](addr bytes[0]).toOpenArray(0, bytes.len - 1)
+    )
 
 func sha256*(v: Value): array[32, byte] =
   ## The sha256 of the value's CE bytes

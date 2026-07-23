@@ -38,12 +38,12 @@ func hexName(hash: openArray[byte]): string =
 func safeAlgo*(algo: string): bool =
   ## Algo names come off the wire and become path segments; only a
   ## tame alphabet may pass.
-  algo.len > 0 and allCharsInSet(algo, {'a'..'z', '0'..'9', '-'})
+  algo.len > 0 and allCharsInSet(algo, {'a' .. 'z', '0' .. '9', '-'})
 
-proc pathFor(s: Store; algo: string; hash: openArray[byte]): string =
+proc pathFor(s: Store, algo: string, hash: openArray[byte]): string =
   s.root / algo / hexName(hash)
 
-proc put*[T: ValueLike](s: Store; x: T): Digest =
+proc put*[T: ValueLike](s: Store, x: T): Digest =
   ## Holds x as a value, returns its name: idempotent, convergent --
   ## the same value from anyone lands as the same file.
   let v = toValue(x)
@@ -56,7 +56,7 @@ proc put*[T: ValueLike](s: Store; x: T): Digest =
     moveFile(tmp, dest)
   d
 
-proc load*(s: Store; algo: string; hash: seq[byte]): Option[string] =
+proc load*(s: Store, algo: string, hash: seq[byte]): Option[string] =
   ## The stored CE bytes for a name, or none if the store doesn't
   ## hold it. Raises StoreError if the file no longer matches its
   ## name -- a store that lies is worse than one that's missing.
@@ -68,11 +68,10 @@ proc load*(s: Store; algo: string; hash: seq[byte]): Option[string] =
   let raw = readFile(path)
   if algo == "sha256":
     if @(sha256(raw.toOpenArrayByte(0, raw.high))) != hash:
-      raise newException(StoreError, "corrupt: " & path &
-                         " no longer matches its name")
+      raise newException(StoreError, "corrupt: " & path & " no longer matches its name")
   some raw
 
-proc load*(s: Store; d: Digest): Option[string] =
+proc load*(s: Store, d: Digest): Option[string] =
   ## The stored CE bytes for a typed name. The Sym -> path-string
   ## cast lives here, at the boundary, and nowhere else.
   s.load($d.algo, d.hash)

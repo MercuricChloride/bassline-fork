@@ -3,17 +3,16 @@
 import ../values
 export values
 
-type
-  DecodeError* = object of CatchableError
+type DecodeError* = object of CatchableError
 
 func fail(msg: string) {.noreturn.} =
   raise newException(DecodeError, msg)
 
-func need(bytes: openArray[byte]; pos, n: int) =
+func need(bytes: openArray[byte], pos, n: int) =
   if pos + n > bytes.len:
     fail "unexpected end of input"
 
-func readLength(bytes: openArray[byte]; pos: var int; lenBits: byte): int =
+func readLength(bytes: openArray[byte], pos: var int, lenBits: byte): int =
   case lenBits
   of 0 .. 6:
     int(lenBits)
@@ -26,10 +25,9 @@ func readLength(bytes: openArray[byte]; pos: var int; lenBits: byte): int =
       int(medium)
     of 255:
       need(bytes, pos, 4)
-      let len = (uint32(bytes[pos]) shl 24) or
-                (uint32(bytes[pos + 1]) shl 16) or
-                (uint32(bytes[pos + 2]) shl 8) or
-                 uint32(bytes[pos + 3])
+      let len =
+        (uint32(bytes[pos]) shl 24) or (uint32(bytes[pos + 1]) shl 16) or
+        (uint32(bytes[pos + 2]) shl 8) or uint32(bytes[pos + 3])
       pos += 4
       if len < 255:
         fail "length in a longer form than its value requires"
@@ -37,7 +35,7 @@ func readLength(bytes: openArray[byte]; pos: var int; lenBits: byte): int =
     else: # 0 .. 6
       fail "length in a longer form than its value requires"
 
-func decodeValue(bytes: openArray[byte]; pos: var int; depth: int): Value =
+func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
   if depth <= 0:
     fail "nesting past the depth limit"
   need(bytes, pos, 1)
@@ -53,7 +51,6 @@ func decodeValue(bytes: openArray[byte]; pos: var int; depth: int): Value =
     if lenBits != 0:
       fail "null with nonzero length bits"
     nilValue(marked)
-
   of 0x2 .. 0x5:
     let
       len = readLength(bytes, pos, lenBits)
@@ -113,16 +110,14 @@ func decodeValue(bytes: openArray[byte]; pos: var int; depth: int): Value =
         if cmp(children[i - 1], children[i]) >= 0:
           fail "set members out of order or duplicated"
       set(children, marked)
-
   of 0xA:
     if header == END_BYTE:
       fail "END where a value was expected"
     fail "END carries no flag and no length"
-
   else:
     fail "invalid tag"
 
-func decode*(bytes: openArray[byte]; maxDepth = 64): Value =
+func decode*(bytes: openArray[byte], maxDepth = 64): Value =
   var pos = 0
   result = decodeValue(bytes, pos, maxDepth)
   if pos != bytes.len:

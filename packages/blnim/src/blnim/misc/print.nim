@@ -6,7 +6,7 @@ import ../values
 import read
 export values
 
-func escaped(s: string; q: char): string =
+func escaped(s: string, q: char): string =
   for c in s:
     if c == q or c == '\\':
       result.add '\\'

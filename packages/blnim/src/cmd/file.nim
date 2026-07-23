@@ -20,7 +20,7 @@ Options:
           file record whose info gains zip: tarball
 """
 
-proc info(path: string; zip = ""): BlFileInfo =
+proc info(path: string, zip = ""): BlFileInfo =
   result.name = some lastPathPart(path)
   if zip != "":
     result.zip = some Sym(zip)
@@ -32,15 +32,12 @@ proc tarball(path: string): Value =
       createTarball(path, tmp)
     except CatchableError as e:
       quit "can't tarball " & path & " -- " & e.msg
-    BlFile(
-      contents: readFile(tmp).toBytes,
-      info: some info(path, zip = "tarball")
-    ).toValue
+    BlFile(contents: readFile(tmp).toBytes, info: some info(path, zip = "tarball")).toValue
   finally:
     if fileExists(tmp):
       removeFile(tmp)
 
-proc valueOfPath(path: string; zip: bool): Value =
+proc valueOfPath(path: string, zip: bool): Value =
   if dirExists(path):
     if zip:
       tarball(path)
@@ -63,7 +60,7 @@ proc valueOfPath(path: string; zip: bool): Value =
     if zip:
       BlFile(
         contents: compress(contents, dataFormat = dfGzip).toBytes,
-        info: some info(path, zip = "gzip")
+        info: some info(path, zip = "gzip"),
       ).toValue
     else:
       toValue BlFile(contents: toBytes(contents), info: some info(path))
@@ -72,8 +69,7 @@ proc run*(args: seq[string]) =
   var
     path = ""
     zip = false
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help", "zip"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help", "zip"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key

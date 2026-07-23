@@ -10,8 +10,7 @@ You can read the output of this with bl read
 
 proc run*(args: seq[string]) =
   var paths: seq[string]
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key

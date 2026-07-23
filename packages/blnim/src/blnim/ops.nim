@@ -6,11 +6,10 @@ export options, values
 
 type ValuePred* = proc(v: Value): bool {.noSideEffect.}
 
-func hasHead*(v: Value; expected: Value): bool =
+func hasHead*(v: Value, expected: Value): bool =
   v.isKind(bRecord) and v.head == expected
 
-
-func `[]`*(v: Value; i: int): Option[Value] =
+func `[]`*(v: Value, i: int): Option[Value] =
   ## content by position for lists & records
   ## none when out of range or the kind isn't positional
   doAssert(i >= 0, "I cannot be negative")
@@ -19,8 +18,7 @@ func `[]`*(v: Value; i: int): Option[Value] =
 
   none Value
 
-
-func `[]`*(v: Value; key: Value): Option[Value] =
+func `[]`*(v: Value, key: Value): Option[Value] =
   ## keyed access by binary search over canonical order: a dict
   ## answers with the value under key, a set answers with its own
   ## element equal to key. none when absent or the kind isn't keyed.
@@ -29,18 +27,21 @@ func `[]`*(v: Value; key: Value): Option[Value] =
     let i = binarySearch(
       v.entries.toOpenArray(low(v.entries), high(v.entries)),
       key,
-      proc(e: (Value, Value), k: Value): int = cmp(e[0], k))
+      proc(e: (Value, Value), k: Value): int =
+        cmp(e[0], k),
+    )
 
     if i < 0:
       none Value
     else:
       some v.entries[i][1]
-
   of bSet:
     let i = binarySearch(
       v.elements.toOpenArray(low(v.elements), high(v.elements)),
       key,
-      proc (e, k: Value): int = cmp(e, k))
+      proc(e, k: Value): int =
+        cmp(e, k),
+    )
 
     if i < 0:
       none Value
@@ -49,7 +50,6 @@ func `[]`*(v: Value; key: Value): Option[Value] =
   else:
     none Value
 
-
 func contains*(v: Value, element: Value): bool =
   ## shallow containment
   for c in v.children:
@@ -57,9 +57,9 @@ func contains*(v: Value, element: Value): bool =
       return true
   false
 
-
-func find*(v: Value, pred: ValuePred,
-           descendMarked = true): Option[Value] {.effectsOf: pred.} =
+func find*(
+    v: Value, pred: ValuePred, descendMarked = true
+): Option[Value] {.effectsOf: pred.} =
   ## the first value in walk order that pred admits (v itself first),
   ## or none
 
@@ -76,8 +76,7 @@ func find*(v: Value, pred: ValuePred,
 
   none Value
 
-
-func map*(v: Value; f: proc (x: Value): Value): Value {.effectsOf: f.} =
+func map*(v: Value, f: proc(x: Value): Value): Value {.effectsOf: f.} =
   ## the same value with f over its content:
   ##
   ## list items, record fields
@@ -110,8 +109,7 @@ func map*(v: Value; f: proc (x: Value): Value): Value {.effectsOf: f.} =
   else:
     v
 
-
-func filter*(v: Value; pred: proc (x: Value): bool): Value {.effectsOf: pred.} =
+func filter*(v: Value, pred: proc(x: Value): bool): Value {.effectsOf: pred.} =
   ## the same value keeping the content pred admits: list items, record
   ## fields (the head always stays), set elements, dict entries kept by
   ## their value. Scalars come back untouched. Never raises.

@@ -19,32 +19,32 @@ const
   CompactThreshold = 64 * 1024
   ReleaseThreshold = 256 * 1024
 
-type
-  StreamDecoder* = object
-    buf: seq[byte]     # accumulated input
-    start: int         # first byte of the value currently being scanned
-    scanPos: int       # scan frontier (start <= scanPos <= buf.len)
-    depth: int         # frames open at the frontier
-    skip: int          # scalar payload bytes still to arrive
-    maxDepth: int
-    maxValueBytes: int
+type StreamDecoder* = object
+  buf: seq[byte] # accumulated input
+  start: int # first byte of the value currently being scanned
+  scanPos: int # scan frontier (start <= scanPos <= buf.len)
+  depth: int # frames open at the frontier
+  skip: int # scalar payload bytes still to arrive
+  maxDepth: int
+  maxValueBytes: int
 
-func initStreamDecoder*(maxDepth = 64;
-                        maxValueBytes = DefaultMaxValueBytes): StreamDecoder =
+func fail(msg: string) {.noreturn.} =
+  raise newException(DecodeError, msg)
+
+func initStreamDecoder*(
+    maxDepth = 64, maxValueBytes = DefaultMaxValueBytes
+): StreamDecoder =
   StreamDecoder(maxDepth: maxDepth, maxValueBytes: maxValueBytes)
 
 func buffered*(sd: StreamDecoder): int =
   ## Bytes received but not yet returned as a value.
   sd.buf.len - sd.start
 
-func fail(msg: string) {.noreturn.} =
-  raise newException(DecodeError, msg)
-
-func checkSize(sd: StreamDecoder; declared: int) =
+func checkSize(sd: StreamDecoder, declared: int) =
   if (sd.scanPos - sd.start) + declared > sd.maxValueBytes:
     fail "value exceeds the size limit"
 
-func skipPayload(sd: var StreamDecoder; payload: int): bool =
+func skipPayload(sd: var StreamDecoder, payload: int): bool =
   ## Advances over scalar payload bytes, as many as have arrived.
   ## Returns false when the rest of the payload is still in flight.
   let n = min(sd.buf.len - sd.scanPos, payload)
@@ -76,7 +76,6 @@ func scan(sd: var StreamDecoder): bool =
       inc sd.scanPos
       if sd.depth == 0:
         return true
-
     of 0x2 .. 0x5:
       var
         hdrLen = 1
@@ -89,10 +88,11 @@ func scan(sd: var StreamDecoder): bool =
         if medium == 255:
           if avail < 6:
             return false
-          payload = int((uint32(sd.buf[sd.scanPos + 2]) shl 24) or
-                        (uint32(sd.buf[sd.scanPos + 3]) shl 16) or
-                        (uint32(sd.buf[sd.scanPos + 4]) shl 8) or
-                         uint32(sd.buf[sd.scanPos + 5]))
+          payload = int(
+            (uint32(sd.buf[sd.scanPos + 2]) shl 24) or
+              (uint32(sd.buf[sd.scanPos + 3]) shl 16) or
+              (uint32(sd.buf[sd.scanPos + 4]) shl 8) or uint32(sd.buf[sd.scanPos + 5])
+          )
           hdrLen = 6
         else:
           payload = int(medium)
@@ -104,7 +104,6 @@ func scan(sd: var StreamDecoder): bool =
         return false
       if sd.depth == 0:
         return true
-
     of 0x6 .. 0x9:
       # decidable at this byte, so don't buffer a doomed stream
       # waiting for decode's verdict
@@ -114,7 +113,6 @@ func scan(sd: var StreamDecoder): bool =
       if sd.depth > sd.maxDepth:
         fail "nesting past the depth limit"
       inc sd.scanPos
-
     of 0xA:
       if header != END_BYTE:
         fail "END carries no flag and no length"
@@ -124,7 +122,6 @@ func scan(sd: var StreamDecoder): bool =
       inc sd.scanPos
       if sd.depth == 0:
         return true
-
     else:
       fail "invalid tag"
 
@@ -145,7 +142,7 @@ func compact(sd: var StreamDecoder) =
     sd.scanPos -= sd.start
     sd.start = 0
 
-func feed*(sd: var StreamDecoder; data: openArray[byte]) =
+func feed*(sd: var StreamDecoder, data: openArray[byte]) =
   sd.buf.add data
 
 func next*(sd: var StreamDecoder): Option[Value] =
@@ -156,8 +153,7 @@ func next*(sd: var StreamDecoder): Option[Value] =
     # header-only bytes (frames, nils, ENDs) declare no sizes, so a
     # completed span is the first place their total is knowable
     sd.checkSize(0)
-    let value = decode(sd.buf.toOpenArray(sd.start, sd.scanPos - 1),
-                       sd.maxDepth)
+    let value = decode(sd.buf.toOpenArray(sd.start, sd.scanPos - 1), sd.maxDepth)
     sd.start = sd.scanPos
     sd.compact()
     some value

@@ -35,31 +35,32 @@ import values
 export options, values
 
 type
-  Sym* = distinct string
-    ## a field that is a bassline symbol (string fields are text)
+  Sym* = distinct string ## a field that is a bassline symbol (string fields are text)
 
-  Lit*[S: static string] = object
-    ## a slot pinned to the symbol S; carries no data.
+  Lit*[S: static string] = object ## a slot pinned to the symbol S; carries no data.
 
 func `==`*(a, b: Sym): bool {.borrow.}
 func `$`*(s: Sym): string {.borrow.}
-func `==`*(a: Sym; b: string): bool = string(a) == b
-func `==`*(a: string; b: Sym): bool = a == string(b)
+func `==`*(a: Sym, b: string): bool =
+  string(a) == b
+func `==`*(a: string, b: Sym): bool =
+  a == string(b)
 
 template blRecord*(head: string) {.pragma.}
   ## type pragma: this object is a record dialect with the given head
 
-template blDict* {.pragma.}
+template blDict*() {.pragma.}
   ## type pragma: this object is a dict dialect; keys are the field
   ## names as symbols, Option fields may be silent (absent key)
 
-template blSet* {.pragma.}
+template blSet*() {.pragma.}
   ## field pragma: this seq renders as set framing instead of a list
 
 template blKey*(key: string) {.pragma.}
   ## field pragma (dict dialects): wire key overriding the field name
 
-func litOf[S: static string](t: typedesc[Lit[S]]): string = S
+func litOf[S: static string](t: typedesc[Lit[S]]): string =
+  S
 
 # ================ TO VALUE ================
 
@@ -84,8 +85,11 @@ func toValueObj[T: object](x: T): Value =
   elif T.hasCustomPragma(blDict):
     var entries: seq[(Value, Value)]
     for name, f in x.fieldPairs:
-      const key = when hasCustomPragma(f, blKey): getCustomPragmaVal(f, blKey)
-                  else: name
+      const key =
+        when hasCustomPragma(f, blKey):
+          getCustomPragmaVal(f, blKey)
+        else:
+          name
       when typeof(f) is Option:
         if f.isSome:
           entries.add (sym(key), toValue(f.get))
@@ -119,7 +123,10 @@ func toValue*[T](x: T): Value =
     else:
       {.error: "only byte arrays have a dialect mapping".}
   elif T is Option:
-    if x.isSome: toValue(x.get) else: nilValue()
+    if x.isSome:
+      toValue(x.get)
+    else:
+      nilValue()
   elif T is seq:
     var els = newSeqOfCap[Value](x.len)
     for it in x:
@@ -136,9 +143,9 @@ func toValue*[T](x: T): Value =
 # than typeof(...) extraction: pattern binding launders the type into
 # a clean semantic symbol, which hasCustomPragma needs downstream.
 
-func fromValue*[T](v: Value; t: typedesc[T]): Option[T]
+func fromValue*[T](v: Value, t: typedesc[T]): Option[T]
 
-func fromValue*[X](v: Value; t: typedesc[Option[X]]): Option[Option[X]] =
+func fromValue*[X](v: Value, t: typedesc[Option[X]]): Option[Option[X]] =
   ## outer Option: did the slot parse; inner: was it nil
   mixin fromValue
   if v.kind == bNil and not v.marked:
@@ -150,7 +157,7 @@ func fromValue*[X](v: Value; t: typedesc[Option[X]]): Option[Option[X]] =
     else:
       none(Option[X])
 
-func fromValue*[X](v: Value; t: typedesc[seq[X]]): Option[seq[X]] =
+func fromValue*[X](v: Value, t: typedesc[seq[X]]): Option[seq[X]] =
   mixin fromValue
   when X is byte:
     if v.kind == bBytes and not v.marked:
@@ -168,9 +175,10 @@ func fromValue*[X](v: Value; t: typedesc[seq[X]]): Option[seq[X]] =
       res.add p.get
     some(res)
 
-func match*[X](t: typedesc[X], v: Value): Option[X] = fromValue(v, t)
+func match*[X](t: typedesc[X], v: Value): Option[X] =
+  fromValue(v, t)
 
-func fromValueObj[T](v: Value; t: typedesc[T]): Option[T] =
+func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
   mixin fromValue
   when T.hasCustomPragma(blRecord):
     if v.kind != bRecord or v.marked:
@@ -206,8 +214,11 @@ func fromValueObj[T](v: Value; t: typedesc[T]): Option[T] =
     var res: T
     var matched = 0
     for name, f in res.fieldPairs:
-      const key = when hasCustomPragma(f, blKey): getCustomPragmaVal(f, blKey)
-                  else: name
+      const key =
+        when hasCustomPragma(f, blKey):
+          getCustomPragmaVal(f, blKey)
+        else:
+          name
       let keyVal = sym(key)
       var found = false
       for j in 0 ..< v.entries.len:
@@ -229,7 +240,7 @@ func fromValueObj[T](v: Value; t: typedesc[T]): Option[T] =
   else:
     {.error: $T & " needs {.blRecord: \"head\".} or {.blDict.} to be a dialect".}
 
-func fromValue*[T](v: Value; t: typedesc[T]): Option[T] =
+func fromValue*[T](v: Value, t: typedesc[T]): Option[T] =
   mixin fromValue
   when T is Value:
     some(v)

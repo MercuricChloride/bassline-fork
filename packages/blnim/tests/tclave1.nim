@@ -10,8 +10,9 @@ let
       s[i] = byte(i * 7)
     s
   kp = keypairFromSeed(seed)
-  doc = toValue(BlFile(contents: toBytes"hello",
-                     info: some BlFileInfo(name: some "hello.txt")))
+  doc = toValue(
+    BlFile(contents: toBytes"hello", info: some BlFileInfo(name: some "hello.txt"))
+  )
 
 suite "clave":
   test "sign / verify round trip":
@@ -28,14 +29,17 @@ suite "clave":
     let wrapped = signedValue(kp, doc)
     let forged = record(sym"signed", text"other", wrapped.items[2])
     let s = fromValue(forged, Signed)
-    check s.isSome            # the shape is fine
-    check not s.get.holds     # the attestation is not
+    check s.isSome # the shape is fine
+    check not s.get.holds # the attestation is not
 
   test "a tampered signature does not verify":
     var sig = @(sign(kp, doc))
     sig[10] = sig[10] xor 1
-    let tampered = record(sym"signed", doc,
-      record(sym"signature", sym(Scheme), bytes(sig), bytes(@(kp.public))))
+    let tampered = record(
+      sym"signed",
+      doc,
+      record(sym"signature", sym(Scheme), bytes(sig), bytes(@(kp.public))),
+    )
     let s = fromValue(tampered, Signed)
     check s.isSome
     check not s.get.holds
@@ -45,9 +49,13 @@ suite "clave":
     for i in 0 ..< 32:
       otherSeed[i] = byte(200 - i)
     let other = keypairFromSeed(otherSeed)
-    let tampered = record(sym"signed", doc,
-      record(sym"signature", sym(Scheme), bytes(@(sign(kp, doc))),
-             bytes(@(other.public))))
+    let tampered = record(
+      sym"signed",
+      doc,
+      record(
+        sym"signature", sym(Scheme), bytes(@(sign(kp, doc))), bytes(@(other.public))
+      ),
+    )
     check not fromValue(tampered, Signed).get.holds
 
   test "keypair value round trips through recognition":
@@ -60,7 +68,15 @@ suite "clave":
   test "unsigned and near-miss shapes do not match Signed":
     check Signed.match(doc).isNone
     check Signed.match(record(sym"signed", doc)).isNone
-    check Signed.match(record(sym"signed", doc,
-      record(sym"signature", sym"other",
-             bytes(newSeqWith(64, byte 0)),
-             bytes(newSeqWith(32, byte 0))))).isNone
+    check Signed.match(
+      record(
+        sym"signed",
+        doc,
+        record(
+          sym"signature",
+          sym"other",
+          bytes(newSeqWith(64, byte 0)),
+          bytes(newSeqWith(32, byte 0)),
+        ),
+      )
+    ).isNone

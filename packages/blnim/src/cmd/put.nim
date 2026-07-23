@@ -13,8 +13,7 @@ The default store lives at ~/.bl/store.
 
 proc run*(args: seq[string]) =
   var root = defaultStoreRoot()
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key
@@ -31,4 +30,7 @@ proc run*(args: seq[string]) =
       quit "put takes no arguments\n\n" & help
 
   let s = openStore(root)
-  runFilter(proc (v: Value): Option[Digest] = some s.put(v))
+  runFilter(
+    proc(v: Value): Option[Digest] =
+      some s.put(v)
+  )

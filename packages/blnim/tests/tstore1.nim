@@ -6,8 +6,9 @@ removeDir(root)
 
 suite "content-addressed store":
   let s = openStore(root)
-  let doc = toValue(BlFile(contents: toBytes"hello",
-                         info: some BlFileInfo(name: some "hello.txt")))
+  let doc = toValue(
+    BlFile(contents: toBytes"hello", info: some BlFileInfo(name: some "hello.txt"))
+  )
 
   test "put returns the name; load round trips the CE bytes":
     let name = s.put(doc)

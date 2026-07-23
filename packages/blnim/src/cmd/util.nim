@@ -6,9 +6,9 @@ proc blHome*(): string =
   ## Everything bl keeps locally lives under one roof.
   getHomeDir() / ".bl"
 
-const DefaultPort* = 8455  # where bl listen lands by default
+const DefaultPort* = 8455 # where bl listen lands by default
 
-proc parsePort*(s: string; allowZero = false): Port =
+proc parsePort*(s: string, allowZero = false): Port =
   ## Port(x) wraps modulo 2^16 on out-of-range ints, so the range
   ## check has to happen here.
   var port: int
@@ -42,22 +42,21 @@ proc parseDest*(dest: string): (string, Port) =
     quit "dest needs a port, got: " & dest
   (host, parsePort(portStr))
 
-iterator cmdOpts*(args: seq[string]; shortNoVal: set[char] = {};
-                  longNoVal: seq[string] = @[]):
-                 (CmdLineKind, string, string) =
+iterator cmdOpts*(
+    args: seq[string], shortNoVal: set[char] = {}, longNoVal: seq[string] = @[]
+): (CmdLineKind, string, string) =
   ## Option iteration for subcommands. Guards a parseopt footgun:
   ## initOptParser on an EMPTY seq silently re-reads the real command
   ## line, re-feeding the dispatched command name as an argument.
   if args.len > 0:
-    var p = initOptParser(args, shortNoVal = shortNoVal,
-                          longNoVal = longNoVal)
+    var p = initOptParser(args, shortNoVal = shortNoVal, longNoVal = longNoVal)
     while true:
       p.next()
       if p.kind == cmdEnd:
         break
       yield (p.kind, p.key, p.val)
 
-proc eachValue*(input: File; action: proc (v: Value)) =
+proc eachValue*(input: File, action: proc(v: Value)) =
   ## Drives `action` over a concatenation of values (the .blb / wire
   ## format). Quits with a message on malformed input.
   ##
@@ -88,7 +87,7 @@ proc eachValue*(input: File; action: proc (v: Value)) =
   if sd.buffered > 0:
     quit "input ends mid-value (" & $sd.buffered & " incomplete bytes)"
 
-proc runFilter*[T: ValueLike](f: proc (v: Value): Option[T]) =
+proc runFilter*[T: ValueLike](f: proc(v: Value): Option[T]) =
   ## Lifts a function from values to ValueLikes into a
   ## stdin -> stdout stream filter.
   ## None drops the value indicating refusal;
@@ -99,10 +98,14 @@ proc runFilter*[T: ValueLike](f: proc (v: Value): Option[T]) =
   ## ie:
   ## bl listen | bl x | ...
   mixin toValue
-  eachValue(stdin, proc (v: Value) =
-    let o = f(v)
-    if o.isSome:
-      let ce = encode o.get.toValue
-      if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
-        quit "short write to stdout"
-      stdout.flushFile())
+  eachValue(
+    stdin,
+    proc(v: Value) =
+      let o = f(v)
+      if o.isSome:
+        let ce = encode o.get.toValue
+        if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
+          quit "short write to stdout"
+        stdout.flushFile()
+    ,
+  )

@@ -29,8 +29,7 @@ proc loadKeypair(path: string): Keypair =
 
 proc run*(args: seq[string]) =
   var keyPath = defaultKeyPath()
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key
@@ -47,5 +46,7 @@ proc run*(args: seq[string]) =
       quit "sign takes no arguments\n\n" & help
 
   let kp = loadKeypair(keyPath)
-  runFilter(proc (v: Value): Option[Value] =
-    some signedValue(kp, v))
+  runFilter(
+    proc(v: Value): Option[Value] =
+      some signedValue(kp, v)
+  )

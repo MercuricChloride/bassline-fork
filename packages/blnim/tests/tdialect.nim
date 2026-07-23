@@ -3,7 +3,9 @@ import blnim/codec/encode
 import blnim/dialect
 
 type
-  ZipMode = enum gzip, tarball
+  ZipMode = enum
+    gzip
+    tarball
 
   FileInfo {.blDict.} = object
     name: Option[string]
@@ -13,7 +15,10 @@ type
     contents: seq[byte]
     info: Option[FileInfo]
 
-  FsKind = enum fsFile, fsDir
+  FsKind = enum
+    fsFile
+    fsDir
+
   FsEntry = object
     case kind: FsKind
     of fsFile: file: File
@@ -55,10 +60,12 @@ type
 # a union is one hand-written overload pair; the engine defers to it
 func toValue(x: FsEntry): Value =
   case x.kind
-  of fsFile: toValue(x.file)
-  of fsDir: toValue(x.dir)
+  of fsFile:
+    toValue(x.file)
+  of fsDir:
+    toValue(x.dir)
 
-func fromValue(v: Value; T: typedesc[FsEntry]): Option[FsEntry] =
+func fromValue(v: Value, T: typedesc[FsEntry]): Option[FsEntry] =
   let f = fromValue(v, File)
   if f.isSome:
     return some FsEntry(kind: fsFile, file: f.get)
@@ -83,22 +90,27 @@ suite "byte parity with the wire spellings":
     check encode(typed) == encode(handRolled)
 
   test "file with info dict":
-    let typed = toValue(File(
-      contents: payload,
-      info: some FileInfo(name: some "a.txt", zip: some gzip)))
-    let handRolled = record(sym"file", bytes(payload),
-      dict(@[(sym"name", text"a.txt"), (sym"zip", sym"gzip")]))
+    let typed = toValue(
+      File(contents: payload, info: some FileInfo(name: some "a.txt", zip: some gzip))
+    )
+    let handRolled = record(
+      sym"file",
+      bytes(payload),
+      dict(@[(sym"name", text"a.txt"), (sym"zip", sym"gzip")]),
+    )
     check typed == handRolled
     check encode(typed) == encode(handRolled)
 
   test "directory with set framing":
     let a = File(contents: payload, info: some FileInfo(name: some "a"))
     let b = File(contents: @[byte 9], info: some FileInfo(name: some "b"))
-    let typed = toValue(Directory(entries: @[
-      FsEntry(kind: fsFile, file: a),
-      FsEntry(kind: fsFile, file: b)]))
-    let handRolled = record(sym"directory",
-      values.set(toValue(a), toValue(b)), nilValue())
+    let typed = toValue(
+      Directory(
+        entries: @[FsEntry(kind: fsFile, file: a), FsEntry(kind: fsFile, file: b)]
+      )
+    )
+    let handRolled =
+      record(sym"directory", values.set(toValue(a), toValue(b)), nilValue())
     check typed == handRolled
     check encode(typed) == encode(handRolled)
 
@@ -113,24 +125,30 @@ suite "byte parity with the wire spellings":
       kp.seed[i] = seed32[i]
       kp.public[i] = pub32[i]
     let typed = toValue(kp)
-    let handRolled = record(sym"keypair", sym"eddsa-blake2b",
-                            bytes(seed32), bytes(pub32))
+    let handRolled =
+      record(sym"keypair", sym"eddsa-blake2b", bytes(seed32), bytes(pub32))
     check typed == handRolled
 
   test "signed wraps a nested signature record":
     var s = Signature()
-    for i in 0 ..< 64: s.sig[i] = sig64[i]
-    for i in 0 ..< 32: s.public[i] = pub32[i]
+    for i in 0 ..< 64:
+      s.sig[i] = sig64[i]
+    for i in 0 ..< 32:
+      s.public[i] = pub32[i]
     let inner = mark(record(sym"greet", text"hello")) # an actionable payload
     let typed = Signed(value: inner, signature: s).toValue
-    let handRolled = record(sym"signed", inner,
-      record(sym"signature", sym"eddsa-blake2b", bytes(sig64), bytes(pub32)))
+    let handRolled = record(
+      sym"signed",
+      inner,
+      record(sym"signature", sym"eddsa-blake2b", bytes(sig64), bytes(pub32)),
+    )
     check typed == handRolled
 
 suite "recognition":
   test "round trips":
-    let f = File(contents: payload,
-                 info: some FileInfo(name: some "a.txt", zip: some tarball))
+    let f = File(
+      contents: payload, info: some FileInfo(name: some "a.txt", zip: some tarball)
+    )
     let back = fromValue(toValue(f), File)
     check back.isSome
     check back.get.contents == payload
@@ -138,35 +156,40 @@ suite "recognition":
     check back.get.info.get.zip.get == tarball
 
   test "keypair shape, exactly clave's checks":
-    let good = record(sym"keypair", sym"eddsa-blake2b",
-                      bytes(seed32), bytes(pub32))
+    let good = record(sym"keypair", sym"eddsa-blake2b", bytes(seed32), bytes(pub32))
     let kp = fromValue(good, Keypair)
     check kp.isSome
     check kp.get.seed[0] == byte 7
     check kp.get.public[0] == byte 9
 
     # wrong scheme literal
-    check fromValue(record(sym"keypair", sym"rsa",
-                           bytes(seed32), bytes(pub32)), Keypair).isNone
+    check fromValue(
+      record(sym"keypair", sym"rsa", bytes(seed32), bytes(pub32)), Keypair
+    ).isNone
     # wrong head
-    check fromValue(record(sym"keypare", sym"eddsa-blake2b",
-                           bytes(seed32), bytes(pub32)), Keypair).isNone
+    check fromValue(
+      record(sym"keypare", sym"eddsa-blake2b", bytes(seed32), bytes(pub32)), Keypair
+    ).isNone
     # wrong seed size
-    check fromValue(record(sym"keypair", sym"eddsa-blake2b",
-                           bytes(seed32[0 ..< 31]), bytes(pub32)),
-                               Keypair).isNone
+    check fromValue(
+      record(sym"keypair", sym"eddsa-blake2b", bytes(seed32[0 ..< 31]), bytes(pub32)),
+      Keypair,
+    ).isNone
     # extra field: shape is closed
-    check fromValue(record(sym"keypair", sym"eddsa-blake2b",
-                           bytes(seed32), bytes(pub32), nilValue()),
-                               Keypair).isNone
+    check fromValue(
+      record(sym"keypair", sym"eddsa-blake2b", bytes(seed32), bytes(pub32), nilValue()),
+      Keypair,
+    ).isNone
     # missing field
-    check fromValue(record(sym"keypair", sym"eddsa-blake2b",
-                           bytes(seed32)), Keypair).isNone
+    check fromValue(record(sym"keypair", sym"eddsa-blake2b", bytes(seed32)), Keypair).isNone
 
   test "nested recognition, signed":
     let inner = mark(record(sym"greet", text"hello"))
-    let v = record(sym"signed", inner,
-      record(sym"signature", sym"eddsa-blake2b", bytes(sig64), bytes(pub32)))
+    let v = record(
+      sym"signed",
+      inner,
+      record(sym"signature", sym"eddsa-blake2b", bytes(sig64), bytes(pub32)),
+    )
     let s = fromValue(v, Signed)
     check s.isSome
     check s.get.value == inner # passthrough keeps the mark
@@ -183,8 +206,10 @@ suite "recognition":
     var files, dirs = 0
     for e in d.get.entries:
       case e.kind
-      of fsFile: inc files
-      of fsDir: inc dirs
+      of fsFile:
+        inc files
+      of fsDir:
+        inc dirs
     check files == 1 and dirs == 1
 
   test "integers, the doc's (dec 15 -1)":
@@ -194,8 +219,7 @@ suite "recognition":
     check d.get.m == 15 and d.get.e == -1
     check toValue(d.get) == v
     # doesn't fit an int -> refused, not truncated
-    check fromValue(record(sym"dec", num"99999999999999999999999", num"0"),
-                    Dec).isNone
+    check fromValue(record(sym"dec", num"99999999999999999999999", num"0"), Dec).isNone
     # DecimalString carries what int can't, losslessly
     let big = fromValue(record(sym"big", num"99999999999999999999999"), Big)
     check big.isSome
@@ -219,13 +243,13 @@ suite "epistemics and strictness":
 
   test "dict shapes are closed and required keys required":
     # unknown key refused
-    check fromValue(dict(@[(sym"name", text"x"), (sym"extra", num"1")]),
-                    FileInfo).isNone
+    check fromValue(dict(@[(sym"name", text"x"), (sym"extra", num"1")]), FileInfo).isNone
     # required key missing
     check fromValue(dict(@[(sym"content-type", sym"text")]), Pinned).isNone
     # blKey spells what a Nim identifier can't
-    let p = fromValue(dict(@[(sym"algo", sym"sha256"),
-                             (sym"content-type", sym"text")]), Pinned)
+    let p = fromValue(
+      dict(@[(sym"algo", sym"sha256"), (sym"content-type", sym"text")]), Pinned
+    )
     check p.isSome
     check p.get.contentType.get == Sym"text"
 
@@ -235,14 +259,12 @@ suite "epistemics and strictness":
 
   test "marks are refused in typed slots":
     # a marked record is an instruction, not a statement of this shape
-    check fromValue(mark(record(sym"digest", sym"sha256", bytes(payload))),
-                    Digest).isNone
+    check fromValue(mark(record(sym"digest", sym"sha256", bytes(payload))), Digest).isNone
     # a marked scalar inside a slot likewise
-    check fromValue(record(sym"digest", mark(sym"sha256"), bytes(payload)),
-                    Digest).isNone
+    check fromValue(record(sym"digest", mark(sym"sha256"), bytes(payload)), Digest).isNone
 
   test "kind confusion is refused":
-    check fromValue(record(sym"digest", text"sha256", bytes(payload)),
-                    Digest).isNone # text where symbol expected
-    check fromValue(record(sym"file", list(num"1"), nilValue()),
-                    File).isNone # list where bytes expected
+    check fromValue(record(sym"digest", text"sha256", bytes(payload)), Digest).isNone
+      # text where symbol expected
+    check fromValue(record(sym"file", list(num"1"), nilValue()), File).isNone
+      # list where bytes expected

@@ -10,8 +10,7 @@ don't claim to be signed pass through untouched.
 """
 
 proc run*(args: seq[string]) =
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key
@@ -24,8 +23,9 @@ proc run*(args: seq[string]) =
       quit "verify takes no arguments\n\n" & help
 
   runFilter(
-    proc (v: Value): Option[Value] =
-      let s = v.fromValue: Signed
+    proc(v: Value): Option[Value] =
+      let s = v.fromValue:
+        Signed
       if s.isNone:
         some v # doesn't claim to be signed
       elif s.get.holds:

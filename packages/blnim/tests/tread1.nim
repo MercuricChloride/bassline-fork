@@ -19,13 +19,13 @@ suite "atoms":
     check readValue("0") == num"0"
     check readValue("-5") == num"-5"
     check readValue("123456789012345678901234567890") ==
-          num"123456789012345678901234567890"
+      num"123456789012345678901234567890"
 
   test "strings":
     check readValue("\"\"") == text""
     check readValue("\"hi\"") == text"hi"
     check readValue("\"a\\n\\t\\r\\\\\\\"b\"") == text("a\n\t\r\\\"b")
-    check readValue("\"a\nb\"") == text("a\nb")   # literal newline is legal
+    check readValue("\"a\nb\"") == text("a\nb") # literal newline is legal
 
   test "symbols":
     check readValue("foo") == sym"foo"
@@ -54,8 +54,7 @@ suite "frames":
 
   test "dicts read in any order, mean their canonical form":
     check readValue("{}") == dict(newSeq[(Value, Value)]())
-    check readValue("{b: 2 a: 1}") ==
-          dict(@[(sym"a", num"1"), (sym"b", num"2")])
+    check readValue("{b: 2 a: 1}") == dict(@[(sym"a", num"1"), (sym"b", num"2")])
     check readValue("{foo:bar}") == dict(@[(sym"foo", sym"bar")])
     check readValue("{[1]: one}") == dict(@[(list(num"1"), sym"one")])
 
@@ -81,14 +80,14 @@ suite "rejections":
       check rejects(s)
 
   test "malformed frames":
-    check rejects("()")               # record with no head
-    check rejects("#{1 1}")           # duplicate set member
-    check rejects("{a: 1 a: 2}")      # duplicate dict key
-    check rejects("{a 1}")            # missing colon
-    check rejects("{a:}")             # missing value
+    check rejects("()") # record with no head
+    check rejects("#{1 1}") # duplicate set member
+    check rejects("{a: 1 a: 2}") # duplicate dict key
+    check rejects("{a 1}") # missing colon
+    check rejects("{a:}") # missing value
     check rejects("[1")
     check rejects("(")
-    check rejects("a : b")            # ':' outside a dict
+    check rejects("a : b") # ':' outside a dict
 
   test "malformed bytes":
     check rejects("#[AB")
@@ -100,8 +99,8 @@ suite "rejections":
   test "malformed scalars":
     check rejects("\"ab")
     check rejects("'ab")
-    check rejects("\"a\\x\"")         # unknown escape
-    check rejects("\"\xFF\"")         # ill-formed UTF-8
+    check rejects("\"a\\x\"") # unknown escape
+    check rejects("\"\xFF\"") # ill-formed UTF-8
     check rejects("\xFF")
 
   test "stray closers":
@@ -125,20 +124,39 @@ suite "documents":
 suite "print and read are inverse":
   test "round trip":
     let corpus = [
-      nilValue(), nilValue(true), num"0", num"-42",
+      nilValue(),
+      nilValue(true),
+      num"0",
+      num"-42",
       num"123456789012345678901234567890",
-      text"", text("line\nbreak\ttab \"q\" \\ back"),
-      sym"plain", sym"has space", sym"nil", sym"", sym"007", sym"-5",
-      sym"a:b", sym"#weird", sym"`tick", sym"a'b", mark(sym"go"),
-      bytes(newSeq[byte]()), bytes(@[byte 0, 255]),
-      list(), values.set(newSeq[Value]()),
+      text"",
+      text("line\nbreak\ttab \"q\" \\ back"),
+      sym"plain",
+      sym"has space",
+      sym"nil",
+      sym"",
+      sym"007",
+      sym"-5",
+      sym"a:b",
+      sym"#weird",
+      sym"`tick",
+      sym"a'b",
+      mark(sym"go"),
+      bytes(newSeq[byte]()),
+      bytes(@[byte 0, 255]),
+      list(),
+      values.set(newSeq[Value]()),
       dict(newSeq[(Value, Value)]()),
       record(sym"f", nilValue()),
       dict(@[(num"1", text"one"), (list(num"2"), text"two")]),
-      mark(record(sym"run",
-        list(num"1", mark(sym"x")),
-        values.set(sym"b", sym"a"),
-        dict(@[(sym"k", bytes(@[byte 0xEE]))])))
+      mark(
+        record(
+          sym"run",
+          list(num"1", mark(sym"x")),
+          values.set(sym"b", sym"a"),
+          dict(@[(sym"k", bytes(@[byte 0xEE]))]),
+        )
+      ),
     ]
     for v in corpus:
       check readValue($v) == v

@@ -13,8 +13,7 @@ is the default for bl listen.
 
 proc run*(args: seq[string]) =
   var dest = ""
-  for kind, key, val in cmdOpts(args, shortNoVal = {'h'},
-                                longNoVal = @["help"]):
+  for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
       case key
@@ -40,9 +39,13 @@ proc run*(args: seq[string]) =
     except OSError as e:
       quit "can't reach " & host & ":" & $int(port) & " -- " & e.msg
   var count = 0
-  eachValue(stdin, proc (v: Value) =
-    waitFor conn.send(v)
-    inc count)
+  eachValue(
+    stdin,
+    proc(v: Value) =
+      waitFor conn.send(v)
+      inc count
+    ,
+  )
   conn.close()
   if count == 0:
     quit "no values on stdin"
