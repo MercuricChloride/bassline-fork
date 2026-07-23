@@ -1,6 +1,6 @@
 import std/[strutils, nativesockets, options, parseopt, os, posix]
-import ../blnim/codec/[stream, encode]
-export options, stream, encode, parseopt
+import ../blnim/codec
+export options, codec, parseopt
 
 proc blHome*(): string =
   ## Everything bl keeps locally lives under one roof.

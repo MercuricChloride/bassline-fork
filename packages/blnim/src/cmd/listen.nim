@@ -1,6 +1,6 @@
 import std/os
 from std/strutils import parseInt
-import ../blnim/server/server
+import ../blnim/server
 import util
 
 const help = """

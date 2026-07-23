@@ -10,10 +10,10 @@
 ## and "proper"
 
 import std/[os, options, strutils]
-import ../blnim/codec/[decode, digest, encode]
+import ../blnim/[codec, digest]
 import ../blnim/misc/common
 import util
-export options, decode, digest, encode, common
+export options, digest, codec, common
 
 type
   Store* = object

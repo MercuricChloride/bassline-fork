@@ -20,3 +20,5 @@ target/
 .env.production.local
 
 .mcp.json
+
+bin/

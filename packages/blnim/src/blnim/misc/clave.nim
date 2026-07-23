@@ -22,7 +22,7 @@
 
 import monocypher
 import ../dialect
-import ../codec/encode
+import ../codec
 export dialect
 
 const Scheme* = "eddsa-blake2b"

@@ -1,12 +1,8 @@
 {.experimental: "strictFuncs".}
 
-## Content digests over canonical bytes. The sink streams encodeInto
-## straight into the hash state, so a value's name is computed without
-## ever materializing its encoding.
-
 import checksums/sha2
-import encode
-import ../misc/common
+import codec
+import ./misc/common
 
 type Sha256Writer = object
   ctx: ShaStateStatic[Sha_256]

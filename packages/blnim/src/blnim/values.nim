@@ -1,8 +1,9 @@
 {.experimental: "strictFuncs".}
+
 import std/[algorithm, sequtils, options]
 import strflavors
 
-export strflavors
+export strflavors, options
 
 type
   SetOrder = object

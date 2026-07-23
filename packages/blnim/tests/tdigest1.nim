@@ -1,6 +1,6 @@
 import std/unittest
 from std/strutils import repeat
-import blnim/codec/[digest, encode]
+import blnim/[codec, digest]
 import blnim/misc/common
 import checksums/sha2
 

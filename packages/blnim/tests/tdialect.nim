@@ -1,5 +1,5 @@
 import std/[unittest, sequtils]
-import blnim/codec/encode
+import blnim/codec
 import blnim/dialect
 
 type

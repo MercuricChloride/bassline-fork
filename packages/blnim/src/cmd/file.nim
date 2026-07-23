@@ -2,7 +2,7 @@ import std/os
 import zippy
 import zippy/tarballs
 import ../blnim/misc/common
-import ../blnim/codec/encode
+import ../blnim/codec
 import util
 
 const help = """

@@ -6,13 +6,13 @@
 ## This is because the nim table hasher it isn't stable across
 ## nim versions or writer chunking patterns.
 ##
-## If you need a hashed digest of a value, use codec/digest to get it's
+## If you need a hashed digest of a value, use digest to get it's
 ## sha256 over the ce bytes.
 
 import std/hashes
-import ../codec/encode
+import ../codec
 
-export encode
+export codec
 export hashes
 
 type HashWriter = object

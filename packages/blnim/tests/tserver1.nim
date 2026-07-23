@@ -1,7 +1,7 @@
 import std/unittest
 import std/options
 from std/strutils import repeat
-import blnim/server/server
+import blnim/server
 
 suite "landing surface":
   test "values land in order across awkward splits":

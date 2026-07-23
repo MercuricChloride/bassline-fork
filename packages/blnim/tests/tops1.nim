@@ -1,6 +1,6 @@
 import std/[unittest, sequtils]
 import blnim/ops
-import blnim/codec/[decode, encode]
+import blnim/codec
 import blnim/misc/[print, common]
 
 suite "recognition":

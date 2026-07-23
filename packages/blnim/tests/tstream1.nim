@@ -2,7 +2,7 @@ import std/unittest
 import std/options
 import std/sequtils
 from std/strutils import repeat
-import blnim/codec/[stream, encode]
+import blnim/codec
 
 # a corpus exercising every kind, the mark bit, and all length tiers
 let corpus = @[

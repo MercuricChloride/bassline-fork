@@ -1,4 +1,4 @@
-import ../blnim/codec/digest
+import ../blnim/digest
 import ../blnim/misc/common
 import util
 
