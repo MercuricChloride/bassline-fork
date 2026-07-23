@@ -1,7 +1,7 @@
 import std/unittest
 import std/sequtils
-import blnim/misc/clave
-import blnim/misc/common
+import core
+import pkg/lib/[clave, common]
 
 let
   seed: Seed = block:

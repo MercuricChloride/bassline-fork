@@ -1,5 +1,4 @@
-import store
-import util
+import ./[store, util]
 
 const help = """
 bl put [--store:PATH]

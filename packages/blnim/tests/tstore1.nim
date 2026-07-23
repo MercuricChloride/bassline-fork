@@ -1,5 +1,6 @@
 import std/[unittest, os, options]
-import cmd/store
+import pkg/core
+import pkg/cmd/store
 
 let root = getTempDir() / "bl-test-store-" & $getCurrentProcessId()
 removeDir(root)

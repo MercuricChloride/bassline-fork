@@ -1,6 +1,6 @@
-import ../blnim/misc/print
-import store
-import util
+import ../core
+import ../lib/[print, common]
+import ./[store, util]
 
 const help = """
 bl get [--store:PATH]

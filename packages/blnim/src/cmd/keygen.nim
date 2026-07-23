@@ -1,6 +1,7 @@
 import std/[os, sysrand]
-import ../blnim/misc/[clave, print]
-import util
+import ../core
+import ../lib/[clave, print]
+import ./util
 
 const help = """
 bl keygen [--out:PATH] [--force]
@@ -48,7 +49,7 @@ proc run*(args: seq[string]) =
   let kp = keypairFromSeed(seed)
 
   createDir(outPath.parentDir)
-  writeFile(outPath, encodeToString(kp))
+  writeFile(outPath, encode(kp.toValue))
   setFilePermissions(outPath, {fpUserRead, fpUserWrite})
   stderr.writeLine "-- wrote " & outPath
   stderr.writeLine "-- public " & $bytes(@(kp.public))

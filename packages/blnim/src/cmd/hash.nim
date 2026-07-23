@@ -1,6 +1,6 @@
-import ../blnim/digest
-import ../blnim/misc/common
-import util
+import ../core
+import ../lib/[common, digest]
+import ./util
 
 const help = """
 bl hash

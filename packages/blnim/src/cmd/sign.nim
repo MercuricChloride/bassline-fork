@@ -1,6 +1,5 @@
 import std/os
-import ../blnim/misc/[clave, common]
-import ../blnim/codec
+import ../lib/[common, clave]
 import util
 import keygen
 

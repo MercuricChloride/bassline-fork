@@ -1,8 +1,9 @@
 import std/unittest
 from std/strutils import repeat
-import blnim/[codec, digest]
-import blnim/misc/common
 import checksums/sha2
+import pkg/core
+import pkg/lib/[common, digest]
+
 
 proc bulkSha256(bs: seq[byte]): array[32, byte] =
   var st = initSha_256()

@@ -1,6 +1,6 @@
 import std/[unittest, sequtils]
-import blnim/codec
-import blnim/dialect
+import core
+import lib/dialect
 
 type
   ZipMode = enum

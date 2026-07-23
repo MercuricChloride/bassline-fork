@@ -1,6 +1,6 @@
 import std/os
-import ../blnim/misc/read as textread
-import ../blnim/codec
+import ../core/codec
+import ../lib/read as textread
 import util
 
 const help = """

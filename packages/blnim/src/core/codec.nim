@@ -1,7 +1,6 @@
 {.experimental: "strictFuncs".}
 
-import values
-export values
+import ./values
 
 type
   DecodeError* = object of CatchableError

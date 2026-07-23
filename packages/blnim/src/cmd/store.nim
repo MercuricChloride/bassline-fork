@@ -10,9 +10,10 @@
 ## and "proper"
 
 import std/[os, options, strutils]
-import ../blnim/[codec, digest]
-import ../blnim/misc/common
-import util
+import ../core
+import ../lib/[common, digest]
+import ./util
+
 export options, digest, codec, common
 
 type

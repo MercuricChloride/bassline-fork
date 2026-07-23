@@ -1,4 +1,5 @@
-import ../blnim/misc/print
+import ../core
+import ../lib/print
 import util
 
 const help = """

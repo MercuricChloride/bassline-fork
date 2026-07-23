@@ -1,8 +1,8 @@
 {.experimental: "strictFuncs".}
 
 import checksums/sha2
-import codec
-import ./misc/common
+import ../core
+import ./[dialect, common]
 
 type Sha256Writer = object
   ctx: ShaStateStatic[Sha_256]

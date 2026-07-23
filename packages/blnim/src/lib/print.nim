@@ -2,9 +2,8 @@
 
 from std/strutils import join, toHex
 import std/sequtils
-import ../values
-import read
-export values
+import ../core/values
+import ./read
 
 func escaped(s: string, q: char): string =
   for c in s:

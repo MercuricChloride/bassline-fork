@@ -1,5 +1,6 @@
 import std/unittest
-import blnim/misc/[read, print]
+import pkg/core
+import pkg/lib/[read, print]
 
 proc rejects(text: string): bool =
   try:

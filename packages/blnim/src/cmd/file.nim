@@ -1,9 +1,9 @@
 import std/os
 import zippy
 import zippy/tarballs
-import ../blnim/misc/common
-import ../blnim/codec
-import util
+import ../core
+import ../lib/common
+import ./util
 
 const help = """
 bl file <path> [--zip]

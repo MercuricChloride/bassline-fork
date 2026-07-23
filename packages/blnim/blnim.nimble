@@ -1,13 +1,13 @@
 # Package
 
-version       = "0.1.0"
-author        = "mercuricchloride"
-description   = "Bassline nim implementation"
-license       = "AGPL-3.0-or-later"
-srcDir        = "src"
-installExt    = @["nim"]
-bin           = @["bl"]
-binDir        = "bin"
+version = "0.1.0"
+author = "mercuricchloride"
+description = "Bassline nim implementation"
+license = "AGPL-3.0-or-later"
+srcDir = "src"
+installExt = @["nim"]
+bin = @["bl"]
+binDir = "bin"
 
 # Dependencies
 

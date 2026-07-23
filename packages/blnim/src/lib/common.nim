@@ -1,6 +1,7 @@
 {.experimental: "strictFuncs".}
 
-import ../dialect
+import ../core
+import ./dialect
 export dialect
 
 type

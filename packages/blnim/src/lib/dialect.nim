@@ -29,10 +29,8 @@
 ## and marked values are refused everywhere except Value passthrough.
 ## fromValue never raises on foreign data; it answers none.
 
-import std/[options, strutils, macros]
-import values
-
-export options, values
+import std/[strutils, macros]
+import ../core/values
 
 type
   Sym* = distinct string ## a field that is a bassline symbol (string fields are text)

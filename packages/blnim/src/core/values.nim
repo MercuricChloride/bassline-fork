@@ -1,8 +1,7 @@
 {.experimental: "strictFuncs".}
 
 import std/[algorithm, sequtils, options]
-import strflavors
-
+import ./strflavors
 export strflavors, options
 
 type

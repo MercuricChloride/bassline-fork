@@ -1,4 +1,5 @@
-import ../blnim/misc/clave
+import ../core
+import ../lib/[common, clave]
 import util
 
 const help = """

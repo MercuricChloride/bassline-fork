@@ -1,7 +1,6 @@
 import std/[unittest, sequtils]
-import blnim/ops
-import blnim/codec
-import blnim/misc/[print, common]
+import pkg/core
+import pkg/lib/[print, common]
 
 suite "recognition":
   test "hasHead: any value as head, compared by CE equality":

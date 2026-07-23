@@ -1,6 +1,6 @@
 import std/[unittest, tables, sets]
-import blnim/values
-import blnim/misc/hash
+import pkg/core
+import pkg/lib/hash
 
 suite "smoke tests":
   test "basic insertion & updates for tables":

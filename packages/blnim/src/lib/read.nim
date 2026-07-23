@@ -1,6 +1,6 @@
 {.experimental: "strictFuncs".}
 
-import ../values
+import ../core/values
 
 type ReadError* = object of CatchableError
 

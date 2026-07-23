@@ -1,8 +1,7 @@
 {.experimental: "strictFuncs".}
 
-import std/[algorithm, options]
-import values
-export options, values
+import std/algorithm
+import ./values
 
 type ValuePred* = proc(v: Value): bool {.noSideEffect.}
 

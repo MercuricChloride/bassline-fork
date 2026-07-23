@@ -10,7 +10,7 @@
 ## sha256 over the ce bytes.
 
 import std/hashes
-import ../codec
+import ../core/[values, codec]
 
 export codec
 export hashes

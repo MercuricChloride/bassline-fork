@@ -21,9 +21,8 @@
 ## what the scheme slot is for.
 
 import monocypher
-import ../dialect
-import ../codec
-export dialect
+import ../core
+import ./dialect
 
 const Scheme* = "eddsa-blake2b"
 

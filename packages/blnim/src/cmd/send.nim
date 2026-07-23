@@ -1,5 +1,5 @@
 import std/parseopt
-import ../blnim/server
+import ../lib/server
 import util
 
 const help = """

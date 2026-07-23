@@ -4,8 +4,8 @@ import std/tables
 import std/sets
 from std/strutils import repeat, join
 from std/math import sgn
-import blnim/codec
-import blnim/misc/[print, hash]
+import pkg/core
+import pkg/lib/[print, hash]
 
 func roundTrips(v: Value): bool =
   decode(encode(v)) == v
