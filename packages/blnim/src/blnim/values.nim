@@ -47,8 +47,6 @@ type
     toValue(x) is Value
     fromValue(Value, typeof(x)) is Option[typeof(x)]
 
-const END_BYTE*: byte = 0xA0
-
 # ================ SORTED ================
 # We use a distinct type so we don't have to worry about
 # improper usage polluting our values
@@ -173,7 +171,7 @@ func cmp*(a, b: Value): int
   ##
   ## NOTE!
   ##
-  ## Because frames are delimited with END_BYTE (0xA0) and since
+  ## Because frames are delimited with 0xA0 and since
   ## that byte is > all other CE header bytes it means that:
   ## a shorter frame is > a longer frame
 func cmp*(a, b: seq[byte]): int =

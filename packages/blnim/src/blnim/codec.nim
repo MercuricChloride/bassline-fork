@@ -21,6 +21,7 @@ type
     maxValueBytes: int
 
 const
+  EndByte = 0xA0
   MaxPayloadSize: uint32 = high(uint32)
   DefaultMaxValueBytes* = 150 * 1024 * 1024
   CompactThreshold = 64 * 1024
@@ -107,7 +108,7 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
     let t: 0x6 .. 0x9 = tag
     while true:
       need(bytes, pos, 1)
-      if bytes[pos] == END_BYTE:
+      if bytes[pos] == EndByte:
         inc pos
         break
       children.add decodeValue(bytes, pos, depth - 1)
@@ -134,7 +135,7 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
           fail "set members out of order or duplicated"
       set(children, marked)
   of 0xA:
-    if header == END_BYTE:
+    if header == EndByte:
       fail "END where a value was expected"
     fail "END carries no flag and no length"
   else:
@@ -221,16 +222,16 @@ func encodeInto*[W](value: Value, w: var W) =
   of bList, bRecord:
     for item in value.items:
       item.encodeInto w
-    w.write END_BYTE
+    w.write EndByte
   of bSet:
     for el in value.elements:
       el.encodeInto w
-    w.write END_BYTE
+    w.write EndByte
   of bDict:
     for (key, val) in value.entries:
       key.encodeInto w
       val.encodeInto w
-    w.write END_BYTE
+    w.write EndByte
 
 func encode*[T: ValueLike](x: T): seq[byte] =
   mixin toValue
@@ -316,7 +317,7 @@ func scan(sd: var StreamDecoder): bool =
         fail "nesting past the depth limit"
       inc sd.scanPos
     of 0xA:
-      if header != END_BYTE:
+      if header != EndByte:
         fail "END carries no flag and no length"
       if sd.depth == 0:
         fail "END where a value was expected"
