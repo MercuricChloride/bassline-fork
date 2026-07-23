@@ -1,6 +1,6 @@
 import std/os
 from std/strutils import parseInt
-import core
+import ../core
 import ../lib/server
 import util
 

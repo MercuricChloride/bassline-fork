@@ -1,5 +1,5 @@
 import std/[unittest, sequtils]
-import core
+import pkg/core
 import lib/dialect
 
 type

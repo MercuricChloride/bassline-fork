@@ -1,6 +1,6 @@
 import std/unittest
 import std/sequtils
-import core
+import pkg/core
 import pkg/lib/[clave, common]
 
 let
