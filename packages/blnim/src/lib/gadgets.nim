@@ -185,12 +185,12 @@ when isMainModule:
   gr[] =
     readGrammar"""{
     point: [`(num) `(num)]
-    wide: ( `(any) `(any) `(any) )
+    triple: ( `(any) `(any) `(any) )
     tag: `(sym)
   }"""
   let router = route(
     gr,
-    {"point": logger("point: "), "wide": logger("wide: "), "tag": logger("tag: ")},
+    {"point": logger("point: "), "triple": logger("triple: "), "tag": logger("tag: ")},
     rest = logger("unrecognized: "),
   )
   for v in [

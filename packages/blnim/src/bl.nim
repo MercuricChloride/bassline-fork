@@ -1,5 +1,9 @@
 import std/parseopt
-import cmd/[listen, file, send, hash, cat, keygen, sign, verify, put, get, read]
+import
+  cmd/[
+    listen, file, send, hash, cat, keygen, sign, verify, put, get, read, grep, classify,
+    gen, gram,
+  ]
 
 proc printHelp() =
   echo """
@@ -18,6 +22,10 @@ Usage:
   bl verify                      check signed values, emit the inner
   bl put [--store:PATH]          hold stdin values, emit their names
   bl get [--store:PATH]          resolve digest names to content
+  bl grep <grammar>              pass on the values a grammar admits
+  bl classify <grammar>          name every rule that admits each value
+  bl gen <grammar>               write values a grammar admits
+  bl grammar <what> <grammar>    show, digest, lint, diff
   bl <command> --help            command-specific help
   bl -h | --help
   bl -v | --version
@@ -76,6 +84,18 @@ proc main() =
         return
       of "get":
         get.run(p.remainingArgs())
+        return
+      of "grep":
+        grep.run(p.remainingArgs())
+        return
+      of "classify":
+        classify.run(p.remainingArgs())
+        return
+      of "gen":
+        gen.run(p.remainingArgs())
+        return
+      of "grammar":
+        gram.run(p.remainingArgs())
         return
       else:
         echo "unknown command: ", p.key

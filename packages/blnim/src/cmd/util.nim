@@ -1,6 +1,6 @@
-import std/[strutils, nativesockets, options, parseopt, os, posix]
+import std/[strutils, nativesockets, options, parseopt, os, posix, random]
 import ../core
-export core, options, parseopt
+export core, options, parseopt, random
 
 proc blHome*(): string =
   ## Everything bl keeps locally lives under one roof.
@@ -87,14 +87,30 @@ proc eachValue*(input: File, action: proc(v: Value)) =
   if sd.buffered > 0:
     quit "input ends mid-value (" & $sd.buffered & " incomplete bytes)"
 
+proc seededRand*(seed: int, given: bool): Rand =
+  ## Sampling repeats exactly when you say which run you want. When you
+  ## don't, it picks one and says which, so any run can be had again --
+  ## a generator whose default is one fixed answer is not a generator.
+  var s = seed
+  if not given:
+    var pick = initRand()
+    s = pick.rand(int.high)
+    stderr.writeLine "-- seed " & $s
+  initRand(s)
+
+proc emit*(v: Value) =
+  ## One value onto stdout, flushed. A filter in a live pipeline must
+  ## pass each value on now, not when its stdio buffer happens to fill.
+  let ce = encode(v)
+  if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
+    quit "short write to stdout"
+  stdout.flushFile()
+
 proc runFilter*[T: ValueLike](f: proc(v: Value): Option[T]) =
   ## Lifts a function from values to ValueLikes into a
   ## stdin -> stdout stream filter.
   ## None drops the value indicating refusal;
   ## everything else is one value in, one out.
-  ## Flushes stdout per value.
-  ## A filter in a live pipeline must pass each value on now, not when
-  ## its stdio buffer happens to fill.
   ## ie:
   ## bl listen | bl x | ...
   mixin toValue
@@ -103,9 +119,6 @@ proc runFilter*[T: ValueLike](f: proc(v: Value): Option[T]) =
     proc(v: Value) =
       let o = f(v)
       if o.isSome:
-        let ce = encode o.get.toValue
-        if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
-          quit "short write to stdout"
-        stdout.flushFile()
+        emit o.get.toValue
     ,
   )
