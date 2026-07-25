@@ -1,6 +1,6 @@
 import std/strutils
 import ../core
-import ../lib/digest
+import ../lib/[digest, infer]
 import ./[gsource, store, util]
 
 const help = """
@@ -19,6 +19,11 @@ bl grammar <what> [options] <grammar> [...]
   diff <a> <b>            values a admits that b does not, by sampling
   vectors <grammar>       the grammar, then one (vector ...) per rule
                           per built value, with the verdict it froze
+  infer                   read values on stdin and write a dialect that
+                          describes them. Soundness is checked, never
+                          assumed: it says how many of its own corpus
+                          the answer admits, and refuses to call an
+                          inference that misses any of them a success
 
 Options:
   --rule:NAME    the rule to speak for (default `start`)
@@ -28,6 +33,19 @@ Options:
                  and its seed written to stderr
   --size:K       how much structure to spend per value (default 6)
   --store:PATH   where names resolve
+
+  infer only:
+  --enum:N       most distinct values a slot may hold and still read as
+                 vocabulary rather than as a kind (default 16)
+  --repeat:N     how many times over those values must have been seen
+                 before they count as vocabulary (default 2)
+  --positional:N longest fixed-length list still spelled position by
+                 position rather than quantified (default 8)
+  --map-ratio:N  distinct keys per key-per-dictionary before a
+                 dictionary reads as a map rather than a shape (default 3)
+  --holdout:P    infer from the first 100-P percent and report what
+                 share of the rest the answer admits: generalisation,
+                 measured rather than claimed
 
 Everything here writes values; pipe them through bl cat to read them.
 lint exits 1 when it finds something. diff exits 1 when it finds a
@@ -108,6 +126,36 @@ proc runVectors(spec, root: string, count, seed, size: int, seeded: bool) =
         sym(if verdict == vAccepted: "accepted" else: "rejected"),
       )
 
+proc runInfer(cfg: Settings, holdout: int) =
+  var corpus: seq[Value]
+  eachValue(
+    stdin,
+    proc(v: Value) =
+      corpus.add v
+    ,
+  )
+  if corpus.len == 0:
+    quit "nothing to infer from"
+  let cut =
+    if holdout <= 0:
+      corpus.len
+    else:
+      max(1, corpus.len - corpus.len * holdout div 100)
+  let learn = corpus[0 ..< cut]
+  let shape = infer(learn, cfg)
+  emit shape
+  let held = conforms(shape, learn)
+  stderr.writeLine "-- " & $learn.len & " values in, " & $held &
+    " admitted by what came out"
+  if cut < corpus.len:
+    let rest = corpus[cut ..< corpus.len]
+    let recall = conforms(shape, rest)
+    stderr.writeLine "-- held back " & $rest.len & ", of which " & $recall &
+      " are admitted (" & $(recall * 100 div rest.len) & "%)"
+  if held < learn.len:
+    stderr.writeLine "-- an inference that misses its own corpus is a defect"
+    quit 1
+
 proc run*(args: seq[string]) =
   var
     what = ""
@@ -119,6 +167,8 @@ proc run*(args: seq[string]) =
     seeded = false
     size = 6
     root = defaultStoreRoot()
+    cfg = defaults()
+    holdout = 0
   for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
@@ -150,6 +200,18 @@ proc run*(args: seq[string]) =
         if val == "":
           quit "--store needs a path"
         root = val
+      of "enum":
+        cfg.enumMax = parseInt(val)
+      of "repeat":
+        cfg.enumRepeat = parseInt(val)
+      of "positional":
+        cfg.positionalMax = parseInt(val)
+      of "map-ratio":
+        cfg.mapRatio = parseInt(val)
+      of "holdout":
+        holdout = parseInt(val)
+        if holdout < 1 or holdout > 90:
+          quit "--holdout wants a percentage between 1 and 90"
       else:
         quit "unknown grammar option: " & key & "\n\n" & help
     else:
@@ -161,6 +223,10 @@ proc run*(args: seq[string]) =
   case what
   of "":
     echo help
+  of "infer":
+    if specs.len != 0:
+      quit "bl grammar infer reads values on stdin\n\n" & help
+    runInfer(cfg, holdout)
   of "self":
     if specs.len != 0:
       quit "bl grammar self takes no grammar; it is one\n\n" & help

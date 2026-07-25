@@ -801,6 +801,7 @@ type Productivity* = object
   ok: seq[bool] # per pattern: admits at least one sequence
   some: seq[bool] # per pattern: admits at least one non-empty sequence
   rank: seq[int32] # per pattern: cost of its cheapest sequence
+  alts: seq[int32] # per pattern: productive alternatives beneath a choice
   ruleOk, ruleSome: seq[bool]
   ruleRank: seq[int32]
 
@@ -830,6 +831,7 @@ func productivity*(g: Grammar): Productivity =
   result.ok = newSeq[bool](g.pats.len)
   result.some = newSeq[bool](g.pats.len)
   result.rank = newSeq[int32](g.pats.len)
+  result.alts = newSeq[int32](g.pats.len)
   result.ruleOk = newSeq[bool](g.rules.len)
   result.ruleSome = newSeq[bool](g.rules.len)
   result.ruleRank = newSeq[int32](g.rules.len)
@@ -846,6 +848,7 @@ func productivity*(g: Grammar): Productivity =
         ok = false
         some = false
         rank = Unreachable
+        alts = 0'i32
       case p.kind
       of pEmpty:
         ok = true
@@ -856,6 +859,11 @@ func productivity*(g: Grammar): Productivity =
         ok = result.ok[p.left] or result.ok[p.right]
         some = result.some[p.left] or result.some[p.right]
         rank = min(result.rank[p.left], result.rank[p.right])
+        # a choice tree is balanced for the matcher's sake, so walking it
+        # coin-flip by coin-flip would favour whichever alternatives sit
+        # nearer the root. Counting the leaves below each side makes the
+        # draw uniform over the alternatives as written
+        alts = result.alts[p.left] + result.alts[p.right]
       of pGroup:
         ok = result.ok[p.left] and result.ok[p.right]
         some =
@@ -890,10 +898,14 @@ func productivity*(g: Grammar): Productivity =
         some = result.ruleSome[p.rule]
         if ok:
           rank = 1 + result.ruleRank[p.rule]
-      if ok != result.ok[i] or some != result.some[i] or rank != result.rank[i]:
+      if p.kind != pChoice and ok:
+        alts = 1
+      if ok != result.ok[i] or some != result.some[i] or rank != result.rank[i] or
+          alts != result.alts[i]:
         result.ok[i] = ok
         result.some[i] = some
         result.rank[i] = rank
+        result.alts[i] = alts
         changed = true
     for r in 0 ..< g.rules.len:
       let p = g.rules[r]
@@ -1067,7 +1079,10 @@ proc genSeq(
     if pr.ok[pat.left] and pr.ok[pat.right]:
       let takeLeft =
         if budget > 0:
-          rng.rand(1) == 0
+          # by leaf count, so every alternative is equally likely however
+          # the choice tree happens to be balanced
+          rng.rand(int(pr.alts[pat.left] + pr.alts[pat.right]) - 1) <
+            int(pr.alts[pat.left])
         else:
           pr.rank[pat.left] <= pr.rank[pat.right]
       first = if takeLeft: pat.left else: pat.right
@@ -1088,7 +1103,10 @@ proc genSeq(
   of pStar:
     var reps = 0
     if budget > 0 and not quiet and pr.some[pat.body]:
-      reps = rng.rand(2)
+      # a share of what is left rather than a fixed handful, so --size
+      # buys length instead of only buying whether a run happens at all.
+      # Each repetition spends, so nested runs still come to an end
+      reps = rng.rand(1 + budget div 2)
     for _ in 0 ..< reps:
       dec budget
       if not g.genSeq(pr, pat.body, rng, budget, quiet, acc):
