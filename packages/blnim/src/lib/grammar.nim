@@ -92,8 +92,7 @@ type
     vRejected
     vRefused
 
-  GrammarError* = object of CatchableError
-    ## a malformed grammar, reported at seal
+  GrammarError* = object of CatchableError ## a malformed grammar, reported at seal
 
   BudgetError* = object of CatchableError
     ## the judgment budget was spent before an answer
@@ -515,8 +514,9 @@ func parAdd(a, b: Par): Par =
   else:
     parOdd
 
-func parityOf(g: Grammar, p: PatId, ruleP: seq[Par]): Par =
-  case g.pats[p].kind
+func parOf(g: Grammar, i: int, par: seq[Par], ruleP: seq[Par]): Par =
+  ## one shallow step, children read from the settling arrays
+  case g.pats[i].kind
   of pEmpty:
     parEven
   of pNotAllowed:
@@ -524,15 +524,15 @@ func parityOf(g: Grammar, p: PatId, ruleP: seq[Par]): Par =
   of pKind, pLit, pFrame:
     parOdd
   of pChoice:
-    parJoin(g.parityOf(g.pats[p].left, ruleP), g.parityOf(g.pats[p].right, ruleP))
+    parJoin(par[g.pats[i].left], par[g.pats[i].right])
   of pGroup:
-    parAdd(g.parityOf(g.pats[p].left, ruleP), g.parityOf(g.pats[p].right, ruleP))
+    parAdd(par[g.pats[i].left], par[g.pats[i].right])
   of pStar:
-    case g.parityOf(g.pats[p].body, ruleP)
+    case par[g.pats[i].body]
     of parEven, parUnknown: parEven
     else: parMixed
   of pRef:
-    ruleP[g.pats[p].rule]
+    ruleP[g.pats[i].rule]
 
 func reaches(g: Grammar, root, target: PatId): bool =
   ## does the tree under `root` contain `target`, expanding each rule once
@@ -570,19 +570,27 @@ func blame(g: Grammar, p: PatId): string =
 
 func checkParity(g: Grammar) =
   ## the dictionary parity law: patterns in dictionary position admit an
-  ## even count of values on every path, or keys meet value patterns
+  ## even count of values on every path, or keys meet value patterns.
+  ## Per-pattern parities to a fixpoint like nullability — the pool is a
+  ## DAG, and walking it as a tree re-walks every shared subtree
+  var par = newSeq[Par](g.pats.len)
   var ruleP = newSeq[Par](g.rules.len)
   var changed = true
   while changed:
     changed = false
+    for i in 0 ..< g.pats.len:
+      let p = g.parOf(i, par, ruleP)
+      if p != par[i]:
+        par[i] = p
+        changed = true
     for r in 0 ..< g.rules.len:
-      let p = g.parityOf(g.rules[r], ruleP)
+      let p = par[g.rules[r]]
       if p != ruleP[r]:
         ruleP[r] = p
         changed = true
   for i in 0 ..< g.pats.len:
     if g.pats[i].kind == pFrame and g.pats[i].frameKind == bDict:
-      if g.parityOf(g.pats[i].children, ruleP) in {parOdd, parMixed}:
+      if par[g.pats[i].children] in {parOdd, parMixed}:
         raise newException(
           GrammarError,
           "dictionary children may admit an odd count of values" & g.blame(PatId(i)) &
@@ -698,9 +706,12 @@ func matches*(g: var Grammar, name: string, v: Value, budget = DefaultBudget): b
   g.judgeRule(r, v, budget)
 
 func matches*(g: var Grammar, v: Value, budget = DefaultBudget): bool =
-  ## does the start rule admit `v`? Raises `BudgetError` on refusal.
+  ## does the start rule admit `v`? Raises `BudgetError` on refusal and
+  ## `GrammarError` when no rule is named `start` — whether a table
+  ## names one is the definition's own data, never a defect here
   doAssert g.sealed, "seal the grammar before judging"
-  doAssert g.startRule != NoRule, "sealed without a start rule"
+  if g.startRule == NoRule:
+    raise newException(GrammarError, "this grammar names no start rule")
   g.judgeRule(g.startRule, v, budget)
 
 template verdictOf(call): Verdict =
@@ -762,7 +773,10 @@ func fullyInert(v: Value): bool =
 
 func opHead(v: Value): string =
   ## the operator name of a marked record, "" when there is none
-  if v.kind == bRecord and not v.head.marked and v.head.kind == bSym:
+  if v.isKind(bRecord) and
+     v.marked and
+     v.head.isKind(bSym) and not
+     v.head.marked:
     string(v.head.text)
   else:
     ""
@@ -954,7 +968,8 @@ func loadPattern(g: var Grammar, v: Value): PatId =
     else:
       refuse "unknown operator: " & op
   else:
-    refuse "a marked " & $v.kind & " is not a pattern; a marked literal is spelled (lit …)"
+    refuse "a marked " & $v.kind &
+      " is not a pattern; a marked literal is spelled (lit …)"
 
 func load*(v: Value): Grammar =
   ## read the grammar dialect: a marked `(grammar {name: pattern, …})`
@@ -983,7 +998,15 @@ func load*(v: Value): Grammar =
     result.rule(string(k.text), result.loadPattern(pat))
   result.seal(start = if hasStart: "start" else: "")
 
-const grammarOfGrammar = readValue"""
+func readGrammar*(text: string): Grammar =
+  ## read a bare rule table — a dictionary in the grammar dialect —
+  ## wrap it as the marked (grammar …) record, and load it: the
+  ## ergonomic door for local definitions. A dialect that travels or
+  ## is named by digest is always the whole `(grammar …)` value
+  load(mark record(sym"grammar", readValue(text)))
+
+const grammarOfGrammar =
+  readValue"""
 `(grammar {
   start: `(marked (grammar `(dict `(* `(sym) `pattern))))
 
@@ -1029,7 +1052,5 @@ const grammarOfGrammar = readValue"""
 """
 
 func grammarGrammar*(): Value =
-  ## the grammar dialect described in itself; the digest of this value
-  ## names the schema language. It describes the spelling — the sealing
-  ## laws stay judgments, so a value it admits may still refuse to load
+  ## the grammar dialect described in itself
   grammarOfGrammar

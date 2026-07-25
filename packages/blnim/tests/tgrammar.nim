@@ -550,6 +550,72 @@ suite "the grammar dialect":
       expect GrammarError:
         discard load(v)
 
+  test "inert records are templates whatever their heads spell":
+    # the mark is the reading: an inert (? 1) in value position is a
+    # record template, never the optional-entry operator
+    var g = readGrammar"{d: {k: (? 1)}}"
+    check g.matches("d", dict(@[(sym"k", record(sym"?", num"1"))]))
+    check not g.matches("d", dict(@[(sym"k", num"1")]))
+    check not g.matches("d", dict(@[]))
+    var meta = load(grammarGrammar())
+    check meta.matches(readValue"`(grammar {d: {k: (? 1)}})")
+    # an inert (lit …) key is a template, not a literal escape; load
+    # and the self-description refuse the same spelling
+    expect GrammarError:
+      discard readGrammar"{d: {(lit `go): `(num)}}"
+    check not meta.matches(readValue"`(grammar {d: {(lit `go): `(num)}})")
+    # an inert (* …) set member is neither a literal nor a run
+    expect GrammarError:
+      discard readGrammar"{s: #{(* `(num))}}"
+    check not meta.matches(readValue"`(grammar {s: #{(* `(num))}})")
+
+  test "a startless table loads and refuses the no-name question":
+    var g = readGrammar"{a: `(num)}"
+    check g.matches("a", num"1")
+    check g.judge("a", num"1") == vAccepted
+    expect GrammarError:
+      discard g.matches(num"1")
+    expect GrammarError:
+      discard g.judge(num"1")
+
+  test "mark lanes share a shape through a sequence rule":
+    # a demand cannot ride a reference — the rule owns its meaning
+    # everywhere it is referenced — so the two polarities of one shape
+    # factor through a sequence rule and frame operators over it
+    var g = readGrammar"""{
+      greetbody: `(cat greet `(text))
+      inertgreet: `(record `greetbody)
+      markedgreet: `(marked `(record `greetbody))
+    }"""
+    let v = record(sym"greet", text"hi")
+    check g.matches("inertgreet", v)
+    check not g.matches("inertgreet", mark(v))
+    check g.matches("markedgreet", mark(v))
+    check not g.matches("markedgreet", v)
+    expect GrammarError: # and through a bare reference it stays refused
+      discard readGrammar"{a: `(num), b: `(marked `a)}"
+
+  test "parity settles per pattern, not per unfolding":
+    # p = star(group(p, p)) doubles the unfolded tree each level while
+    # the pool stays tiny; sealing must cost the pool, not the tree
+    var g = initGrammar()
+    var p = g.entry(g.any(mrAny), g.any(mrAny))
+    for _ in 0 ..< 64:
+      p = g.star(g.group(p, p))
+    g.rule "d", g.frame(bDict, p)
+    g.seal(start = "d")
+    check g.matches(dict(@[]))
+    # judging the pathological shape against content is the budget's
+    # problem, and refusal is its answer
+    check g.judge(dict(@[(sym"a", num"1")])) == vRefused
+
+  test "readGrammar wraps a bare rule table":
+    var g = readGrammar"{start: (point `(num) `(num))}"
+    check g.matches(record(sym"point", num"1", num"2"))
+    check not g.matches(record(sym"point", num"1", text"x"))
+    expect GrammarError: # anything but a dictionary refuses
+      discard readGrammar"[1 2 3]"
+
   test "whatever loads is self-described":
     var meta = load(grammarGrammar())
     var rng = initRand(20260724)

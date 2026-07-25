@@ -348,7 +348,11 @@ func genPatV*(f: var ByteFeed, depth: int): Value =
   of 7:
     list(@[f.genPatV(depth - 1), f.genPatV(depth - 1)])
   of 8:
-    record(@[sym(f.genShortText & "h"), f.genPatV(depth - 1)])
+    # sometimes an operator's name on an inert head: still a template,
+    # and the loader and self-description must agree on that reading
+    let hi = int(f.next mod 4)
+    let heads = [f.genShortText & "h", "lit", "?", "*"]
+    record(@[sym(heads[hi]), f.genPatV(depth - 1)])
   of 9:
     dict(@[(sym(f.genShortText), f.genPatV(depth - 1))])
   else:
