@@ -1,6 +1,6 @@
 import std/strutils
 import ../core
-import ../lib/print
+import ../lib/[grammar, print]
 import ./[gsource, store, util]
 
 const help = """
@@ -11,7 +11,7 @@ inline text, a file of text or canonical bytes, or a name the store
 holds.
 
   bl listen | bl grep shape.bl | bl cat
-  bl cat log.blb | bl grep '{start: (point `(num) `(num))}'
+  bl cat log.blb | bl grep '{start: (point !(num) !(num))}'
 
 Options:
   --rule:NAME    judge by this rule instead of `start`

@@ -8,7 +8,7 @@ proc blHome*(): string =
 
 const DefaultPort* = 8455 # where bl listen lands by default
 
-proc parsePort*(s: string, allowZero = false): Port =
+proc parsePort(s: string, allowZero = false): Port =
   ## Port(x) wraps modulo 2^16 on out-of-range ints, so the range
   ## check has to happen here.
   var port: int
@@ -20,14 +20,6 @@ proc parsePort*(s: string, allowZero = false): Port =
   if port < lo or port > 65535:
     quit "port out of range (" & $lo & "-65535): " & s
   Port(port)
-
-func isDestSpelling*(s: string): bool =
-  ## port, :port, host:port, or a file with a ./prefix if it's a file
-  let i = s.rfind(':')
-  if i >= 0 and '/' in s[0 ..< i]:
-    return false
-  let portPart = s[i + 1 .. ^1]
-  portPart.len > 0 and allCharsInSet(portPart, {'0' .. '9'})
 
 proc parseDest*(dest: string): (string, Port) =
   var

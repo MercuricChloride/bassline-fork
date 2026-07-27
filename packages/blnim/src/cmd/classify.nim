@@ -1,5 +1,6 @@
 import std/[sequtils, strutils]
 import ../core
+import ../lib/grammar
 import ./[gsource, store, util]
 
 const help = """
@@ -9,7 +10,7 @@ Says which of a grammar's rules admit each value from stdin.
 Recognition is additive, so every rule that speaks is named and none of
 them is the value's type.
 
-  (readings #{file fsentry} #{} <the value>)
+  (readings {file fsentry} {} <the value>)
 
 The first set is what admitted it, the second is what the budget
 refused to answer for. With --split, each reading is its own utterance

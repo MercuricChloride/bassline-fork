@@ -9,7 +9,7 @@ bl keygen [--out:PATH] [--force]
 Don't send this around as a value!
 
 Generates a keypair and writes it as a value,
-(keypair eddsa-blake2b #[seed] #[public]), mode 600.
+(keypair eddsa-blake2b 0x<seed> 0x<public>), mode 600.
 Default path: ~/.bl/key.blb
 """
 

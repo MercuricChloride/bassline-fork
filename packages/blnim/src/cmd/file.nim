@@ -9,9 +9,9 @@ const help = """
 bl file <path> [--zip]
 
 Writes the file at <path> to stdout as the binary encoding of
-(file #[contents] {name: "<basename>"}).
+(file 0x<contents> {name: "<basename>"}).
 
-A directory becomes (directory #{entries} {name: "<basename>"}),
+A directory becomes (directory {entries} {name: "<basename>"}),
 recursing into files and subdirectories.
 
 Options:

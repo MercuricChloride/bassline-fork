@@ -1,6 +1,6 @@
 import std/strutils
 import ../core
-import ../lib/print
+import ../lib/[grammar, print]
 import ./[gsource, store, util]
 
 const help = """

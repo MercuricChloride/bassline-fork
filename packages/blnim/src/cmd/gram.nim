@@ -1,6 +1,6 @@
 import std/strutils
 import ../core
-import ../lib/[digest, infer]
+import ../lib/[digest, grammar, infer]
 import ./[gsource, store, util]
 
 const help = """

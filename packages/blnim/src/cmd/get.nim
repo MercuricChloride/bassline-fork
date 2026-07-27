@@ -5,7 +5,7 @@ import ./[store, util]
 const help = """
 bl get [--store:PATH]
 
-Resolves names to content: each (digest <algo> #[...]) value on stdin
+Resolves names to content: each (digest <algo> 0x…) value on stdin
 is looked up in the store and its content value emitted. Values that
 aren't digests pass through untouched, so a mixed stream resolves in
 place. A name the store doesn't hold is fatal.

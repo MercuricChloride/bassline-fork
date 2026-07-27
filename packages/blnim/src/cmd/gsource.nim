@@ -3,8 +3,6 @@ import ../core
 import ../lib/[grammar, read]
 import ./[store, util]
 
-export grammar
-
 proc grammarValue*(spec: string, root: string): Value =
   ## A grammar argument is a value like any other: text or canonical
   ## bytes, inline or in a file, and a name resolves through the store.
@@ -12,8 +10,6 @@ proc grammarValue*(spec: string, root: string): Value =
   ## convention, so there is nothing to configure.
   if spec == "":
     quit "this command wants a grammar"
-  if not fileExists(spec) and '/' in spec:
-    quit "no such file: " & spec
   let text =
     if fileExists(spec):
       try:
@@ -29,7 +25,13 @@ proc grammarValue*(spec: string, root: string): Value =
       try:
         readValue(text)
       except ReadError as e:
+        if not fileExists(spec) and '/' in spec:
+          quit "no such file: " & spec
         quit "not a grammar: " & e.msg
+  # inline text that spells one bare symbol is no grammar; when it also
+  # spells like a path, the story is a file that isn't there
+  if result.isKind(bSym) and not fileExists(spec) and '/' in spec:
+    quit "no such file: " & spec
   if result.isKind(bDict) and not result.marked:
     result = mark record(sym"grammar", result) # a bare rule table
   let name = fromValue(result, Digest)

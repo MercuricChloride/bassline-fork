@@ -6,7 +6,7 @@ const help = """
 bl hash
 
 Reads values from stdin and writes each one's name by content:
-(digest sha256 #[sha256 of its canonical bytes]).
+(digest sha256 0x<sha256 of its canonical bytes>).
 """
 
 proc run*(args: seq[string]) =
