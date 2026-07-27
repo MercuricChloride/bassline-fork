@@ -1,6 +1,6 @@
 {.experimental: "strictFuncs".}
 
-import std/[algorithm, sequtils, options]
+import std/[algorithm, sequtils, options, hashes]
 import ./strflavors
 export strflavors, options
 
@@ -143,6 +143,34 @@ iterator allChildren*(v: Value): lent Value {.closure.} =
     yield child
     for deep in child.allChildren:
       yield deep
+
+func hash*(v: Value): Hash =
+  ## This is not a cryptographic hash!
+  ##
+  ## This is only used for things like tables & hash sets.
+  ## Use lib/digest for cryptographic hashing
+  var h: Hash = 0
+  h = h !& hash(v.tag)
+  h = h !& hash(v.marked)
+  case v.kind
+  of bNil:
+    discard
+  of bNum:
+    h = h !& hash(string(v.num))
+  of bText, bSym:
+    h = h !& hash(string(v.text))
+  of bBytes:
+    h = h !& hash(v.bytes)
+  of bList, bRecord:
+    for c in v.items:
+      h = h !& hash(c)
+  of bSet:
+    for c in v.elements:
+      h = h !& hash(c)
+  of bDict:
+    for (k, val) in v.entries:
+      h = h !& hash(k) !& hash(val)
+  !$h
 
 # ================ RECOGNITION ================
 

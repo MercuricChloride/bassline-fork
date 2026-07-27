@@ -6,7 +6,7 @@ type ReadError* = object of CatchableError
 
 const
   Ws = {' ', '\t', '\n', '\r', ','}
-  Delims* = Ws + {'[', ']', '{', '}', '(', ')', ':', '#', '\'', '"', '`', ';'}
+  Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '#', '\'', '"', '`', ';'}
 
 func isBareSpelling*(s: string): bool =
   ## whether a symbol may be spelled without quotes

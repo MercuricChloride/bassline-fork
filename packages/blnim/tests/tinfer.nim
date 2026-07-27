@@ -1,6 +1,6 @@
 import std/[unittest, options, random, sequtils]
 import pkg/core
-import lib/[grammar, infer, read]
+import lib/[grammar, infer]
 import ./gen
 
 # Reading a grammar out of data is guessing. These suites pin what each

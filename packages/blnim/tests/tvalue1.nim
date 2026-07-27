@@ -5,7 +5,7 @@ import std/sets
 from std/strutils import repeat, join
 from std/math import sgn
 import pkg/core
-import pkg/lib/[print, hash]
+import pkg/lib/print
 
 func roundTrips(v: Value): bool =
   decode(encode(v)) == v
