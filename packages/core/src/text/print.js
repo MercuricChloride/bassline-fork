@@ -1,11 +1,11 @@
 /** @import {Value} from "../data.js" */
+import { assertValue } from '../data.js'
 
 const DELIM = new Set([
   ' ',
   '\t',
   '\n',
   '\r',
-  ',', // reads as whitespace
   '[',
   ']',
   '{',
@@ -13,14 +13,20 @@ const DELIM = new Set([
   '(',
   ')',
   ':',
-  '#',
   "'",
   '"',
-  '`',
   ';',
+  '!',
 ])
 
-const isDigit = c => /[0-9]/.test(c)
+const isDigit = c => c !== undefined && /[0-9]/.test(c)
+
+/** @type {(v: Value) => boolean} */
+const isFrame = v =>
+  v.kind === 'list' ||
+  v.kind === 'record' ||
+  v.kind === 'dict' ||
+  v.kind === 'set'
 
 /**
  * @param {string} s
@@ -34,17 +40,16 @@ function bareSafe(s) {
 }
 
 /**
+ * Escape the closing quote and the backslash; everything else is held
+ * literally (raw newlines and tabs re-read inside quotes).
  * @param {string} s
  * @param {string} quote
  */
 function escapeBody(s, quote) {
   let out = ''
   for (const ch of s) {
-    if (ch === quote) out += '\\' + quote
-    else if (ch === '\\') out += '\\\\'
-    else if (ch === '\t') out += '\\t'
-    else if (ch === '\r') out += '\\r'
-    else out += ch // newlines are emitted literally; they re-read inside quotes
+    if (ch === quote || ch === '\\') out += '\\'
+    out += ch
   }
   return out
 }
@@ -52,13 +57,13 @@ function escapeBody(s, quote) {
 /** @param {Uint8Array} u8 */
 function hex(u8) {
   let s = ''
-  for (const b of u8) s += b.toString(16).padStart(2, '0').toUpperCase()
+  for (const b of u8) s += b.toString(16).padStart(2, '0')
   return s
 }
 
 /**
  * The bare one-line rendering of each value kind. Frames recurse through `flat`
- * (not `flatten`) so nested actionable values keep their backtick prefix.
+ * (not `flatten`) so nested marked values keep their marks.
  * @param {Value} v
  * @returns {string}
  */
@@ -73,28 +78,31 @@ function flatten(v) {
     case 'symbol':
       return bareSafe(v.value) ? v.value : "'" + escapeBody(v.value, "'") + "'"
     case 'bytes':
-      return '#[' + hex(v.value) + ']'
+      return '0x' + hex(v.value)
     case 'list':
       return '[' + v.value.map(flat).join(' ') + ']'
     case 'set':
-      return '#{' + v.value.map(flat).join(' ') + '}'
+      return '{' + v.value.map(flat).join(' ') + '}'
     case 'record':
       return '(' + v.value.map(flat).join(' ') + ')'
     case 'dict':
-      return (
-        '{' +
-        v.value.map(([k, val]) => flat(k) + ': ' + flat(val)).join(' ') +
-        '}'
-      )
+      return v.value.length === 0
+        ? '{:}'
+        : '{' +
+            v.value.map(([k, val]) => flat(k) + ': ' + flat(val)).join(' ') +
+            '}'
   }
 }
 
 /**
- * One-line rendering of a value, prefixed with the actionable backtick.
+ * One-line rendering of a value with its mark: a frame is marked in front
+ * (`!(…)`), an atom behind (`x!`).
  * @param {Value} v
  */
 function flat(v) {
-  return v.actionable ? '`' + flatten(v) : flatten(v)
+  const s = flatten(v)
+  if (!v.actionable) return s
+  return isFrame(v) ? '!' + s : s + '!'
 }
 
 /**
@@ -104,6 +112,7 @@ function flat(v) {
  * @param {number} padding
  */
 export function print(value, width = 72, padding = 2) {
+  assertValue(value, 'print expects a Bassline value')
   let str = ''
   let depth = 0
 
@@ -117,7 +126,7 @@ export function print(value, width = 72, padding = 2) {
       case 'list':
         return compound(v, () => block('[', ']', v.value))
       case 'set':
-        return compound(v, () => block('#{', '}', v.value))
+        return compound(v, () => block('{', '}', v.value))
       case 'dict':
         return compound(v, () =>
           block('{', '}', v.value, ([k, val]) => {
@@ -148,14 +157,16 @@ export function print(value, width = 72, padding = 2) {
   return str
 
   /**
-   * Prints flat if it fits the remaining print width, else prints the actionable prefix and calls emitBroken to print the broken form.
-   * @param {Value} node
+   * Prints flat if it fits the remaining print width, else prints the mark
+   * and calls emitBroken to print the broken form. An empty frame always
+   * prints flat: broken `{}` would lose the set/dict distinction.
+   * @param {Value & {value: unknown[]}} node
    * @param {() => void} emitBroken
    */
   function compound(node, emitBroken) {
     const s = flat(node)
-    if (column() + s.length <= width) return write(s)
-    if (node.actionable) write('`')
+    if (node.value.length === 0 || column() + s.length <= width) return write(s)
+    if (node.actionable) write('!')
     emitBroken()
   }
 

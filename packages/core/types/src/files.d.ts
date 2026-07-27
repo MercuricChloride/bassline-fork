@@ -16,12 +16,14 @@ export function loadBinary(path: string): (import("./forms.js").BString | import
  */
 export function saveText(path: string, values: Value | Value[]): void;
 /**
- * Parse a text file into its list of values.
+ * Parse a text file into its list of values. Ill-formed UTF-8 is rejected,
+ * never replaced: a substitution character would be minted into canonical
+ * bytes downstream.
  * @param {string} path
  */
 export function loadText(path: string): Value[];
 /**
- * Write values to either on-disk form: text when the path ends in .blt
+ * Write values to either on-disk form: text when the path ends in .bl
  * or {text} says so, binary otherwise.
  * @param {string} path
  * @param {Value|Value[]} values
@@ -65,7 +67,7 @@ export function textToBinary(srcPath: string, dstPath: string): void;
  * @param {string} dstPath
  */
 export function binaryToText(srcPath: string, dstPath: string): void;
-export const BINARY_EXT: ".blb";
-export const TEXT_EXT: ".blt";
+export const BINARY_EXT: ".blt";
+export const TEXT_EXT: ".bl";
 import type { Value } from "./data.js";
 //# sourceMappingURL=files.d.ts.map

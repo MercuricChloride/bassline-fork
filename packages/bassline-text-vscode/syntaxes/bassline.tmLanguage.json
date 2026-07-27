@@ -1,0 +1,97 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Bassline",
+  "scopeName": "source.bassline",
+  "patterns": [{ "include": "#value" }],
+  "repository": {
+    "value": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#quoted-symbol" },
+        { "include": "#bytes" },
+        { "include": "#number" },
+        { "include": "#nil" },
+        { "include": "#head" },
+        { "include": "#mark" },
+        { "include": "#punctuation" }
+      ]
+    },
+
+    "comment": {
+      "name": "comment.line.semicolon.bassline",
+      "match": ";.*$"
+    },
+
+    "string": {
+      "name": "string.quoted.double.bassline",
+      "begin": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.bassline" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.bassline" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.bassline",
+          "match": "\\\\([\"\\\\ntr])"
+        }
+      ]
+    },
+
+    "quoted-symbol": {
+      "name": "constant.other.symbol.quoted.bassline",
+      "begin": "'",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.symbol.begin.bassline" }
+      },
+      "end": "'",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.symbol.end.bassline" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.bassline",
+          "match": "\\\\(['\\\\ntr])"
+        }
+      ]
+    },
+
+    "bytes": {
+      "name": "constant.numeric.hex.bassline",
+      "match": "(?<![^\\s\\[\\]{}():'\\\";!])0x[0-9A-Fa-f_]*(?![^\\s\\[\\]{}():'\\\";!])"
+    },
+
+    "number": {
+      "name": "constant.numeric.integer.bassline",
+      "match": "(?<![^\\s\\[\\]{}():'\\\";!])-?[0-9][0-9_]*(?![^\\s\\[\\]{}():'\\\";!])"
+    },
+
+    "nil": {
+      "name": "constant.language.nil.bassline",
+      "match": "(?<![^\\s\\[\\]{}():'\\\";!])nil(?![^\\s\\[\\]{}():'\\\";!])"
+    },
+
+    "head": {
+      "name": "entity.name.function.bassline",
+      "match": "(?<=\\()[^\\s\\[\\]{}():'\\\";!]+"
+    },
+
+    "mark": {
+      "name": "keyword.control.mark.bassline",
+      "match": "!"
+    },
+
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.brackets.bassline",
+          "match": "[\\[\\]{}()]"
+        },
+        { "name": "punctuation.separator.key-value.bassline", "match": ":" }
+      ]
+    }
+  }
+}

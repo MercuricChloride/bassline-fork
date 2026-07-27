@@ -25,7 +25,7 @@ function diagnose(doc: vscode.TextDocument): vscode.Diagnostic[] {
 export function registerDiagnostics(context: vscode.ExtensionContext): void {
   const collection = vscode.languages.createDiagnosticCollection('bassline')
   const lint = (doc: vscode.TextDocument) => {
-    if (doc.languageId !== 'bassline-text') return
+    if (doc.languageId !== 'bassline') return
     collection.set(doc.uri, diagnose(doc))
   }
 

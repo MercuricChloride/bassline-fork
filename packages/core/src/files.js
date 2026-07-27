@@ -5,8 +5,8 @@ import { read } from './text/reader.js'
 import { print } from './text/print.js'
 
 // The two on-disk spellings of the same values.
-export const BINARY_EXT = '.blb'
-export const TEXT_EXT = '.blt'
+export const BINARY_EXT = '.blt'
+export const TEXT_EXT = '.bl'
 
 const asList = values => (Array.isArray(values) ? values : [values])
 
@@ -49,17 +49,21 @@ export function saveText(path, values) {
 }
 
 /**
- * Parse a text file into its list of values.
+ * Parse a text file into its list of values. Ill-formed UTF-8 is rejected,
+ * never replaced: a substitution character would be minted into canonical
+ * bytes downstream.
  * @param {string} path
  */
 export function loadText(path) {
-  return read(readFileSync(path, 'utf8'))
+  return read(
+    new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(path))
+  )
 }
 
 // --- extension-directed and self-detecting forms ---
 
 /**
- * Write values to either on-disk form: text when the path ends in .blt
+ * Write values to either on-disk form: text when the path ends in .bl
  * or {text} says so, binary otherwise.
  * @param {string} path
  * @param {Value|Value[]} values

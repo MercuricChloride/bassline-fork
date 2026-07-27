@@ -3,6 +3,7 @@
 
 /** @import {Value} from "../data.js" */
 import {
+  CANONICAL_INT,
   bytes,
   dict,
   eq,
@@ -13,23 +14,24 @@ import {
   set,
   string,
   symbol,
+  withMark,
 } from '../data.js'
 
-const WS = ' \t\n\r,'
-const DELIM = '[]{}():#\'"`;'
+const WS = ' \t\n\r'
+const DELIM = '[]{}():\'";!'
+const OPENERS = '([{'
 
 /** @type {(c: string) => boolean} */
 const isWs = c => WS.includes(c)
-/** @type {(c: string) => boolean} */
-const isDigit = c => /[0-9]/.test(c)
+/** @type {(c: string | undefined) => boolean} */
+const isDigit = c => c !== undefined && /[0-9]/.test(c)
 /** @type {(c: string) => boolean} */
 const isDelim = c => DELIM.includes(c)
-/** @type {(c: string) => boolean} */
-const isHex = c => /[0-9a-fA-F]/.test(c)
+/** @type {(c: string | undefined) => boolean} */
+const isHex = c => c !== undefined && /[0-9a-fA-F]/.test(c)
 /** @type {(c: unknown) => c is undefined} */
 const isEOF = c => c === undefined
-
-/** @type {(c: string) => boolean} */
+/** @type {(c: string | undefined) => boolean} */
 const isBoundary = c => isEOF(c) || isWs(c) || isDelim(c)
 
 export class ReaderError extends Error {
@@ -50,7 +52,7 @@ export class ReaderError extends Error {
       }
     }
     super(`reader error at ${line}:${col}: ${msg}`)
-    /** Byte offset into the source where the error was detected. */
+    /** UTF-16 code-unit offset into the source where the error was detected. */
     this.pos = pos
     this.line = line
     this.col = col
@@ -58,10 +60,11 @@ export class ReaderError extends Error {
 }
 
 /**
- * A parsed value together with its source span and child spans. `start` sits
- * before any actionable `` ` ``; `end` is just past the form. `children` are the
- * sub-spans in document order (record head + fields, dict keys + values, list
- * and set members); atoms have none.
+ * A parsed value together with its source span and child spans, in UTF-16
+ * code-unit offsets. The mark is part of the span: `start` sits before a
+ * frame's leading `!`, and `end` sits just past an atom's trailing `!`.
+ * `children` are the sub-spans in document order (record head + fields, dict
+ * keys + values, list and set members); atoms have none.
  * @typedef {object} Spanned
  * @property {Value} value
  * @property {number} start
@@ -83,12 +86,17 @@ export function read(source, opts) {
  * Like {@link read}, but each value is wrapped with its source span. `read` is
  * the projection `readSpans(source).map(s => s.value)`, so the values produced
  * are identical; only the span metadata is extra.
+ *
+ * The reader recurses per frame, so a `maxDepth` far past the default trades
+ * the positioned depth error for the engine's own stack-overflow ceiling
+ * (around 1700 frames).
  * @param {string} source
  * @param {{maxDepth?: number}} [opts]
  * @returns {Spanned[]}
  */
-export function readSpans(source, { maxDepth = 1024 } = {}) {
+export function readSpans(source, opts) {
   if (typeof source !== 'string') throw new TypeError('read expects a string')
+  const { maxDepth = 1024 } = opts ?? {}
 
   const n = source.length
   let pos = 0
@@ -104,13 +112,6 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
    */
   function fail(p, msg) {
     throw new ReaderError(source, p, msg)
-  }
-
-  /**
-   * @param {Spanned} span
-   */
-  function push(span) {
-    values.push(span)
   }
 
   /**
@@ -158,14 +159,17 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
     }
   }
 
-  function readEscape() {
+  /**
+   * pos sits on the backslash's escape character; the only escapes are the
+   * closing quote, and \\ \n \t \r.
+   * @param {string} closer
+   */
+  function readEscape(closer) {
     const e = source[pos]
     pos++
     switch (e) {
-      case '"':
-        return '"'
-      case "'":
-        return "'"
+      case closer:
+        return closer
       case '\\':
         return '\\'
       case 'n':
@@ -181,12 +185,15 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
 
   /**
    * pos sits just after the opening quote; read until the matching closer.
+   * Any character but the closer and backslash is held literally (a raw
+   * newline is legal inside quotes).
    * @param {string} closer
+   * @param {string} what
    */
-  function readQuoted(closer) {
+  function readQuoted(closer, what) {
     let out = ''
     while (true) {
-      if (pos >= n) fail(pos, 'unterminated literal')
+      if (pos >= n) fail(pos, `unterminated ${what}`)
       const c = source[pos]
       if (c === closer) {
         pos++
@@ -194,7 +201,8 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
       }
       if (c === '\\') {
         pos++
-        out += readEscape()
+        if (pos >= n) fail(pos, `unterminated ${what}`)
+        out += readEscape(closer)
       } else {
         out += c
         pos++
@@ -202,84 +210,81 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
     }
   }
 
-  // pos sits just after '#['; read hex pairs (inner whitespace ignored) to ']'.
   /**
-   * @param {boolean} actionable
+   * A maximal run of non-delimiter characters starting at `start` (where pos
+   * already sits). The token is classified afterwards: bytes, number, nil,
+   * or symbol.
+   * @param {number} start
    */
-  function readBytes(actionable) {
-    const nibbles = []
-    while (true) {
-      if (pos >= n) fail(pos, 'unterminated bytestring')
-      const c = source[pos]
-      if (c === ']') {
-        pos++
-        break
-      } else if (isWs(c)) {
-        pos++
-        continue
+  function readBareToken(start) {
+    while (pos < n && !isBoundary(source[pos])) pos++
+    return source.slice(start, pos)
+  }
+
+  /**
+   * A bare token opening with `0x` is a bytestring: an even count of hex
+   * digits, either case, with `_` allowed between two digits as a visual
+   * separator. `0x` alone is the empty bytestring.
+   * @param {string} tok
+   * @param {number} start
+   */
+  function bytesFromToken(tok, start) {
+    let digits = ''
+    for (let i = 2; i < tok.length; i++) {
+      const c = tok[i]
+      if (c === '_') {
+        if (!isHex(tok[i - 1]) || !isHex(tok[i + 1]))
+          fail(start + i, "'_' sits between digits")
       } else if (isHex(c)) {
-        nibbles.push(parseInt(c, 16))
-        pos++
-        continue
+        digits += c
       } else {
-        fail(pos, `Invalid hex digit in bytestring: ${c}`)
+        fail(start + i, `not a hex digit in bytes: ${c}`)
       }
     }
-    if (nibbles.length % 2 !== 0)
-      fail(pos, 'bytestring has an odd number of hex digits')
-    const out = new Uint8Array(nibbles.length / 2)
+    if (digits.length % 2 !== 0)
+      fail(start, 'bytes need an even count of hex digits')
+    const out = new Uint8Array(digits.length / 2)
     for (let i = 0; i < out.length; i++) {
-      const offset = 2 * i
-      const a = nibbles[offset]
-      const b = nibbles[offset + 1]
-      out[i] = a * 16 + b
+      out[i] = parseInt(digits.slice(2 * i, 2 * i + 2), 16)
     }
-    return bytes(out, actionable)
+    return bytes(out)
   }
 
-  // pos sits at the first character (a digit, or a sign on a digit).
   /**
+   * A bare token opening with a digit, or a `-` on a digit, is a number.
+   * `_` is allowed between two digits; the digits left after dropping the
+   * separators must be the canonical decimal spelling.
+   * @param {string} tok
    * @param {number} start
-   * @param {boolean} actionable
    */
-  function readNumber(start, actionable) {
-    if (source[pos] === '-') pos++
-    while (isDigit(source[pos])) pos++
-    if (source[pos] === '.' && isDigit(source[pos + 1]))
-      fail(
-        pos,
-        'no decimal number literals: non-integer numbers are vocabulary'
-      )
-    if (!isBoundary(source[pos]))
-      fail(pos, 'number adjacent to a symbol character')
-    const text = source.slice(start, pos)
-    return int(BigInt(text), actionable)
-  }
-
-  // pos sits at the first character; read a maximal bare run, then reclassify.
-  /**
-   *
-   * @param {number} start
-   * @param {boolean} actionable
-   */
-  function readSymbol(start, actionable) {
-    while (!isBoundary(source[pos])) pos++
-    const text = source.slice(start, pos)
-    if (text === 'nil') return nil(actionable)
-    return symbol(text, actionable)
+  function intFromToken(tok, start) {
+    let digits = ''
+    for (let i = 0; i < tok.length; i++) {
+      const c = tok[i]
+      if (c === '_') {
+        if (!isDigit(tok[i - 1]) || !isDigit(tok[i + 1]))
+          fail(start + i, "'_' sits between digits")
+      } else {
+        digits += c
+      }
+    }
+    if (!CANONICAL_INT.test(digits))
+      fail(start, `not a canonical number: ${tok}`)
+    return int(BigInt(digits))
   }
 
   /**
    * Read child values until `closer`, returning their spans in document order.
+   * @param {string} opener
    * @param {string} closer
    * @returns {Spanned[]}
    */
-  function readUntil(closer) {
+  function readUntil(opener, closer) {
     /** @type {Spanned[]} */
     const items = []
     while (true) {
       skipTrivia()
-      if (pos >= n) fail(pos, `unterminated, expected '${closer}'`)
+      if (pos >= n) fail(pos, `unclosed ${opener}`)
       if (source[pos] === closer) {
         pos++
         return items
@@ -288,31 +293,108 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
     }
   }
 
-  /**
-   * @param {boolean} actionable
-   * @returns {{ value: Value, children: Spanned[] }}
-   */
-  function readList(actionable) {
-    const items = readUntil(']')
-    return {
-      value: list(
-        items.map(s => s.value),
-        actionable
-      ),
-      children: items,
-    }
+  /** @returns {{ value: Value, children: Spanned[] }} */
+  function readList() {
+    const items = readUntil('[', ']')
+    return { value: list(items.map(s => s.value)), children: items }
+  }
+
+  /** @returns {{ value: Value, children: Spanned[] }} */
+  function readRecord() {
+    const items = readUntil('(', ')')
+    if (items.length === 0) fail(pos - 1, 'record with no head')
+    return { value: record(items.map(s => s.value)), children: items }
   }
 
   /**
-   * @param {boolean} actionable
+   * One brace family: the first element decides. A `:` after it makes a
+   * dictionary; no `:` makes a set. `{}` is the empty set, `{:}` the empty
+   * dictionary — no colon, no dict, even at zero elements.
    * @returns {{ value: Value, children: Spanned[] }}
    */
-  function readSet(actionable) {
-    const items = readUntil('}')
-    const value = set(
-      items.map(s => s.value),
-      actionable
-    )
+  function readBraces() {
+    skipTrivia()
+    if (pos >= n) fail(pos, 'unclosed {')
+    if (source[pos] === '}') {
+      pos++
+      return { value: set([]), children: [] }
+    }
+    if (source[pos] === ':') {
+      pos++
+      skipTrivia()
+      if (pos >= n) fail(pos, 'unclosed {')
+      if (source[pos] !== '}')
+        fail(pos, "'{:' is the empty dictionary; expected '}'")
+      pos++
+      return { value: dict([]), children: [] }
+    }
+    const first = readValue()
+    skipTrivia()
+    if (pos >= n) fail(pos, 'unclosed {')
+    if (source[pos] === ':') {
+      pos++
+      return readDictAfter(first)
+    }
+    return readSetAfter(first)
+  }
+
+  /**
+   * pos sits just after the first key's `:`; read the dictionary's entries.
+   * @param {Spanned} firstKey
+   * @returns {{ value: Value, children: Spanned[] }}
+   */
+  function readDictAfter(firstKey) {
+    /** @type {[Value, Value][]} */
+    const entries = []
+    /** @type {Spanned[]} */
+    const children = []
+    let key = firstKey
+    while (true) {
+      const val = readValue()
+      entries.push([key.value, val.value])
+      children.push(key, val)
+      skipTrivia()
+      if (pos >= n) fail(pos, 'unclosed {')
+      if (source[pos] === '}') {
+        pos++
+        break
+      }
+      key = readValue()
+      skipTrivia()
+      if (pos >= n || source[pos] !== ':')
+        fail(pos, "dict entry needs ':' after its key")
+      pos++
+    }
+    const value = dict(entries)
+    // the constructor canonicalizes; a dropped entry means the source
+    // spelled the same key twice
+    if (value.value.length !== entries.length)
+      failDuplicate(
+        children.filter((_, i) => i % 2 === 0),
+        'dict key'
+      )
+    return { value, children }
+  }
+
+  /**
+   * pos sits after the first member; read the set's remaining members.
+   * @param {Spanned} first
+   * @returns {{ value: Value, children: Spanned[] }}
+   */
+  function readSetAfter(first) {
+    const items = [first]
+    while (true) {
+      skipTrivia()
+      if (pos >= n) fail(pos, 'unclosed {')
+      if (source[pos] === '}') {
+        pos++
+        break
+      }
+      if (source[pos] === ':')
+        fail(pos, "':' in a set; a dictionary is {key: value}")
+      items.push(readValue())
+    }
+    const value = set(items.map(s => s.value))
     // the constructor canonicalizes; a dropped member means the source
     // spelled the same value twice
     if (value.value.length !== items.length) failDuplicate(items, 'set member')
@@ -320,76 +402,47 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
   }
 
   /**
-   * @param {boolean} actionable
-   * @returns {{ value: Value, children: Spanned[] }}
+   * Construct a string/symbol, converting a well-formedness rejection into a
+   * positioned reader error.
+   * @param {(s: string) => Value} ctor
+   * @param {string} raw
+   * @param {number} at
+   * @param {string} what
    */
-  function readRecord(actionable) {
-    const items = readUntil(')')
-    if (items.length === 0) fail(pos, `Record cannot be empty!`)
-    return {
-      value: record(
-        items.map(s => s.value),
-        actionable
-      ),
-      children: items,
+  function wellFormed(ctor, raw, at, what) {
+    try {
+      return ctor(raw)
+    } catch {
+      return fail(at, `malformed text in ${what}`)
     }
-  }
-
-  /**
-   * @param {boolean} actionable
-   * @returns {{ value: Value, children: Spanned[] }}
-   */
-  function readDict(actionable) {
-    /** @type {[Value, Value][]} */
-    const entries = []
-    /** @type {Spanned[]} */
-    const children = []
-    while (true) {
-      skipTrivia()
-      if (pos >= n) fail(pos, "unterminated, expected '}'")
-      if (source[pos] === '}') {
-        pos++
-        break
-      }
-      const key = readValue()
-      skipTrivia()
-      if (source[pos] === ':') pos++
-      else fail(pos, "dictionary expected a separator ':'")
-      const val = readValue()
-      entries.push([key.value, val.value])
-      children.push(key, val)
-    }
-    const value = dict(entries, actionable)
-    if (value.value.length !== entries.length)
-      failDuplicate(
-        children.filter((_, i) => i % 2 === 0),
-        'dictionary key'
-      )
-    return { value, children }
   }
 
   /** @returns {Spanned} */
   function readValue() {
-    const INVALID_CHARS = ':)]}'
-    let actionable = false
     skipTrivia()
     const start = pos
-    if (source[pos] === '`') {
+
+    let prefixMarked = false
+    if (source[pos] === '!') {
+      // a mark in front belongs to a frame; it must touch the bracket
       pos++
-      actionable = true
-      // the mark is one bit with one spelling, bound to the value it prefixes
-      if (source[pos] === '`') fail(pos, 'repeated mark')
-      if (isEOF(source[pos]) || isWs(source[pos]) || source[pos] === ';')
-        fail(pos, 'a mark must immediately prefix its value')
+      if (isEOF(source[pos])) fail(pos, 'mark with no value')
+      if (source[pos] === '!') fail(pos, 'repeated mark')
+      if (isWs(source[pos]) || source[pos] === ';')
+        fail(pos, 'mark separated from its value')
+      if (!OPENERS.includes(source[pos]))
+        fail(
+          pos,
+          'only a frame is marked in front; an atom is marked behind: x!'
+        )
+      prefixMarked = true
     }
+
     const c = source[pos]
-    const k = source[pos + 1]
-
     if (isEOF(c)) fail(pos, 'expected a value')
+    if (':)]}'.includes(c)) fail(pos, `unexpected ${c}`)
 
-    if (INVALID_CHARS.includes(c)) {
-      fail(pos, `unexpected closing character: ${c}`)
-    }
+    const frame = OPENERS.includes(c)
 
     /** @type {Value} */
     let value
@@ -398,35 +451,42 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
 
     if (c === '[') {
       pos++
-      ;({ value, children } = framed(start, () => readList(actionable)))
-    } else if (c === '{') {
-      pos++
-      ;({ value, children } = framed(start, () => readDict(actionable)))
+      ;({ value, children } = framed(start, readList))
     } else if (c === '(') {
       pos++
-      ;({ value, children } = framed(start, () => readRecord(actionable)))
+      ;({ value, children } = framed(start, readRecord))
+    } else if (c === '{') {
+      pos++
+      ;({ value, children } = framed(start, readBraces))
     } else if (c === '"') {
       pos++
-      value = string(readQuoted('"'), actionable)
+      value = wellFormed(string, readQuoted('"', 'string'), start, 'string')
     } else if (c === "'") {
       pos++
-      value = symbol(readQuoted("'"), actionable)
-    } else if (c === '#') {
-      if (k === '{') {
-        pos += 2
-        ;({ value, children } = framed(start, () => readSet(actionable)))
-      } else if (k === '[') {
-        pos += 2
-        value = readBytes(actionable)
-      } else {
-        // Note: I could see this not be an error but do a normal symbol parse
-        fail(pos, "'#' must begin '#[' or '#{'")
-      }
+      value = wellFormed(symbol, readQuoted("'", 'symbol'), start, 'symbol')
     } else {
-      const numberLike = isDigit(c) || (c === '-' && isDigit(k))
-      value = numberLike
-        ? readNumber(pos, actionable)
-        : readSymbol(pos, actionable)
+      const tok = readBareToken(start)
+      if (tok.length >= 2 && tok[0] === '0' && tok[1] === 'x') {
+        value = bytesFromToken(tok, start)
+      } else if (isDigit(tok[0]) || (tok[0] === '-' && isDigit(tok[1]))) {
+        value = intFromToken(tok, start)
+      } else if (tok === 'nil') {
+        value = nil()
+      } else {
+        value = wellFormed(symbol, tok, start, 'symbol')
+      }
+    }
+
+    if (source[pos] === '!') {
+      // a mark behind belongs to an atom; it must touch the atom and end at
+      // a delimiter
+      if (frame) fail(pos, 'a frame is marked in front: !(…)')
+      pos++
+      if (!isBoundary(source[pos]))
+        fail(pos, 'a marked atom ends at a delimiter')
+      value = withMark(value, true)
+    } else if (prefixMarked) {
+      value = withMark(value, true)
     }
 
     return { value, start, end: pos, children }
@@ -435,7 +495,7 @@ export function readSpans(source, { maxDepth = 1024 } = {}) {
   while (true) {
     skipTrivia()
     if (pos >= n) break
-    push(readValue())
+    values.push(readValue())
   }
 
   return values

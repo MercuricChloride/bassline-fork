@@ -11,9 +11,9 @@ const options = {
   target: 'node20',
   // The VS Code API is provided by the host at runtime, never bundled.
   external: ['vscode'],
-  // @bassline/core and @bassline/comm are ESM workspace packages; bundling
-  // inlines them into the single CJS output so the packaged .vsix needs no
-  // node_modules resolution at runtime.
+  // @bassline/core is an ESM workspace package; bundling inlines it into the
+  // single CJS output so the packaged .vsix needs no node_modules resolution
+  // at runtime.
   outfile: 'dist/extension.js',
   sourcemap: true,
   logLevel: 'info',

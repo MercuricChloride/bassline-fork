@@ -1,0 +1,22 @@
+; a bassline document is any number of values
+
+(entry "title" "hello bassline")
+
+[1 2 3 {4 5 6}] ; a list holding a set
+
+{name: "ada" tags: {math code} scores: [1 -2 3_000]}
+
+{:} ; the empty dictionary
+{}  ; the empty set
+
+0xdead_beef ; a bytestring
+'has space' ; a quoted symbol
+"a string with \"quotes\" and a
+literal newline"
+
+go!            ; a marked atom
+!(add 1 2)     ; a marked record
+!{park: brake} ; a marked dictionary
+
+(digest sha256 0x00ff)
+nil

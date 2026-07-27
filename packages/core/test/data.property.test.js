@@ -15,7 +15,7 @@ import {
   dict,
   record,
 } from '../src/data.js'
-import { read, print } from '../src/text/index.js'
+import { read, readSpans, print } from '../src/text/index.js'
 
 const hex = u8 =>
   [...u8]
@@ -26,7 +26,7 @@ const hex = u8 =>
 const ceHex = v => hex(encode(v))
 
 // Spellings that once broke, or nearly break, the textual syntax: reserved
-// words, delimiters, whitespace (the comma!), number look-alikes, escapes.
+// words, delimiters, the mark, number and bytes look-alikes, escapes.
 // Mixed into the grapheme generators so the text round-trip stays honest.
 const spelling = fc.oneof(
   fc.string({ unit: 'grapheme' }),
@@ -37,12 +37,19 @@ const spelling = fc.oneof(
     'has space',
     'a:b',
     'a;b',
+    'a!b',
+    '!',
+    'go!',
     "it's",
     '"quoted"',
     'back\\slash',
     'new\nline',
     '`x',
-    '#[',
+    '#weird',
+    '0x',
+    '0xab',
+    '1_000',
+    '_5',
     '->',
     '-',
     '-5',
@@ -54,7 +61,8 @@ const spelling = fc.oneof(
     '[',
     ']',
     '{',
-    '}'
+    '}',
+    '{:}'
   )
 )
 
@@ -96,6 +104,32 @@ describe('round-trip', () => {
     const vs = read(print(v))
     expect(vs.length).toBe(1)
     expect(eq(vs[0], v)).toBe(true)
+  })
+
+  test.prop([
+    value,
+    fc.integer({ min: 0, max: 80 }),
+    fc.integer({ min: 0, max: 4 }),
+  ])(
+    'read(print(v, width, padding)) yields exactly v at any width',
+    (v, w, p) => {
+      const vs = read(print(v, w, p))
+      expect(vs.length).toBe(1)
+      expect(eq(vs[0], v)).toBe(true)
+    }
+  )
+
+  test.prop([value])('every span slice re-reads to its value', v => {
+    const src = print(v)
+    const check = spans => {
+      for (const s of spans) {
+        const again = read(src.slice(s.start, s.end))
+        expect(again.length).toBe(1)
+        expect(eq(again[0], s.value)).toBe(true)
+        check(s.children)
+      }
+    }
+    check(readSpans(src))
   })
 })
 

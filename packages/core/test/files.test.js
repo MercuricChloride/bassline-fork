@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as F from '../src/files.js'
@@ -27,33 +27,47 @@ const sampleDoc = [
   set([bytes(Uint8Array.of(0xa0)), bytes(Uint8Array.of(0x80))]),
 ]
 
-describe('binary files', () => {
+describe('binary files (.blt)', () => {
   it('round-trips a multi-value document', () => {
-    F.saveBinary(p('doc.bce'), sampleDoc)
-    expect(eqAll(F.loadBinary(p('doc.bce')), sampleDoc)).toBe(true)
+    F.saveBinary(p('doc.blt'), sampleDoc)
+    expect(eqAll(F.loadBinary(p('doc.blt')), sampleDoc)).toBe(true)
   })
 
   it('accepts a single value and an empty document', () => {
-    F.saveBinary(p('one.bce'), int(7n))
-    expect(eqAll(F.loadBinary(p('one.bce')), [int(7n)])).toBe(true)
-    F.saveBinary(p('empty.bce'), [])
-    expect(F.loadBinary(p('empty.bce'))).toEqual([])
+    F.saveBinary(p('one.blt'), int(7n))
+    expect(eqAll(F.loadBinary(p('one.blt')), [int(7n)])).toBe(true)
+    F.saveBinary(p('empty.blt'), [])
+    expect(F.loadBinary(p('empty.blt'))).toEqual([])
   })
 })
 
-describe('text files', () => {
+describe('text files (.bl)', () => {
   it('round-trips a multi-value document', () => {
-    F.saveText(p('doc.blt'), sampleDoc)
-    expect(eqAll(F.loadText(p('doc.blt')), sampleDoc)).toBe(true)
+    F.saveText(p('doc.bl'), sampleDoc)
+    expect(eqAll(F.loadText(p('doc.bl')), sampleDoc)).toBe(true)
+  })
+
+  it('rejects ill-formed UTF-8 instead of substituting', () => {
+    writeFileSync(p('bad.bl'), Uint8Array.of(0x28, 0x66, 0x20, 0xff, 0x29))
+    expect(() => F.loadText(p('bad.bl'))).toThrow()
+  })
+})
+
+describe('extension-directed forms', () => {
+  it('saveValues and loadValues pick the form from the suffix', () => {
+    F.saveValues(p('by-ext.bl'), sampleDoc)
+    expect(eqAll(F.loadValues(p('by-ext.bl')), sampleDoc)).toBe(true)
+    F.saveValues(p('by-ext.blt'), sampleDoc)
+    expect(eqAll(F.loadValues(p('by-ext.blt')), sampleDoc)).toBe(true)
   })
 })
 
 describe('conversion', () => {
   it('text -> binary -> text preserves the document', () => {
-    F.saveText(p('a.blt'), sampleDoc)
-    F.textToBinary(p('a.blt'), p('a.bce'))
-    expect(eqAll(F.loadBinary(p('a.bce')), sampleDoc)).toBe(true)
-    F.binaryToText(p('a.bce'), p('b.blt'))
-    expect(eqAll(F.loadText(p('b.blt')), sampleDoc)).toBe(true)
+    F.saveText(p('a.bl'), sampleDoc)
+    F.textToBinary(p('a.bl'), p('a.blt'))
+    expect(eqAll(F.loadBinary(p('a.blt')), sampleDoc)).toBe(true)
+    F.binaryToText(p('a.blt'), p('b.bl'))
+    expect(eqAll(F.loadText(p('b.bl')), sampleDoc)).toBe(true)
   })
 })

@@ -27,6 +27,9 @@ const val = src => {
   return vs[0]
 }
 
+const bs = (...n) => bytes(Uint8Array.of(...n))
+const act = v => withMark(v, true)
+
 describe('documents', () => {
   it('parses zero or more whitespace-separated values into an array', () => {
     expect(read('')).toEqual([])
@@ -36,96 +39,184 @@ describe('documents', () => {
     expect(eq(vs[1], string('hi'))).toBe(true)
     expect(eq(vs[2], symbol('foo'))).toBe(true)
   })
+
+  it('a comma is an ordinary symbol character', () => {
+    expect(eq(val('[a, b]'), list([symbol('a,'), symbol('b')]))).toBe(true)
+    expect(() => read('[1, 2]')).toThrow(ReaderError) // '1,' is no number
+  })
 })
 
 describe('atoms', () => {
-  it('parses each atom kind', () => {
+  it('nil is reserved, quotable, markable', () => {
     expect(eq(val('nil'), nil())).toBe(true)
-    expect(eq(val('-7'), int(-7n))).toBe(true)
+    expect(eq(val("'nil'"), symbol('nil'))).toBe(true)
+    expect(eq(val('nil!'), act(nil()))).toBe(true)
+    expect(eq(val('nilx'), symbol('nilx'))).toBe(true)
+  })
+
+  it('numbers', () => {
+    expect(eq(val('0'), int(0n))).toBe(true)
+    expect(eq(val('-5'), int(-5n))).toBe(true)
+    expect(
+      eq(
+        val('123456789012345678901234567890'),
+        int(123456789012345678901234567890n)
+      )
+    ).toBe(true)
     expect(eq(val('+7'), symbol('+7'))).toBe(true) // no + sign: a symbol
-    expect(eq(val('"hi"'), string('hi'))).toBe(true) // double quotes: a string
-    expect(eq(val("'sym'"), symbol('sym'))).toBe(true) // single quotes: a symbol
+  })
+
+  it("'_' groups digits and never survives the reading", () => {
+    expect(eq(val('1_000_000'), int(1000000n))).toBe(true)
+    expect(eq(val('-1_000'), int(-1000n))).toBe(true)
+    expect(eq(val('_5'), symbol('_5'))).toBe(true) // no digit in front of it: a symbol
+    expect(eq(val('_5_'), symbol('_5_'))).toBe(true) // still that symbol
+    expect(() => read('1_')).toThrow(ReaderError)
+    expect(() => read('1__000')).toThrow(ReaderError)
+    expect(() => read('0_0')).toThrow(ReaderError) // canonicality is judged on the digits
+  })
+
+  it('strings', () => {
+    expect(eq(val('""'), string(''))).toBe(true)
+    expect(eq(val('"hi"'), string('hi'))).toBe(true)
+    expect(eq(val('"a\\n\\t\\r\\\\\\"b"'), string('a\n\t\r\\"b'))).toBe(true)
+    expect(eq(val('"a\nb"'), string('a\nb'))).toBe(true) // literal newline is legal
+  })
+
+  it('symbols', () => {
     expect(eq(val('foo'), symbol('foo'))).toBe(true)
-    expect(eq(val('#[DEAD]'), bytes(Uint8Array.of(0xde, 0xad)))).toBe(true)
-  })
-
-  it('distinguishes a quoted symbol from the reserved word', () => {
-    expect(val("'nil'").kind).toBe('symbol')
-    expect(val('nil').kind).toBe('nil')
-  })
-
-  it('reads former reserved words as plain symbols', () => {
-    for (const w of ['true', 'false', 'NaN', 'Infinity', '-Infinity']) {
-      expect(eq(val(w), symbol(w))).toBe(true)
+    for (const s of [
+      '->',
+      '-',
+      '<=',
+      '+5',
+      '*',
+      '?',
+      'a.b',
+      ',',
+      'a,b',
+      '#',
+      '#weird',
+      '`tick',
+    ]) {
+      expect(eq(val(s), symbol(s))).toBe(true)
     }
+    expect(eq(val("'has space'"), symbol('has space'))).toBe(true)
+    expect(eq(val("''"), symbol(''))).toBe(true)
+    expect(eq(val("'a\\'b'"), symbol("a'b"))).toBe(true)
+    expect(eq(val("'a!b'"), symbol('a!b'))).toBe(true) // '!' delimits, so it is quoted
+  })
+
+  it('bytes', () => {
+    expect(eq(val('0x'), bs())).toBe(true)
+    expect(eq(val('0xdead'), bs(0xde, 0xad))).toBe(true)
+    expect(eq(val('0xDEAD'), bs(0xde, 0xad))).toBe(true) // either case reads
+    expect(eq(val('0xde_ad'), bs(0xde, 0xad))).toBe(true)
+    expect(eq(val('0xd_e_a_d'), bs(0xde, 0xad))).toBe(true)
   })
 })
 
 describe('frames', () => {
-  it('parses empty frames', () => {
+  it('lists and records', () => {
     expect(eq(val('[]'), list([]))).toBe(true)
-    expect(eq(val('{}'), dict([]))).toBe(true)
-    expect(eq(val('#{}'), set([]))).toBe(true)
-    expect(() => val('()')).toThrow('Record cannot be empty!')
-  })
-
-  it('parses a record', () => {
     expect(
-      eq(val('(point 1 2)'), record([symbol('point'), int(1n), int(2n)]))
+      eq(val('[1 two [3]]'), list([int(1n), symbol('two'), list([int(3n)])]))
     ).toBe(true)
+    expect(eq(val('(f)'), record([symbol('f')]))).toBe(true)
+    expect(eq(val('(f 1 nil)'), record([symbol('f'), int(1n), nil()]))).toBe(
+      true
+    )
   })
 
-  it('reads angle characters as bare symbols', () => {
-    expect(eq(val('->'), symbol('->'))).toBe(true)
-    expect(eq(val('<='), symbol('<='))).toBe(true)
-    expect(eq(val('>='), symbol('>='))).toBe(true)
-    expect(
-      eq(val('(lt a b)'), record([symbol('lt'), symbol('a'), symbol('b')]))
-    ).toBe(true)
+  it("braces without ':' are a set, in canonical order", () => {
+    expect(eq(val('{}'), set([]))).toBe(true)
+    expect(eq(val('{3 1 2}'), set([int(1n), int(2n), int(3n)]))).toBe(true)
+    expect(eq(val('{lone}'), set([symbol('lone')]))).toBe(true)
   })
 
-  it('parses a dictionary, splitting on the colon', () => {
+  it("braces with ':' are a dict, in canonical order", () => {
+    expect(eq(val('{:}'), dict([]))).toBe(true)
     const want = dict([
       [symbol('a'), int(1n)],
       [symbol('b'), int(2n)],
     ])
-    expect(eq(val('{a: 1 b: 2}'), want)).toBe(true)
+    expect(eq(val('{b: 2 a: 1}'), want)).toBe(true)
     expect(eq(val('{a:1 b:2}'), want)).toBe(true)
+    expect(eq(val('{foo:bar}'), dict([[symbol('foo'), symbol('bar')]]))).toBe(
+      true
+    )
+    expect(
+      eq(val('{[1]: one}'), dict([[list([int(1n)]), symbol('one')]]))
+    ).toBe(true)
+  })
+
+  it('the first element decides which', () => {
+    expect(() => read('{a b: c}')).toThrow("':' in a set")
+    expect(() => read('{a: 1 b}')).toThrow("dict entry needs ':'")
+    expect(() => read('{: a}')).toThrow('empty dictionary')
   })
 
   it('parses nesting', () => {
-    const v = val('[1 [2] {a: "x"}]')
-    expect(v.kind).toBe('list')
     expect(
       eq(
-        v,
+        val('[1 [2] {a: "x"}]'),
         list([int(1n), list([int(2n)]), dict([[symbol('a'), string('x')]])])
       )
     ).toBe(true)
   })
 })
 
-describe('actionable', () => {
-  it('parses an actionable value', () => {
-    const v = val('`foo')
+describe('marks', () => {
+  it('an atom is marked behind', () => {
+    const v = val('go!')
     expect(isActionable(v)).toBe(true)
-    expect(eq(v, withMark(symbol('foo'), true))).toBe(true)
+    expect(eq(v, act(symbol('go')))).toBe(true)
+    expect(eq(val('5!'), act(int(5n)))).toBe(true)
+    expect(eq(val('"hi"!'), act(string('hi')))).toBe(true)
+    expect(eq(val("'has space'!"), act(symbol('has space')))).toBe(true)
+    expect(eq(val("''!"), act(symbol('')))).toBe(true)
+    expect(eq(val('0xab!'), act(bs(0xab)))).toBe(true)
+    expect(
+      eq(val('[go! stop]'), list([act(symbol('go')), symbol('stop')]))
+    ).toBe(true)
+    expect(eq(val('{go!: 1}'), dict([[act(symbol('go')), int(1n)]]))).toBe(true)
   })
 
-  it('parses an actionable frame', () => {
-    expect(eq(val('`[1 2]'), withMark(list([int(1n), int(2n)]), true))).toBe(
+  it('a frame is marked in front', () => {
+    expect(eq(val('!(f 1)'), act(record([symbol('f'), int(1n)])))).toBe(true)
+    expect(eq(val('![1]'), act(list([int(1n)])))).toBe(true)
+    expect(eq(val('!{a}'), act(set([symbol('a')])))).toBe(true)
+    expect(eq(val('!{a: 1}'), act(dict([[symbol('a'), int(1n)]])))).toBe(true)
+    expect(eq(val('!{:}'), act(dict([])))).toBe(true)
+    expect(
+      eq(
+        val('(f go! !(g))'),
+        record([symbol('f'), act(symbol('go')), act(record([symbol('g')]))])
+      )
+    ).toBe(true)
+  })
+
+  it('allows structurally nested marks', () => {
+    expect(eq(val('![x! y]'), act(list([act(symbol('x')), symbol('y')])))).toBe(
       true
     )
   })
 
-  it('allows structurally nested actionables', () => {
-    expect(
-      eq(val('`[`a]'), withMark(list([withMark(symbol('a'), true)]), true))
-    ).toBe(true)
+  it('the mark touches its value, on its side', () => {
+    expect(() => read('! (f)')).toThrow('mark separated from its value')
+    expect(() => read('!!(f)')).toThrow('repeated mark')
+    expect(() => read('!')).toThrow('mark with no value')
+    expect(() => read('!x')).toThrow('an atom is marked behind')
+    expect(() => read('(f)!')).toThrow('a frame is marked in front')
+    expect(() => read('!(f)!')).toThrow('a frame is marked in front')
+    expect(() => read('go !')).toThrow('mark with no value') // a separated '!' is no suffix
+    expect(() => read('go ! x')).toThrow('mark separated from its value')
+    expect(() => read('a!b')).toThrow('a marked atom ends at a delimiter')
+    expect(() => read('!;c\n(f)')).toThrow('mark separated from its value')
   })
 
-  it('accepts an actionable dict key (the Data firewall is gone)', () => {
-    expect(eq(val('{`a: 1}'), dict([[symbol('a', true), int(1n)]]))).toBe(true)
+  it('the mark is part of identity: x and x! are distinct members', () => {
+    expect(eq(val('{x x!}'), set([symbol('x'), symbol('x', true)]))).toBe(true)
   })
 })
 
@@ -161,35 +252,56 @@ describe('comments', () => {
     expect(eq(val('42;x'), int(42n))).toBe(true)
   })
 
-  it('spans start after leading comments', () => {
-    const [s] = readSpans('; c\n 42')
-    expect(s.start).toBe(5)
-    expect(s.end).toBe(7)
+  it('a document may be only noise', () => {
+    expect(read(' ; only noise\n')).toEqual([])
+    const vs = read('; hi\n1 ; trailing\n2')
+    expect(vs).toHaveLength(2)
+    expect(eq(vs[0], int(1n))).toBe(true)
+    expect(eq(vs[1], int(2n))).toBe(true)
   })
 })
 
-describe('errors', () => {
-  it('rejects a record with no head', () => {
-    expect(() => read('()')).toThrow()
+describe('rejections', () => {
+  it('rejects non-canonical numbers', () => {
+    for (const s of ['007', '-0', '1.5', '42px', '1-2', '1.']) {
+      expect(() => read(s)).toThrow('not a canonical number')
+    }
   })
 
-  it('rejects a stray closer', () => {
-    expect(() => read(']')).toThrow()
-    expect(() => read(')')).toThrow()
+  it('rejects malformed frames', () => {
+    expect(() => read('()')).toThrow('record with no head')
+    expect(() => read('{1 1}')).toThrow('duplicate set member')
+    expect(() => read('{a: 1 a: 2}')).toThrow('duplicate dict key')
+    expect(() => read('{a:}')).toThrow(ReaderError) // missing value
+    expect(() => read('[1')).toThrow('unclosed [')
+    expect(() => read('(')).toThrow('unclosed (')
+    expect(() => read('{')).toThrow('unclosed {')
+    expect(() => read('{a: 1')).toThrow('unclosed {')
+    expect(() => read('a : b')).toThrow('unexpected :') // ':' outside a dict
   })
 
-  it('rejects an unterminated frame', () => {
-    expect(() => read('[1 2')).toThrow()
-    expect(() => read('{a: 1')).toThrow()
+  it('rejects malformed bytes', () => {
+    expect(() => read('0xabc')).toThrow('even count of hex digits')
+    expect(() => read('0xzz')).toThrow('not a hex digit')
+    expect(() => read('0x_ab')).toThrow("'_' sits between digits")
+    expect(() => read('0xab_')).toThrow("'_' sits between digits")
+    expect(() => read('0XAB')).toThrow('not a canonical number') // the prefix is 0x
   })
 
-  it('rejects a dictionary entry without a colon', () => {
-    expect(() => read('{a 1}')).toThrow()
+  it('rejects malformed scalars', () => {
+    expect(() => read('"ab')).toThrow('unterminated string')
+    expect(() => read("'ab")).toThrow('unterminated symbol')
+    expect(() => read('"ab\\')).toThrow('unterminated string') // backslash at EOF
+    expect(() => read('"a\\x"')).toThrow('invalid escape')
+    expect(() => read('"a\\\'b"')).toThrow('invalid escape') // \' only escapes in a symbol
+    expect(() => read('"\uD800"')).toThrow('malformed text') // a lone surrogate
+    expect(() => read('\uD800')).toThrow('malformed text')
   })
 
-  it('rejects a decimal literal', () => {
-    expect(() => read('1.5')).toThrow('decimal')
-    expect(() => read('-0.5')).toThrow('decimal')
+  it('rejects stray closers', () => {
+    for (const s of [')', ']', '}', ':']) {
+      expect(() => read(s)).toThrow(`unexpected ${s}`)
+    }
   })
 
   it('carries pos/line/col on the ReaderError', () => {
@@ -207,29 +319,15 @@ describe('errors', () => {
 })
 
 describe('duplicates', () => {
-  it('rejects a duplicate set member', () => {
-    expect(() => read('#{1 1}')).toThrow('duplicate set member')
-    expect(() => read('#{a b a}')).toThrow('duplicate set member')
-  })
-
-  it('rejects a duplicate dictionary key', () => {
-    expect(() => read('{a: 1 a: 2}')).toThrow('duplicate dictionary key')
-    expect(() => read('{a: 1 b: 2 a: 1}')).toThrow('duplicate dictionary key')
-  })
-
   it('points at the repeated spelling', () => {
     let err
     try {
-      read('#{1 2 1}')
+      read('{1 2 1}')
     } catch (e) {
       err = e
     }
     expect(err).toBeInstanceOf(ReaderError)
-    expect(err.pos).toBe(6)
-  })
-
-  it('the mark is part of identity: x and `x are distinct members', () => {
-    expect(eq(val('#{x `x}'), set([symbol('x'), symbol('x', true)]))).toBe(true)
+    expect(err.pos).toBe(5)
   })
 
   it('out-of-order dict keys are fine; text is written by people', () => {
@@ -238,24 +336,6 @@ describe('duplicates', () => {
       [symbol('b'), int(2n)],
     ])
     expect(eq(val('{b: 2 a: 1}'), want)).toBe(true)
-  })
-})
-
-describe('mark attachment', () => {
-  it('rejects a repeated mark', () => {
-    expect(() => read('``x')).toThrow('repeated mark')
-  })
-
-  it('rejects a mark detached from its value', () => {
-    expect(() => read('` x')).toThrow('mark must immediately prefix')
-    expect(() => read('`,x')).toThrow('mark must immediately prefix')
-    expect(() => read('`')).toThrow('mark must immediately prefix')
-    expect(() => read('`; note')).toThrow('mark must immediately prefix')
-    expect(() => read('(a `)')).toThrow()
-  })
-
-  it('a marked quoted empty symbol is still expressible', () => {
-    expect(eq(val("`''"), symbol('', true))).toBe(true)
   })
 })
 
@@ -282,7 +362,7 @@ describe('depth', () => {
 
 describe('readSpans', () => {
   it('projects to the same values as read', () => {
-    const src = '(entry "k" #{1 2 3}) [1 2] `foo'
+    const src = '(entry "k" {1 2 3}) [1 2] go! !{a: 1}'
     const spanned = readSpans(src)
     expect(spanned.map(s => s.value)).toEqual(read(src))
   })
@@ -294,8 +374,21 @@ describe('readSpans', () => {
     expect(s.children).toEqual([])
   })
 
-  it('includes the actionable backtick in the span', () => {
-    const [s] = readSpans('`foo')
+  it('spans start after leading comments', () => {
+    const [s] = readSpans('; c\n 42')
+    expect(s.start).toBe(5)
+    expect(s.end).toBe(7)
+  })
+
+  it("includes an atom's trailing mark in the span", () => {
+    const [s] = readSpans('go!')
+    expect(s.value.actionable).toBe(true)
+    expect(s.start).toBe(0)
+    expect(s.end).toBe(3)
+  })
+
+  it("includes a frame's leading mark in the span", () => {
+    const [s] = readSpans('![1]')
     expect(s.value.actionable).toBe(true)
     expect(s.start).toBe(0)
     expect(s.end).toBe(4)
@@ -322,11 +415,17 @@ describe('readSpans', () => {
     expect(s.children[0].value.value).toBe('k')
     expect([s.children[1].start, s.children[1].end]).toEqual([4, 5])
   })
+
+  it('spans a marked dict key including its mark', () => {
+    const [s] = readSpans('{go!: 1}')
+    expect(s.children[0].value.actionable).toBe(true)
+    expect([s.children[0].start, s.children[0].end]).toEqual([1, 4])
+  })
 })
 
 describe('round-trip with canonical encoding', () => {
   it('parse then encode reproduces hand-built values', () => {
-    const v = val('(entry "k" #{1 2 3})')
+    const v = val('(entry "k" {1 2 3})')
     const want = record([
       symbol('entry'),
       string('k'),
@@ -342,5 +441,9 @@ describe('input validation', () => {
     for (const bad of [42, null, undefined, [int(1n)]]) {
       expect(() => read(bad)).toThrow(TypeError)
     }
+  })
+
+  it('tolerates a null options bag', () => {
+    expect(eq(read('1', null)[0], int(1n))).toBe(true)
   })
 })

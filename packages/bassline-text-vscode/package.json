@@ -1,8 +1,8 @@
 {
   "name": "bassline-text",
-  "displayName": "bassline-text",
-  "description": "Vscode support for the bassline text format",
-  "version": "0.0.1",
+  "displayName": "Bassline",
+  "description": "VS Code support for the bassline text syntax (.bl)",
+  "version": "0.1.0",
   "main": "./dist/extension.js",
   "engines": {
     "vscode": "^1.96.0"
@@ -10,118 +10,41 @@
   "categories": [
     "Programming Languages"
   ],
+  "activationEvents": [
+    "onLanguage:bassline"
+  ],
   "contributes": {
     "languages": [
       {
-        "id": "bassline-text",
+        "id": "bassline",
         "aliases": [
-          "bassline",
-          "bassline-text"
+          "Bassline",
+          "bassline"
         ],
         "extensions": [
-          ".blt"
+          ".bl"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "bassline-text",
+        "language": "bassline",
         "scopeName": "source.bassline",
-        "path": "./syntaxes/bassline-text.tmLanguage.json"
+        "path": "./syntaxes/bassline.tmLanguage.json"
       }
-    ],
-    "commands": [
-      {
-        "command": "bassline.format",
-        "title": "Bassline: Format Document"
-      },
-      {
-        "command": "bassline.evaluate",
-        "title": "Bassline: Evaluate Document"
-      },
-      {
-        "command": "bassline.run",
-        "title": "Bassline: Run Command…"
-      },
-      {
-        "command": "bassline.loadAffordances",
-        "title": "Bassline: Load Affordances from Document…"
-      },
-      {
-        "command": "bassline.reloadManifest",
-        "title": "Bassline: Reload Workspace Manifest"
-      },
-      {
-        "command": "bassline.slurpForward",
-        "title": "Bassline: Slurp Forward"
-      },
-      {
-        "command": "bassline.barfForward",
-        "title": "Bassline: Barf Forward"
-      },
-      {
-        "command": "bassline.slurpBackward",
-        "title": "Bassline: Slurp Backward"
-      },
-      {
-        "command": "bassline.barfBackward",
-        "title": "Bassline: Barf Backward"
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "bassline.slurpForward",
-        "key": "ctrl+alt+right",
-        "when": "editorTextFocus && editorLangId == bassline-text"
-      },
-      {
-        "command": "bassline.barfForward",
-        "key": "ctrl+alt+left",
-        "when": "editorTextFocus && editorLangId == bassline-text"
-      },
-      {
-        "command": "bassline.slurpBackward",
-        "key": "ctrl+alt+shift+left",
-        "when": "editorTextFocus && editorLangId == bassline-text"
-      },
-      {
-        "command": "bassline.barfBackward",
-        "key": "ctrl+alt+shift+right",
-        "when": "editorTextFocus && editorLangId == bassline-text"
-      }
-    ],
-    "configuration": {
-      "title": "Bassline",
-      "properties": {
-        "bassline.manifest": {
-          "type": "string",
-          "default": "bassline.config.blt",
-          "description": "Workspace-relative path to the bassline manifest document loaded on activation."
-        },
-        "bassline.formatWidth": {
-          "type": "number",
-          "default": 72,
-          "description": "Target print width used by the formatter."
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@bassline/comm": "workspace:*",
-    "@bassline/core": "workspace:*"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@bassline/core": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.96.0",
     "esbuild": "^0.28.1",
-    "typescript": "^5.6.0",
-    "vitest": "^2.0.0"
+    "typescript": "^5.6.0"
   }
 }
