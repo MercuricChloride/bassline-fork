@@ -7,7 +7,7 @@ const help = """
 bl sign [--key:PATH]
 
 Wraps values from stdin with its attestation:
-(signed <value> (signature eddsa-blake2b #[sig] #[public])).
+(signed <value> (signature eddsa-blake2b 0x<sig> 0x<public>)).
 The signature is of the value's canonical bytes so checking it
 needs nothing beyond the signed value itself.
 Default key: ~/.bl/key.blb (bl keygen)

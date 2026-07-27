@@ -8,10 +8,10 @@
 ##
 ##   Keypairs as a value
 ##   But don't send this around silly!
-##   (keypair <scheme> #[seed] #[public])
+##   (keypair <scheme> 0x<seed> 0x<public>)
 ##
 ##   A self contained signature
-##   (signature <scheme> #[sig] #[public])
+##   (signature <scheme> 0x<sig> 0x<public>)
 ##
 ##   A pair that travels as one value
 ##   (signed <value> <signature>)
@@ -65,7 +65,7 @@ func toValue*(kp: Keypair): Value =
   KeypairShape(seed: kp.seed, public: kp.public).toValue
 
 func fromValue*(v: Value, t: typedesc[Keypair]): Option[Keypair] =
-  ## Recognizes (keypair eddsa-blake2b #[32] #[32]).
+  ## Recognizes (keypair eddsa-blake2b 0x<32 bytes> 0x<32 bytes>).
   let kv = fromValue(v, KeypairShape)
   if kv.isSome:
     some keypairFromSeed(kv.get.seed)

@@ -8,7 +8,7 @@
 ##       algo*: Sym
 ##       hash*: seq[byte]
 ##
-##   toValue(Digest(algo: Sym"sha256", hash: h))   -> (digest sha256 #[..])
+##   toValue(Digest(algo: Sym"sha256", hash: h))   -> (digest sha256 0x..)
 ##   fromValue(v, Digest)                          -> Option[Digest]
 ##
 ## Field types map to value kinds:

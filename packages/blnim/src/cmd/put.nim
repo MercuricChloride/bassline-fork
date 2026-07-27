@@ -4,7 +4,7 @@ const help = """
 bl put [--store:PATH]
 
 Stores values from stdin in the monotonic content-addressed store 
-and emits its name: (digest sha256 #[...]). The receipt is the
+and emits its name: (digest sha256 0x…). The receipt is the
 value's "address", and thus `bl get` resolves it back.
 
 The default store lives at ~/.bl/store.

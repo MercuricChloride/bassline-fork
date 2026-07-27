@@ -2,7 +2,7 @@
 
 ## infer: a dialect from a corpus.
 ##
-##   let shape = infer(values)        # a `(grammar {…}) value
+##   let shape = infer(values)        # a !(grammar {…}) value
 ##
 ## Reading a grammar out of data is guessing, so the guesses are few,
 ## named, and each one is a rule you can argue with rather than a
@@ -20,7 +20,7 @@
 ## **What generalises.** An atom becomes its kind, except where the
 ## values repeat: a value seen many times over a small vocabulary is
 ## vocabulary and is kept as literals; a value that never repeats is a
-## name and becomes `(sym)`. That is the one real judgement here and it
+## name and becomes !(sym). That is the one real judgement here and it
 ## is stated as a rule rather than a ratio pulled from the air.
 ##
 ## **What stays exact.** A bytes payload whose length never varies is
@@ -36,9 +36,9 @@
 ## unsound inference is a bug, and it is meant to be caught rather than
 ## shipped.
 
-import std/[algorithm, sets, tables]
-import ../core
-import ./[grammar, hash]
+import std/[algorithm, sets, hashes, tables]
+import ../core/values
+import ./grammar
 
 type
   Settings* = object
@@ -183,25 +183,21 @@ proc observe(inf: var Inference, slot: Slot, v: Value) =
       inf.observePositional(slot.rec, v)
 
 # ================ SPELLING ================
+# The dialect vocabulary — opv, opName, demanded, fullyInert — is the
+# grammar module's own; only the sighting-to-demand mapping is ours.
 
-func opv(name: string, ops: varargs[Value]): Value =
-  record(@[sym(name)] & @ops, marked = true)
+func demandOf(marked, inert: bool): MarkReq =
+  ## what a slot's sightings demand: both polarities is any, marked
+  ## alone is marked, inert (or nothing seen) is inert
+  if marked and inert:
+    mrAny
+  elif marked:
+    mrMarked
+  else:
+    mrInert
 
 func demanded(v: Value, marked, inert: bool): Value =
-  if marked and inert:
-    opv("anymark", v)
-  elif marked:
-    opv("marked", v)
-  else:
-    v
-
-func fullyInert(v: Value): bool =
-  if v.marked:
-    return false
-  for c in v.allChildren:
-    if c.marked:
-      return false
-  true
+  demanded(v, demandOf(marked, inert))
 
 func literal(v: Value): Value =
   ## a value standing for itself; anything carrying a mark needs the
@@ -210,18 +206,6 @@ func literal(v: Value): Value =
     v
   else:
     opv("lit", v)
-
-func kindName(k: BlKind): string =
-  case k
-  of bNil: "nil"
-  of bNum: "num"
-  of bText: "text"
-  of bSym: "sym"
-  of bBytes: "bytes"
-  of bList: "list"
-  of bRecord: "record"
-  of bDict: "dict"
-  of bSet: "set"
 
 func anyPattern(): Value =
   opv("anymark", opv("any"))
@@ -282,7 +266,7 @@ proc atomPattern(inf: Inference, slot: Slot, k: BlKind): seq[Value] =
     for w in words:
       result.add literal(w)
     return
-  var op = opv(kindName(k))
+  var op = opv(opName(k))
   if k == bBytes and slot.byteLens.len == 1:
     # one length, every time: that is what a key or a digest is
     for n in slot.byteLens:
@@ -309,13 +293,13 @@ proc renderPositional(
       # a bare frame operator means any frame of that kind, so an empty
       # one has to spell its emptiness or it would widen to everything
       items.add opv("cat")
-    return demanded(opv(kindName(kind), items), marked, inert)
+    return demanded(opv(opName(kind), items), marked, inert)
   let body =
     if p.any == nil:
       anyPattern()
     else:
       inf.render(p.any)
-  demanded(opv(kindName(kind), opv("*", body)), marked, inert)
+  demanded(opv(opName(kind), opv("*", body)), marked, inert)
 
 proc renderSet(inf: Inference, slot: Slot): Value =
   let marked = bSet in slot.markedKinds
@@ -419,7 +403,7 @@ proc renderShape(inf: Inference, head: Value, sh: Shape): Value =
 # ================ THE DOOR ================
 
 proc infer*(values: openArray[Value], cfg = defaults()): Value =
-  ## a dialect describing these values, as a `(grammar {…}) value.
+  ## a dialect describing these values, as a !(grammar {…}) value.
   ## Deterministic: the same corpus spells the same grammar, so the
   ## same corpus has the same name
   var inf = Inference(top: newSlot(), cfg: cfg)

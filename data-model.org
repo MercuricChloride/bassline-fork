@@ -429,66 +429,75 @@ readable and writable form that compiles into the binary data model.
 
 That is to say that this textual syntax itself is not a canonical encoding.
 
-This also is far from perfect, but it's decent for now. Down the line
-this will be improved to something more enjoyable and ergonomic.
+This syntax is far from perfect, but it's good enuf 4 now.
 
 ** Tokens
 
 #+BEGIN_SRC text
-  WS := (\t | \n | \r | ",")+
+  WS := (" " | \t | \n | \r)+
 
   DELIM := WS
         | "[" | "]"
         | "{" | "}"
         | "(" | ")"
-        | ":" | "#"
+        | ":" | "!"
         | "'" | '"'
-        | "`" | ";"
+        | ";"
 #+END_SRC
 
 Whitespace separates tokens and otherwise carries no other meaning.
 
-A *delimiter* is whitespace or one of the =DELIM= characters.
+A delimiter is whitespace or one of the =DELIM= characters. The
+delimiter set holds characters that do structural work. So brackets
+frame, =:= associates, quotes quote, =!= marks, and =;= comments which
+isn't structural, too bad!
 
 After skipping whitespace, the first character selects the token:
 
-- =[ ] { } ( ) := and =#{= are structural and begin / end frames
+- =[ ] { } ( )= are structural and begin / end frames
 
--  =`= is a prefix for a value and denotes it as actionable.
+- =!= is the mark token.
+  Atoms are marked with a suffix of =!=
+  Frames are marked with a prefix of =!=
+  IE:
+  atoms:  =go!= =5!=, ="hi"!=, =0xab!=
+  frames: =!(a-record foo bar)= =!{a set}= =!{a: dict}=
 
-  The mark must immediately prefix its value: a repeated mark, or a
-  mark separated from its value, is a syntax error.
+  This is for readability since atoms are small we read them all at
+  once visually. Whereas frames are large, spanning multiple lines
+  potentially, so we place the mark up front which reads better.
+
+  The mark must touch its value. A trailing mark must be followed by
+  a delimiter, so =a!b= is a syntax error, not two values. A repeated
+  mark, a mark separated from its value, a leading mark on an atom
+  (=!go=), and a trailing mark on a frame (=(…)!=) are syntax errors.
 
 - =;= begins a comment that runs to the end of the line.
 
   A comment is whitespace and never appears in the compiled binary
   representation. If you want durable "comments", use a value.
 
-- =#[= … =]= is a bytestring
+- =0x= begins a bytestring: an even count of hex digits, either case,
+  compiled to their bytes. =_= may sit between two digits as a visual
+  separator and is ignored: =0xdead_beef= is =0xdeadbeef=. =0x= alone
+  is the empty bytestring.
 
-  It must contain an even number of hex digits. And all hex digits
-  must be within the range =[0-9a-fA-F]=, so case of the digits doesn't
-  matter.
+  There are no hexadecimal integers. =0xff= is one byte and not the
+  number =255=.
 
 - =" ... "= is a string and =' ... '= is a quoted symbol.
 
-  Both hold any scalar but the closing quote and =\=.
-
-  the escapes are =\" \\ \n \t \r= in a string and =\' \\ \n \t \r= in a
-  symbol.
+  Both hold any character but it's closing quote and the escapes:
+  =\\ \n \t \r=.
 
 - A digit, or a =-= immediately followed by a digit, begins a
-  number.
+  number. =_= may sit between two digits and is ignored.
 
 - Anything else begins a bare symbol: a maximal run of non-delimiter
   characters.
 
-So every character that is not whitespace or a delimiter including =< >
-; + - * / . = ! ? |= is an ordinary symbol character (so =-> <- <=>=
-read as symbols).
-
 A symbol that must contain a delimiter is written in its quoted form
-='a:b' 'has space'= and because =:= is its own token it always
+='a:b' 'has space' 'a!b'= and because =:= is its own token it always
 splits a symbol from what follows, so =foo: bar= and =foo:bar= both read
 as the three tokens =foo : bar=, which is what lets dictionary entries
 be written =key: value=.
@@ -506,30 +515,44 @@ symbol. To use nil as a symbol, it must be quoted: ='nil'=.
 #+BEGIN_example
   Document := Value*
 
-  Value    := "`"? Datum
-  Datum    := Frame | Atom
+  Value    := ("!"? Frame) | (Atom "!"?)
 
-  Frame    := List | Set | Record | Dict
+  Frame    := List | Record | Set | Dict
   List     := "[" Value* "]"
-  Set      := "#{" Value* "}"
   Record   := "(" Value Value* ")"   ; the first Value is the head
-  Dict     := "{" Entry* "}"
+  Set      := "{" Value* "}"         ; no ":" anywhere within
+  Dict     := "{" Entry+ "}" | "{" ":" "}"
   Entry    := Value ":" Value
 
   Atom     := Bytes | String | Number | Symbol | Nil
   Nil      := "nil"
-  Bytes    := "#[" HexByte* "]"
+  Bytes    := "0x" (hex | "_")*
   String   := '"' (char | escape)* '"'
   Symbol   := bare | "'" (char | escape)* "'"
-  Number   := "-"? digit+          ; Integer
+  Number   := "-"? (digit | "_")+  ; Integer
 #+END_example
+
+*** A note on dictionary & set syntax
+
+Sets and dictionaries are very similar conceptually, so we represent
+them similar syntactically.
+
+The first element within braces decides whether it's a set or dict.
+
+A =:= after the first element makes a dictionary, and every element must
+then be an entry. Otherwise it's a set and a =:= arriving later is a
+syntax error.
+
+This means the empty set is ={}=  and the empty dictionary is ={:}=
 
 *** Number form
 
 A token is a number only when it opens with a digit, or a =-= on a
-digit; so =-= and =->= are symbols while =-5= is a number. There is no
-=+= sign for numbers meaning that =+5= is an ordinary symbol. A number
-must be followed by a delimiter, whitespace, or end of input: a number
-against a symbol character (=1-2=, =42px=, or =1.=) is a syntax error,
-not two tokens. There are no decimal literals: =1.5= is a syntax
-error, not a value!
+digit; so =-= and =->= are symbols while =-5= is a number. =_= may sit between
+two digits and is ignored so =1_000_000= reads as =1000000= while =1_= and
+=1__000= are syntax errors, and =_5= opens with no digit and so is a
+symbol.  There is no =+= sign for numbers meaning that =+5= is an ordinary
+symbol. A number must be followed by a delimiter, whitespace, or end
+of input: a number against a symbol character (=1-2=, =42px=, or =1.=) is a
+syntax error, not two tokens. There are no decimal literals: =1.5= is a
+syntax error, not a value!

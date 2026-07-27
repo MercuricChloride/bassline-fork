@@ -5,8 +5,10 @@ import ../core/values
 type ReadError* = object of CatchableError
 
 const
-  Ws = {' ', '\t', '\n', '\r', ','}
-  Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '#', '\'', '"', '`', ';'}
+  Ws = {' ', '\t', '\n', '\r'}
+  Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '\'', '"', ';', '!'}
+  Digits = {'0' .. '9'}
+  HexDigits = Digits + {'a' .. 'f', 'A' .. 'F'}
 
 func isBareSpelling*(s: string): bool =
   ## whether a symbol may be spelled without quotes
@@ -15,9 +17,9 @@ func isBareSpelling*(s: string): bool =
   for c in s:
     if c in Delims:
       return false
-  if s[0] in {'0' .. '9'}:
+  if s[0] in Digits:
     return false
-  if s.len > 1 and s[0] == '-' and s[1] in {'0' .. '9'}:
+  if s.len > 1 and s[0] == '-' and s[1] in Digits:
     return false
   true
 
@@ -117,68 +119,66 @@ func datum(s: string, pos: var int): Value =
       items.add value(s, pos)
     record(items)
   of '{':
+    # one brace family: the first element decides. A ':' after it makes
+    # a dictionary; no ':' makes a set. {} is the empty set, {:} the
+    # empty dictionary — no colon, no dict, even at zero elements.
     inc pos
-    var entries: seq[(Value, Value)]
-    while true:
+    skipWs(s, pos)
+    if pos >= s.len:
+      fail(s, pos, "unclosed {")
+    if s[pos] == '}':
+      inc pos
+      values.set(newSeq[Value]())
+    elif s[pos] == ':':
+      inc pos
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed {")
-      if s[pos] == '}':
-        inc pos
-        break
-      let k = value(s, pos)
-      skipWs(s, pos)
-      if pos >= s.len or s[pos] != ':':
-        fail(s, pos, "dict entry needs ':' after its key")
+      if s[pos] != '}':
+        fail(s, pos, "'{:' is the empty dictionary; expected '}'")
       inc pos
-      let v = value(s, pos)
-      entries.add (k, v)
-    try:
-      dict(entries)
-    except ValueError:
-      fail(s, pos, "duplicate dict key")
-  of '#':
-    if pos + 1 >= s.len:
-      fail(s, pos, "lone #")
-    case s[pos + 1]
-    of '{':
-      pos += 2
-      var els: seq[Value]
-      while true:
-        skipWs(s, pos)
-        if pos >= s.len:
-          fail(s, pos, "unclosed #{")
-        if s[pos] == '}':
-          inc pos
-          break
-        els.add value(s, pos)
-      let v = values.set(els)
-      if v.elements.len != els.len:
-        fail(s, pos, "duplicate set member")
-      v
-    of '[':
-      pos += 2
-      var hex: string
-      while true:
-        if pos >= s.len:
-          fail(s, pos, "unclosed #[")
-        let c = s[pos]
-        if c == ']':
-          inc pos
-          break
-        elif c in Ws:
-          inc pos
-        else:
-          hex.add c # validated pairwise below
-          inc pos
-      if hex.len mod 2 != 0:
-        fail(s, pos, "bytes need an even count of hex digits")
-      var bs = newSeq[byte](hex.len div 2)
-      for i in 0 ..< bs.len:
-        bs[i] = nibble(s, pos, hex[2 * i]) shl 4 or nibble(s, pos, hex[2 * i + 1])
-      bytes(bs)
+      dict(newSeq[(Value, Value)]())
     else:
-      fail(s, pos, "expected [ or { after #")
+      let first = value(s, pos)
+      skipWs(s, pos)
+      if pos >= s.len:
+        fail(s, pos, "unclosed {")
+      if s[pos] == ':':
+        inc pos
+        var entries = @[(first, value(s, pos))]
+        while true:
+          skipWs(s, pos)
+          if pos >= s.len:
+            fail(s, pos, "unclosed {")
+          if s[pos] == '}':
+            inc pos
+            break
+          let k = value(s, pos)
+          skipWs(s, pos)
+          if pos >= s.len or s[pos] != ':':
+            fail(s, pos, "dict entry needs ':' after its key")
+          inc pos
+          entries.add (k, value(s, pos))
+        try:
+          dict(entries)
+        except ValueError:
+          fail(s, pos, "duplicate dict key")
+      else:
+        var els = @[first]
+        while true:
+          skipWs(s, pos)
+          if pos >= s.len:
+            fail(s, pos, "unclosed {")
+          if s[pos] == '}':
+            inc pos
+            break
+          if s[pos] == ':':
+            fail(s, pos, "':' in a set; a dictionary is {key: value}")
+          els.add value(s, pos)
+        let v = values.set(els)
+        if v.elements.len != els.len:
+          fail(s, pos, "duplicate set member")
+        v
   of '"':
     let raw = quotedScan(s, pos, '"')
     try:
@@ -191,18 +191,47 @@ func datum(s: string, pos: var int): Value =
       sym(raw)
     except InvalidUtf8Str:
       fail(s, pos, "malformed UTF-8 in symbol")
-  of ')', ']', '}', ':':
+  of ')', ']', '}', ':', '!':
     fail(s, pos, "unexpected " & s[pos])
   else:
     let start = pos
     while pos < s.len and s[pos] notin Delims:
       inc pos
     let tok = s[start ..< pos]
-    if tok[0] in {'0' .. '9'} or
-        (tok.len > 1 and tok[0] == '-' and tok[1] in {'0' .. '9'}):
-      if not isDecimal(tok):
+    if tok.len >= 2 and tok[0] == '0' and tok[1] == 'x':
+      # a bytestring: 0x then an even count of hex digits, '_' between
+      # digits as a visual separator
+      var hex: string
+      for i in 2 ..< tok.len:
+        let c = tok[i]
+        if c == '_':
+          if tok[i - 1] notin HexDigits or i + 1 >= tok.len or
+              tok[i + 1] notin HexDigits:
+            fail(s, start + i, "'_' sits between digits")
+        elif c in HexDigits:
+          hex.add c
+        else:
+          fail(s, start + i, "not a hex digit in bytes: " & c)
+      if hex.len mod 2 != 0:
+        fail(s, start, "bytes need an even count of hex digits")
+      var bs = newSeq[byte](hex.len div 2)
+      for i in 0 ..< bs.len:
+        bs[i] = nibble(s, start, hex[2 * i]) shl 4 or nibble(s, start, hex[2 * i + 1])
+      bytes(bs)
+    elif tok[0] in Digits or
+        (tok.len > 1 and tok[0] == '-' and tok[1] in Digits):
+      var digits: string
+      for i in 0 ..< tok.len:
+        let c = tok[i]
+        if c == '_':
+          if tok[i - 1] notin Digits or i + 1 >= tok.len or
+              tok[i + 1] notin Digits:
+            fail(s, start + i, "'_' sits between digits")
+        else:
+          digits.add c
+      if not isDecimal(digits):
         fail(s, start, "not a canonical number: " & tok)
-      num(tok)
+      num(digits)
     elif tok == "nil":
       nilValue()
     else:
@@ -215,17 +244,33 @@ func value(s: string, pos: var int): Value =
   skipWs(s, pos)
   if pos >= s.len:
     fail(s, pos, "expected a value")
-  if s[pos] == '`':
+  var prefixMarked = false
+  if s[pos] == '!':
+    # a mark in front belongs to a frame; it must touch the bracket
     inc pos
     if pos >= s.len:
       fail(s, pos, "mark with no value")
-    if s[pos] == '`':
+    if s[pos] == '!':
       fail(s, pos, "repeated mark")
     if s[pos] in Ws or s[pos] == ';':
       fail(s, pos, "mark separated from its value")
-    mark(datum(s, pos))
-  else:
-    datum(s, pos)
+    if s[pos] notin {'(', '[', '{'}:
+      fail(s, pos, "only a frame is marked in front; an atom is marked behind: x!")
+    prefixMarked = true
+  let frame = s[pos] in {'(', '[', '{'}
+  var v = datum(s, pos)
+  if pos < s.len and s[pos] == '!':
+    # a mark behind belongs to an atom; it must touch the atom and
+    # end at a delimiter
+    if frame:
+      fail(s, pos, "a frame is marked in front: !(…)")
+    inc pos
+    if pos < s.len and s[pos] notin Delims:
+      fail(s, pos, "a marked atom ends at a delimiter")
+    v = mark(v)
+  elif prefixMarked:
+    v = mark(v)
+  v
 
 func readDocument*(text: string): seq[Value] =
   ## read many values

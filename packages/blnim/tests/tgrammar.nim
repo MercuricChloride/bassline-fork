@@ -15,19 +15,19 @@ const DialectNames = [
 ]
 
 const spelledDialect = readValue"""
-`(grammar {
-  start: `digest
-  digest: (digest `(sym) `(bytes))
-  fileinfo: {name: `(? `(text)), zip: `(? `(or gzip tarball))}
-  file: (file `(bytes) `(or nil `fileinfo))
-  directory: (directory #{`(* `fsentry)} `(or nil `fileinfo))
-  fsentry: `(or `file `directory)
-  keypair: (keypair eddsa-blake2b `(bytes 32) `(bytes 32))
-  signature: (signature eddsa-blake2b `(bytes 64) `(bytes 32))
-  signed: (signed `(anymark `(any)) `signature)
-  dec: (dec `(num) `(num))
-  big: (big `(num))
-  pinned: {algo: `(sym), content-type: `(? `(sym))}
+!(grammar {
+  start: digest!
+  digest: (digest !(sym) !(bytes))
+  fileinfo: {name: !(? !(text)) zip: !(? !(or gzip tarball))}
+  file: (file !(bytes) !(or nil fileinfo!))
+  directory: (directory {!(* fsentry!)} !(or nil fileinfo!))
+  fsentry: !(or file! directory!)
+  keypair: (keypair eddsa-blake2b !(bytes 32) !(bytes 32))
+  signature: (signature eddsa-blake2b !(bytes 64) !(bytes 32))
+  signed: (signed !(anymark !(any)) signature!)
+  dec: (dec !(num) !(num))
+  big: (big !(num))
+  pinned: {algo: !(sym) content-type: !(? !(sym))}
 })
 """
 
@@ -57,21 +57,21 @@ let
 suite "the dialect shapes":
   test "classification freezes the corpus":
     var g = dialects()
-    check g.classify(fileV, DialectNames) == @["file", "fsentry"]
-    check g.classify(fileFullV, DialectNames) == @["file", "fsentry"]
-    check g.classify(fileInfoV, DialectNames) == @["fileinfo"]
-    check g.classify(dict(@[]), DialectNames) == @["fileinfo"]
-    check g.classify(dirV, DialectNames) == @["directory", "fsentry"]
-    check g.classify(nestedDirV, DialectNames) == @["directory", "fsentry"]
-    check g.classify(digestV, DialectNames) == @["digest"]
-    check g.classify(keypairV, DialectNames) == @["keypair"]
-    check g.classify(signatureV, DialectNames) == @["signature"]
-    check g.classify(signedV, DialectNames) == @["signed"]
-    check g.classify(decV, DialectNames) == @["dec"]
-    check g.classify(bigV, DialectNames) == @["big"]
-    check g.classify(pinnedV, DialectNames) == @["pinned"]
-    check g.classify(greeting, DialectNames).len == 0
-    check g.classify(num"42", DialectNames).len == 0
+    check g.readings(fileV, DialectNames).accepted == @["file", "fsentry"]
+    check g.readings(fileFullV, DialectNames).accepted == @["file", "fsentry"]
+    check g.readings(fileInfoV, DialectNames).accepted == @["fileinfo"]
+    check g.readings(dict(@[]), DialectNames).accepted == @["fileinfo"]
+    check g.readings(dirV, DialectNames).accepted == @["directory", "fsentry"]
+    check g.readings(nestedDirV, DialectNames).accepted == @["directory", "fsentry"]
+    check g.readings(digestV, DialectNames).accepted == @["digest"]
+    check g.readings(keypairV, DialectNames).accepted == @["keypair"]
+    check g.readings(signatureV, DialectNames).accepted == @["signature"]
+    check g.readings(signedV, DialectNames).accepted == @["signed"]
+    check g.readings(decV, DialectNames).accepted == @["dec"]
+    check g.readings(bigV, DialectNames).accepted == @["big"]
+    check g.readings(pinnedV, DialectNames).accepted == @["pinned"]
+    check g.readings(greeting, DialectNames).accepted.len == 0
+    check g.readings(num"42", DialectNames).accepted.len == 0
 
   test "the start rule speaks for the grammar":
     var g = dialects()
@@ -354,7 +354,7 @@ suite "composition":
         "big", "dec", "file", "start", "digest", "pinned", "signed", "fsentry",
         "keypair", "fileinfo", "directory", "signature",
       ]
-    check g.classify(fileV, g.ruleNames) == @["file", "fsentry"]
+    check g.readings(fileV, g.ruleNames).accepted == @["file", "fsentry"]
 
   test "a grammar is a value: snapshot, growth, reset":
     var g = dialects()
@@ -558,19 +558,19 @@ suite "the grammar dialect":
     check not g.matches("d", dict(@[(sym"k", num"1")]))
     check not g.matches("d", dict(@[]))
     var meta = load(grammarGrammar())
-    check meta.matches(readValue"`(grammar {d: {k: (? 1)}})")
+    check meta.matches(readValue"!(grammar {d: {k: (? 1)}})")
     # an inert (lit …) key is a template, not a literal escape; load
     # and the self-description refuse the same spelling
     expect GrammarError:
-      discard readGrammar"{d: {(lit `go): `(num)}}"
-    check not meta.matches(readValue"`(grammar {d: {(lit `go): `(num)}})")
+      discard readGrammar"{d: {(lit go!): !(num)}}"
+    check not meta.matches(readValue"!(grammar {d: {(lit go!): !(num)}})")
     # an inert (* …) set member is neither a literal nor a run
     expect GrammarError:
-      discard readGrammar"{s: #{(* `(num))}}"
-    check not meta.matches(readValue"`(grammar {s: #{(* `(num))}})")
+      discard readGrammar"{s: {(* !(num))}}"
+    check not meta.matches(readValue"!(grammar {s: {(* !(num))}})")
 
   test "a startless table loads and refuses the no-name question":
-    var g = readGrammar"{a: `(num)}"
+    var g = readGrammar"{a: !(num)}"
     check g.matches("a", num"1")
     check g.judge("a", num"1") == vAccepted
     expect GrammarError:
@@ -583,9 +583,9 @@ suite "the grammar dialect":
     # everywhere it is referenced — so the two polarities of one shape
     # factor through a sequence rule and frame operators over it
     var g = readGrammar"""{
-      greetbody: `(cat greet `(text))
-      inertgreet: `(record `greetbody)
-      markedgreet: `(marked `(record `greetbody))
+      greetbody: !(cat greet !(text))
+      inertgreet: !(record greetbody!)
+      markedgreet: !(marked !(record greetbody!))
     }"""
     let v = record(sym"greet", text"hi")
     check g.matches("inertgreet", v)
@@ -593,7 +593,7 @@ suite "the grammar dialect":
     check g.matches("markedgreet", mark(v))
     check not g.matches("markedgreet", v)
     expect GrammarError: # and through a bare reference it stays refused
-      discard readGrammar"{a: `(num), b: `(marked `a)}"
+      discard readGrammar"{a: !(num) b: !(marked a!)}"
 
   test "parity settles per pattern, not per unfolding":
     # p = star(group(p, p)) doubles the unfolded tree each level while
@@ -610,7 +610,7 @@ suite "the grammar dialect":
     check g.judge(dict(@[(sym"a", num"1")])) == vRefused
 
   test "readGrammar wraps a bare rule table":
-    var g = readGrammar"{start: (point `(num) `(num))}"
+    var g = readGrammar"{start: (point !(num) !(num))}"
     check g.matches(record(sym"point", num"1", num"2"))
     check not g.matches(record(sym"point", num"1", text"x"))
     expect GrammarError: # anything but a dictionary refuses

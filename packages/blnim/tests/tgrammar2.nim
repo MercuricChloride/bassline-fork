@@ -6,15 +6,15 @@ import ./gen
 # ================ THE SHAPES THESE SUITES USE ================
 
 const spelled = """{
-  start: `(or `point `tag)
-  point: (point `(num) `(num))
-  tag: (tag `(sym))
-  digest: (digest `(sym) `(bytes 32))
-  info: {name: `(? `(text)) algo: `(sym)}
-  tree: `(or `(list `(* `tree)) `(num))
-  members: #{a b `(* `(sym))}
-  opened: `(open (point `(num) `(num)))
-  lanes: `(marked `(record greet `(text)))
+  start: !(or point! tag!)
+  point: (point !(num) !(num))
+  tag: (tag !(sym))
+  digest: (digest !(sym) !(bytes 32))
+  info: {name: !(? !(text)) algo: !(sym)}
+  tree: !(or !(list !(* tree!)) !(num))
+  members: {a b !(* !(sym))}
+  opened: !(open (point !(num) !(num)))
+  lanes: !(marked !(record greet !(text)))
 }"""
 
 proc shapes(): Grammar =
@@ -89,15 +89,15 @@ suite "unparsing":
   test "identity is of the definition, so the spelling is not the name":
     var g = shapes()
     # same language, different definition: unparsing is for reading
-    check g.unparse() != readValue("`(grammar " & spelled & ")")
+    check g.unparse() != readValue("!(grammar " & spelled & ")")
 
   test "empty and never have spellings":
     var g = initGrammar()
     g.rule "nothing", g.never()
     g.rule "silence", g.empty()
     g.seal()
-    check g.unparse(g.rulePattern("nothing")) == readValue"`(or)"
-    check g.unparse(g.rulePattern("silence")) == readValue"`(cat)"
+    check g.unparse(g.rulePattern("nothing")) == readValue"!(or)"
+    check g.unparse(g.rulePattern("silence")) == readValue"!(cat)"
     var h = load(g.unparse())
     check h.isEmpty("nothing")
     check not h.isEmpty("silence")
@@ -107,7 +107,7 @@ suite "unparsing":
     var g = initGrammar()
     g.rule "dead", g.kindOf({bNum}, len = 0)
     g.seal()
-    check g.unparse(g.rulePattern("dead")) == readValue"`(num 0)"
+    check g.unparse(g.rulePattern("dead")) == readValue"!(num 0)"
     check load(g.unparse()).isEmpty("dead")
 
   test "a frame kind a length excluded is not widened back":
@@ -121,11 +121,11 @@ suite "unparsing":
   test "an inert frame literal comes back as a template, and means the same":
     # the dialect's own rule: where both readings coincide, writing out
     # picks the shorter one, so it settles on the second round
-    var g = readGrammar"{start: `(lit #{})}"
+    var g = readGrammar"{start: !(lit {})}"
     let once = g.unparse()
     var h = load(once)
-    check once == readValue"`(grammar {start: #{}})"
-    check h.unparse() == readValue"`(grammar {start: `(set `(cat))})"
+    check once == readValue"!(grammar {start: {}})"
+    check h.unparse() == readValue"!(grammar {start: !(set !(cat))})"
     check load(h.unparse()).unparse() == h.unparse()
     for v in [values.set(newSeq[Value]()), values.set(sym"a"), list()]:
       check g.matches(v) == h.matches(v)
@@ -171,7 +171,7 @@ suite "explanation":
     check m.isSome
     check m.get.path == @[2]
     check m.get.found.get == text"x"
-    check m.get.expected == @[readValue"`(num)"]
+    check m.get.expected == @[readValue"!(num)"]
     check not m.get.complete
 
   test "running out is a miss with nothing found":
@@ -179,7 +179,7 @@ suite "explanation":
     let m = g.explain("point", record(sym"point", num"1"))
     check m.isSome
     check m.get.found.isNone
-    check m.get.expected == @[readValue"`(num)"]
+    check m.get.expected == @[readValue"!(num)"]
 
   test "blame descends only when one frame could have been meant":
     var g = shapes()
@@ -196,13 +196,13 @@ suite "explanation":
   test "a nested miss carries the whole path":
     var g =
       readGrammar"""{
-      start: (outer (inner `(num) `(sym)))
+      start: (outer (inner !(num) !(sym)))
     }"""
     let m = g.explain(record(sym"outer", record(sym"inner", num"1", num"2")))
     check m.isSome
     check m.get.path == @[1, 2]
     check m.get.found.get == num"2"
-    check m.get.expected == @[readValue"`(sym)"]
+    check m.get.expected == @[readValue"!(sym)"]
 
   test "a shape that could have ended says so":
     var g = shapes()
@@ -286,9 +286,9 @@ suite "emptiness":
   test "a length nothing satisfies is a language nothing satisfies":
     var g =
       readGrammar"""{
-      zero: `(num 0)
-      one: `(num 1)
-      nil-with-payload: `(text 0)
+      zero: !(num 0)
+      one: !(num 1)
+      nil-with-payload: !(text 0)
     }"""
     check g.isEmpty("zero")
     check not g.isEmpty("one")
@@ -306,9 +306,9 @@ suite "emptiness":
   test "emptiness travels through references and frames":
     var g =
       readGrammar"""{
-      a: `(list `b)
-      b: `(cat `(num 0) `(num))
-      c: `(or `b `(num))
+      a: !(list b!)
+      b: !(cat !(num 0) !(num))
+      c: !(or b! !(num))
     }"""
     check g.isEmpty("a")
     check g.isEmpty("b")
@@ -317,15 +317,15 @@ suite "emptiness":
   test "lint names the rule and shows what was written":
     var g =
       readGrammar"""{
-      start: `(or `(num) `(num 0))
-      dead: `(num 0)
+      start: !(or !(num) !(num 0))
+      dead: !(num 0)
     }"""
     let found = g.lint()
     check found.len == 2
     check found[0].rule == "dead"
     check found[0].reason == "describes no value"
     check found[1].rule == "start"
-    check found[1].pattern == readValue"`(num 0)"
+    check found[1].pattern == readValue"!(num 0)"
 
   test "a healthy grammar lints clean":
     var g = shapes()
@@ -361,13 +361,13 @@ suite "construction":
           check decode(encode(v.get)) == v.get
 
   test "an empty rule builds nothing":
-    var g = readGrammar"{start: `(num 0)}"
+    var g = readGrammar"{start: !(num 0)}"
     var rng = initRand(1)
     check g.witness("start").isNone
     check g.generate("start", rng, 9).isNone
 
   test "a rule that describes a sequence describes no single value":
-    var g = readGrammar"{start: `(cat `(num) `(num))}"
+    var g = readGrammar"{start: !(cat !(num) !(num))}"
     check g.witness("start").isNone
 
   test "the smallest value is the same value every time":
@@ -380,9 +380,9 @@ suite "construction":
     # order puts them, which is not where the pattern spelled them
     var g =
       readGrammar"""{
-      opendict: `(open {algo: `(sym)})
-      openset: `(open #{a b})
-      quantified: `(dict `(* `(sym) `(num)))
+      opendict: !(open {algo: !(sym)})
+      openset: !(open {a b})
+      quantified: !(dict !(* !(sym) !(num)))
     }"""
     var rng = initRand(4)
     for name in ["opendict", "openset", "quantified"]:
@@ -394,7 +394,7 @@ suite "construction":
           check decode(encode(v.get)) == v.get
 
   test "recursion through frames terminates":
-    var g = readGrammar"{start: `(or `(list `(* `start)) `(num))}"
+    var g = readGrammar"{start: !(or !(list !(* start!)) !(num))}"
     var rng = initRand(11)
     for size in [0, 5, 25, 60]:
       for _ in 0 .. 20:
@@ -489,8 +489,8 @@ suite "properties over generated grammars":
 
 suite "counterexamples":
   test "a wider shape produces what a narrower one refuses":
-    var wide = readGrammar"{start: `(or (point `(num) `(num)) (tag `(sym)))}"
-    var narrow = readGrammar"{start: (point `(num) `(num))}"
+    var wide = readGrammar"{start: !(or (point !(num) !(num)) (tag !(sym)))}"
+    var narrow = readGrammar"{start: (point !(num) !(num))}"
     var rng = initRand(3)
     let found = wide.counterexamples("start", narrow, "start", rng, tries = 40)
     check found.len > 0
@@ -499,14 +499,14 @@ suite "counterexamples":
       check not narrow.matches(v)
 
   test "a narrower shape produces nothing against a wider one":
-    var wide = readGrammar"{start: `(or (point `(num) `(num)) (tag `(sym)))}"
-    var narrow = readGrammar"{start: (point `(num) `(num))}"
+    var wide = readGrammar"{start: !(or (point !(num) !(num)) (tag !(sym)))}"
+    var narrow = readGrammar"{start: (point !(num) !(num))}"
     var rng = initRand(3)
     check narrow.counterexamples("start", wide, "start", rng, tries = 60).len == 0
 
   test "openness only ever widens":
-    var closed = readGrammar"{start: (point `(num) `(num))}"
-    var opened = readGrammar"{start: `(open (point `(num) `(num)))}"
+    var closed = readGrammar"{start: (point !(num) !(num))}"
+    var opened = readGrammar"{start: !(open (point !(num) !(num)))}"
     var rng = initRand(8)
     check closed.counterexamples("start", opened, "start", rng, tries = 60).len == 0
     check opened.counterexamples("start", closed, "start", rng, tries = 60).len > 0
@@ -538,8 +538,8 @@ suite "counterexamples":
 
   test "silence is not a proof":
     # two disjoint shapes, but the first builds nothing, so nothing speaks
-    var nothing = readGrammar"{start: `(num 0)}"
-    var other = readGrammar"{start: `(text)}"
+    var nothing = readGrammar"{start: !(num 0)}"
+    var other = readGrammar"{start: !(text)}"
     var rng = initRand(1)
     check nothing.counterexamples("start", other, "start", rng, tries = 20).len == 0
 

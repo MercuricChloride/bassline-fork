@@ -1,6 +1,6 @@
 {.experimental: "strictFuncs".}
 
-from std/strutils import join, toHex
+from std/strutils import join, toHex, toLowerAscii
 import std/sequtils
 import ../core/values
 import ./read
@@ -12,32 +12,36 @@ func escaped(s: string, q: char): string =
     result.add c
 
 func `$`*(v: Value): string =
-  let prefix = if v.marked: "`" else: ""
-
-  case v.kind
-  of bNil:
-    prefix & "nil"
-  of bNum:
-    prefix & $v.num
-  of bSym:
-    let name = $v.text
-    if isBareSpelling(name):
-      prefix & name
-    else:
-      prefix & "'" & escaped(name, '\'') & "'"
-  of bText:
-    prefix & "\"" & escaped($v.text, '"') & "\""
-  of bBytes:
-    prefix & "#[" & v.bytes.mapIt($it.toHex).join & "]"
-  of bList:
-    let items = v.items.mapIt($it).join(" ")
-    prefix & "[" & items & "]"
-  of bRecord:
-    let items = v.items.mapIt($it).join(" ")
-    prefix & "(" & items & ")"
-  of bSet:
-    let elements = v.elements.mapIt($it).join(" ")
-    prefix & "#{" & elements & "}"
-  of bDict:
-    let entries = v.entries.mapIt($it[0] & ": " & $it[1]).join(" ")
-    prefix & "{" & entries & "}"
+  let core =
+    case v.kind
+    of bNil:
+      "nil"
+    of bNum:
+      $v.num
+    of bSym:
+      let name = $v.text
+      if isBareSpelling(name):
+        name
+      else:
+        "'" & escaped(name, '\'') & "'"
+    of bText:
+      "\"" & escaped($v.text, '"') & "\""
+    of bBytes:
+      "0x" & v.bytes.mapIt(it.toHex).join.toLowerAscii
+    of bList:
+      "[" & v.items.mapIt($it).join(" ") & "]"
+    of bRecord:
+      "(" & v.items.mapIt($it).join(" ") & ")"
+    of bSet:
+      "{" & v.elements.mapIt($it).join(" ") & "}"
+    of bDict:
+      if v.entries.len == 0:
+        "{:}"
+      else:
+        "{" & v.entries.mapIt($it[0] & ": " & $it[1]).join(" ") & "}"
+  if not v.marked:
+    core
+  elif v.isFrame:
+    "!" & core
+  else:
+    core & "!"

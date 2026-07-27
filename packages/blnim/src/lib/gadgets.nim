@@ -13,11 +13,6 @@ type
     q: Deque[Job]
     busy: bool
 
-template defSend*(procName, body: untyped) =
-  ## a named Send with the value injected as `it`
-  proc procName(it {.inject.}: sink Value): void =
-    body
-
 template sendIt*(body: untyped): Send =
   ## an anonymous Send with the value injected as `it`
   (
@@ -184,9 +179,9 @@ when isMainModule:
   let gr = new Grammar
   gr[] =
     readGrammar"""{
-    point: [`(num) `(num)]
-    triple: ( `(any) `(any) `(any) )
-    tag: `(sym)
+    point: [!(num) !(num)]
+    triple: ( !(any) !(any) !(any) )
+    tag: !(sym)
   }"""
   let router = route(
     gr,

@@ -42,14 +42,43 @@
 ## instead of exhausting the stack. Value depth is the decoder's
 ## boundary, as before.
 
-import std/[algorithm, random, sequtils, strutils, tables]
+import std/[algorithm, random, sequtils, strutils, hashes, tables]
 import ../core
-import ./[hash, read]
+import ./read
 
 type
-  PatId* = int32
-  RuleId* = int32
+  PatId* = distinct int32
+  RuleId = distinct int32
 
+func `==`*(a, b: PatId): bool {.borrow.}
+func `<`(a, b: PatId): bool {.borrow.}
+func hash(a: PatId): Hash {.borrow.}
+
+func `==`(a, b: RuleId): bool {.borrow.}
+func hash(a: RuleId): Hash {.borrow.}
+
+const
+  NoPat = PatId(-1)
+  NoRule = RuleId(-1)
+
+template typedIndex(Id: typedesc) =
+  ## seqs holding per-pattern / per-rule facts are indexed by the typed
+  ## id, never by a bare integer
+  func `[]`[T](s: seq[T], i: Id): lent T =
+    s[int(i)]
+
+  func `[]`[T](s: var seq[T], i: Id): var T =
+    s[int(i)]
+
+  func `[]=`[T](s: var seq[T], i: Id, x: sink T) =
+    s[int(i)] = x
+
+typedIndex(PatId)
+typedIndex(RuleId)
+
+# ================ PATTERNS ================
+
+type
   MarkReq* = enum
     mrInert
     mrMarked
@@ -87,44 +116,6 @@ type
     of pRef:
       rule: RuleId
 
-  Verdict* = enum
-    vAccepted
-    vRejected
-    vRefused
-
-  GrammarError* = object of CatchableError ## a malformed grammar, reported at seal
-
-  BudgetError* = object of CatchableError
-    ## the judgment budget was spent before an answer
-
-  Grammar* = object
-    pats: seq[Pattern]
-    ids: Table[Pattern, PatId]
-    nul: seq[bool] # per pattern: admits the empty sequence
-    dep: seq[int32] # per pattern: structural nesting depth
-    rules: seq[PatId] # RuleId -> pattern, NoPat until defined
-    names: seq[string]
-    ruleIds: Table[string, RuleId]
-    ruleNul: seq[bool]
-    startRule: RuleId
-    sealed: bool
-    steps: int # remaining budget while judging
-    jdepth: int # judgment nesting while judging
-
-const
-  NoPat = PatId(-1)
-  NoRule* = RuleId(-1)
-  AllKinds* = {low(BlKind) .. high(BlKind)}
-  DefaultBudget* = 1_000_000
-  MaxPatternDepth* = 1024
-    ## structural nesting a pattern may reach; building past it is a
-    ## `GrammarError`, a residual reaching it while judging refuses
-  MaxJudgeDepth* = 800
-    ## judgment nesting before refusal; sized so judging fits small
-    ## thread stacks and debug call-depth tracking with room to spare
-
-# ================ PATTERN IDENTITY ================
-
 func `==`(a, b: Pattern): bool =
   if a.kind != b.kind:
     return false
@@ -144,41 +135,78 @@ func `==`(a, b: Pattern): bool =
   of pRef:
     a.rule == b.rule
 
-func hash(p: Pattern): Hash =
-  # discriminator plus the active branch, so it tracks the type
-  var h: Hash = 0
-  for _, f in p.fieldPairs:
-    h = h !& hash(f)
-  !$h
+# ================ THE POOL ================
+# One node per distinct pattern, holding the pattern and the two facts
+# every walk needs: whether it admits the empty sequence and how deep
+# it nests. One record per rule likewise. Ids are indices into these.
 
-# ================ POOL ================
+type
+  GrammarError* = object of CatchableError
+    ## a malformed grammar, reported at seal
 
-func nulOf(g: Grammar, p: Pattern): bool =
+  BudgetError* = object of CatchableError
+    ## the judgment budget was spent before an answer
+
+  PatNode = object
+    pat: Pattern
+    nullable: bool # admits the empty sequence
+    depth: int32 # structural nesting depth
+
+  Rule = object
+    name: string
+    pat: PatId # NoPat until defined
+    nullable: bool
+
+  Grammar* = object
+    nodes: seq[PatNode]
+    ids: Table[Pattern, PatId]
+    rules: seq[Rule]
+    byName: Table[string, RuleId]
+    startRule: RuleId
+    sealed: bool
+
+const
+  AllKinds* = {low(BlKind) .. high(BlKind)}
+  DefaultBudget* = 1_000_000
+  MaxPatternDepth* = 1024
+    ## structural nesting a pattern may reach; building past it is a
+    ## `GrammarError`, a residual reaching it while judging refuses
+  MaxJudgeDepth* = 800
+    ## judgment nesting before refusal; sized so judging fits small
+    ## thread stacks and debug call-depth tracking with room to spare
+
+func `[]`(g: Grammar, p: PatId): lent Pattern =
+  g.nodes[p].pat
+
+func nullable(g: Grammar, p: PatId): bool =
+  g.nodes[p].nullable
+
+func nullableOf(g: Grammar, p: Pattern): bool =
   case p.kind
   of pEmpty, pStar:
     true
   of pNotAllowed, pKind, pLit, pFrame:
     false
   of pChoice:
-    g.nul[p.left] or g.nul[p.right]
+    g.nullable(p.left) or g.nullable(p.right)
   of pGroup:
-    g.nul[p.left] and g.nul[p.right]
+    g.nullable(p.left) and g.nullable(p.right)
   of pRef:
-    g.ruleNul[p.rule]
+    g.rules[p.rule].nullable
 
-func depOf(g: Grammar, p: Pattern): int32 =
+func depthOf(g: Grammar, p: Pattern): int32 =
   case p.kind
   of pEmpty, pNotAllowed, pKind, pLit, pRef:
     1
   of pChoice, pGroup:
-    1 + max(g.dep[p.left], g.dep[p.right])
+    1 + max(g.nodes[p.left].depth, g.nodes[p.right].depth)
   of pStar:
-    1 + g.dep[p.body]
+    1 + g.nodes[p.body].depth
   of pFrame:
-    1 + g.dep[p.children]
+    1 + g.nodes[p.children].depth
 
 func intern(g: var Grammar, p: Pattern): PatId =
-  let d = g.depOf(p)
+  let d = g.depthOf(p)
   if d > MaxPatternDepth:
     # checked before the table is touched, so refusal leaves no orphan
     if g.sealed:
@@ -186,15 +214,16 @@ func intern(g: var Grammar, p: Pattern): PatId =
     raise newException(
       GrammarError, "pattern nesting exceeds MaxPatternDepth (" & $MaxPatternDepth & ")"
     )
-  let fresh = PatId(g.pats.len)
+  let fresh = PatId(g.nodes.len)
   result = g.ids.mgetOrPut(p, fresh)
   if result == fresh:
-    g.nul.add g.nulOf(p)
-    g.dep.add d
-    g.pats.add p
+    g.nodes.add PatNode(pat: p, nullable: g.nullableOf(p), depth: d)
 
 func initGrammar*(): Grammar =
   Grammar(startRule: NoRule)
+func patCount*(g: Grammar): int =
+  ## pool size: how much automaton this grammar has learned
+  g.nodes.len
 
 # ================ CONSTRUCTORS ================
 # Smart constructors normalize on the way in: choice is ACI with
@@ -208,10 +237,10 @@ func never*(g: var Grammar): PatId =
   g.intern Pattern(kind: pNotAllowed)
 
 func addAlts(g: Grammar, p: PatId, acc: var seq[PatId]) =
-  case g.pats[p].kind
+  case g[p].kind
   of pChoice:
-    g.addAlts(g.pats[p].left, acc)
-    g.addAlts(g.pats[p].right, acc)
+    g.addAlts(g[p].left, acc)
+    g.addAlts(g[p].right, acc)
   of pNotAllowed:
     discard
   else:
@@ -231,9 +260,9 @@ func choice*(g: var Grammar, alts: varargs[PatId]): PatId =
     # the judgment hot path: units and echoes answer with an existing
     # id, exact because pooled choices are already ACI-normal
     let (a, b) = (alts[0], alts[1])
-    if a == b or g.pats[a].kind == pNotAllowed:
+    if a == b or g[a].kind == pNotAllowed:
       return b
-    if g.pats[b].kind == pNotAllowed:
+    if g[b].kind == pNotAllowed:
       return a
   var ops: seq[PatId]
   for a in alts:
@@ -248,9 +277,9 @@ func choice*(g: var Grammar, alts: varargs[PatId]): PatId =
 
 func addParts(g: Grammar, p: PatId, acc: var seq[PatId]): bool =
   ## false when the whole group is annihilated
-  case g.pats[p].kind
+  case g[p].kind
   of pGroup:
-    g.addParts(g.pats[p].left, acc) and g.addParts(g.pats[p].right, acc)
+    g.addParts(g[p].left, acc) and g.addParts(g[p].right, acc)
   of pNotAllowed:
     false
   of pEmpty:
@@ -265,9 +294,9 @@ func group*(g: var Grammar, parts: varargs[PatId]): PatId =
     # existing id, exact because pooled groups are already right-nested
     # with interned suffixes
     let (a, b) = (parts[0], parts[1])
-    if g.pats[a].kind == pNotAllowed or g.pats[b].kind == pEmpty:
+    if g[a].kind == pNotAllowed or g[b].kind == pEmpty:
       return a
-    if g.pats[b].kind == pNotAllowed or g.pats[a].kind == pEmpty:
+    if g[b].kind == pNotAllowed or g[a].kind == pEmpty:
       return b
   var ops: seq[PatId]
   for p in parts:
@@ -280,7 +309,7 @@ func group*(g: var Grammar, parts: varargs[PatId]): PatId =
     result = g.intern Pattern(kind: pGroup, left: ops[i], right: result)
 
 func star*(g: var Grammar, p: PatId): PatId =
-  case g.pats[p].kind
+  case g[p].kind
   of pEmpty, pNotAllowed:
     g.empty
   of pStar:
@@ -326,7 +355,7 @@ func restEntries*(g: var Grammar): PatId =
   ## any further dictionary entries
   g.star(g.entry(g.any(mrAny), g.any(mrAny)))
 
-func gapped*(g: var Grammar, gap: PatId, parts: openArray[PatId]): PatId =
+func gapped(g: var Grammar, gap: PatId, parts: openArray[PatId]): PatId =
   ## `parts` in order with `gap` interleaved at every position — the
   ## shape of openness for keyed frames, where unknowns sort anywhere
   var ps = @[gap]
@@ -403,50 +432,90 @@ func openSet*(g: var Grammar, members: openArray[Value]): PatId =
 func refTo*(g: var Grammar, name: string): PatId =
   ## a reference to the named rule; the rule may be defined later
   doAssert not g.sealed, "the grammar is sealed; references are fixed"
-  var r = g.ruleIds.getOrDefault(name, NoRule)
+  var r = g.byName.getOrDefault(name, NoRule)
   if r == NoRule:
     r = RuleId(g.rules.len)
-    g.rules.add NoPat
-    g.names.add name
-    g.ruleNul.add false
-    g.ruleIds[name] = r
+    g.rules.add Rule(name: name, pat: NoPat)
+    g.byName[name] = r
   g.intern Pattern(kind: pRef, rule: r)
 
 func rule*(g: var Grammar, name: string, p: PatId): PatId {.discardable.} =
   ## define the named rule; answers a reference to it
   doAssert not g.sealed, "the grammar is sealed; rules are fixed"
   result = g.refTo(name)
-  let r = g.pats[result].rule
-  if g.rules[r] != NoPat:
+  let r = g[result].rule
+  if g.rules[r].pat != NoPat:
     raise newException(GrammarError, "rule defined twice: " & name)
-  g.rules[r] = p
+  g.rules[r].pat = p
 
 func ruleNames*(g: Grammar): seq[string] =
   ## the rules this grammar defines, in definition order
-  g.names
+  for r in g.rules:
+    result.add r.name
 
 func rulePattern*(g: Grammar, name: string): PatId =
   ## the pattern a rule names, for the walks that take one
-  let r = g.ruleIds.getOrDefault(name, NoRule)
+  let r = g.byName.getOrDefault(name, NoRule)
   doAssert r != NoRule, "unknown rule: " & name
-  g.rules[r]
-
-func patCount*(g: Grammar): int =
-  ## pool size: how much automaton this grammar has learned
-  g.pats.len
+  g.rules[r].pat
 
 # ================ SEALING ================
+# The laws a grammar must satisfy before it may judge, and the blame
+# vocabulary their refusals speak with.
+
+func reaches(g: Grammar, root, target: PatId): bool =
+  ## does the tree under `root` contain `target`, expanding each rule once
+  var seenPat = newSeq[bool](g.nodes.len)
+  var seenRule = newSeq[bool](g.rules.len)
+  var stack = @[root]
+  while stack.len > 0:
+    let p = stack.pop
+    if p == target:
+      return true
+    if seenPat[p]:
+      continue
+    seenPat[p] = true
+    case g[p].kind
+    of pChoice, pGroup:
+      stack.add g[p].left
+      stack.add g[p].right
+    of pStar:
+      stack.add g[p].body
+    of pFrame:
+      stack.add g[p].children
+    of pRef:
+      let r = g[p].rule
+      if not seenRule[r] and g.rules[r].pat != NoPat:
+        seenRule[r] = true
+        stack.add g.rules[r].pat
+    else:
+      discard
+
+func blameRule(g: Grammar, p: PatId): RuleId =
+  ## the first rule whose pattern reaches `p`
+  for r in 0 ..< g.rules.len:
+    if g.reaches(g.rules[r].pat, p):
+      return RuleId(r)
+  NoRule
+
+func blame(g: Grammar, p: PatId): string =
+  ## the rule to name in an error message
+  let r = g.blameRule(p)
+  if r != NoRule:
+    " in rule '" & g.rules[r].name & "'"
+  else:
+    ""
 
 func levelRefs(g: Grammar, p: PatId, acc: var seq[RuleId]) =
   ## rules reachable without crossing a frame
-  case g.pats[p].kind
+  case g[p].kind
   of pChoice, pGroup:
-    g.levelRefs(g.pats[p].left, acc)
-    g.levelRefs(g.pats[p].right, acc)
+    g.levelRefs(g[p].left, acc)
+    g.levelRefs(g[p].right, acc)
   of pStar:
-    g.levelRefs(g.pats[p].body, acc)
+    g.levelRefs(g[p].body, acc)
   of pRef:
-    acc.add g.pats[p].rule
+    acc.add g[p].rule
   else:
     discard
 
@@ -466,7 +535,7 @@ func checkLevel(g: Grammar) =
   ## consuming never crossed a frame either.
   var edges = newSeq[seq[RuleId]](g.rules.len)
   for r in 0 ..< g.rules.len:
-    g.levelRefs(g.rules[r], edges[r])
+    g.levelRefs(g.rules[r].pat, edges[r])
   var color = newSeq[Color](g.rules.len)
   for root in 0 ..< g.rules.len:
     if color[root] != white:
@@ -485,7 +554,7 @@ func checkLevel(g: Grammar) =
         of grey:
           raise newException(
             GrammarError,
-            "same-level recursion through rule: " & g.names[s] &
+            "same-level recursion through rule: " & g.rules[s].name &
               "; recursion must cross a frame",
           )
         of black:
@@ -522,7 +591,8 @@ func parAdd(a, b: Par): Par =
 
 func parOf(g: Grammar, i: int, par: seq[Par], ruleP: seq[Par]): Par =
   ## one shallow step, children read from the settling arrays
-  case g.pats[i].kind
+  let p = g.nodes[i].pat
+  case p.kind
   of pEmpty:
     parEven
   of pNotAllowed:
@@ -530,82 +600,40 @@ func parOf(g: Grammar, i: int, par: seq[Par], ruleP: seq[Par]): Par =
   of pKind, pLit, pFrame:
     parOdd
   of pChoice:
-    parJoin(par[g.pats[i].left], par[g.pats[i].right])
+    parJoin(par[p.left], par[p.right])
   of pGroup:
-    parAdd(par[g.pats[i].left], par[g.pats[i].right])
+    parAdd(par[p.left], par[p.right])
   of pStar:
-    case par[g.pats[i].body]
+    case par[p.body]
     of parEven, parUnknown: parEven
     else: parMixed
   of pRef:
-    ruleP[g.pats[i].rule]
-
-func reaches(g: Grammar, root, target: PatId): bool =
-  ## does the tree under `root` contain `target`, expanding each rule once
-  var seenPat = newSeq[bool](g.pats.len)
-  var seenRule = newSeq[bool](g.rules.len)
-  var stack = @[root]
-  while stack.len > 0:
-    let p = stack.pop
-    if p == target:
-      return true
-    if seenPat[p]:
-      continue
-    seenPat[p] = true
-    case g.pats[p].kind
-    of pChoice, pGroup:
-      stack.add g.pats[p].left
-      stack.add g.pats[p].right
-    of pStar:
-      stack.add g.pats[p].body
-    of pFrame:
-      stack.add g.pats[p].children
-    of pRef:
-      let r = g.pats[p].rule
-      if not seenRule[r] and g.rules[r] != NoPat:
-        seenRule[r] = true
-        stack.add g.rules[r]
-    else:
-      discard
-
-func blameRule(g: Grammar, p: PatId): RuleId =
-  ## the first rule whose pattern reaches `p`
-  for r in 0 ..< g.rules.len:
-    if g.reaches(g.rules[r], p):
-      return RuleId(r)
-  NoRule
-
-func blame(g: Grammar, p: PatId): string =
-  ## the rule to name in an error message
-  let r = g.blameRule(p)
-  if r != NoRule:
-    " in rule '" & g.names[r] & "'"
-  else:
-    ""
+    ruleP[p.rule]
 
 func checkParity(g: Grammar) =
   ## the dictionary parity law: patterns in dictionary position admit an
   ## even count of values on every path, or keys meet value patterns.
   ## Per-pattern parities to a fixpoint like nullability — the pool is a
   ## DAG, and walking it as a tree re-walks every shared subtree
-  var par = newSeq[Par](g.pats.len)
+  var par = newSeq[Par](g.nodes.len)
   var ruleP = newSeq[Par](g.rules.len)
   var changed = true
   while changed:
     changed = false
-    for i in 0 ..< g.pats.len:
+    for i in 0 ..< g.nodes.len:
       let p = g.parOf(i, par, ruleP)
       if p != par[i]:
         par[i] = p
         changed = true
     for r in 0 ..< g.rules.len:
-      let p = par[g.rules[r]]
+      let p = par[g.rules[r].pat]
       if p != ruleP[r]:
         ruleP[r] = p
         changed = true
-  for i in 0 ..< g.pats.len:
-    if g.pats[i].kind == pFrame and g.pats[i].frameKind == bDict:
-      if par[g.pats[i].children] in {parOdd, parMixed}:
+  for i in 0 ..< g.nodes.len:
+    let p = g.nodes[i].pat
+    if p.kind == pFrame and p.frameKind == bDict:
+      if par[p.children] in {parOdd, parMixed}:
         raise newException(
           GrammarError,
           "dictionary children may admit an odd count of values" & g.blame(PatId(i)) &
@@ -616,31 +644,43 @@ func seal*(g: var Grammar, start = "") =
   ## finish building: check rules, nullability, guardedness, parity.
   ## Judging an unsealed grammar is a defect.
   doAssert not g.sealed, "grammar already sealed"
-  for r in 0 ..< g.rules.len:
-    if g.rules[r] == NoPat:
-      raise newException(GrammarError, "rule never defined: " & g.names[r])
+  for r in g.rules:
+    if r.pat == NoPat:
+      raise newException(GrammarError, "rule never defined: " & r.name)
   if start != "":
-    g.startRule = g.ruleIds.getOrDefault(start, NoRule)
+    g.startRule = g.byName.getOrDefault(start, NoRule)
     if g.startRule == NoRule:
       raise newException(GrammarError, "start rule unknown: " & start)
   var changed = true
   while changed:
     changed = false
-    for i in 0 ..< g.pats.len:
-      let n = g.nulOf(g.pats[i])
-      if n != g.nul[i]:
-        g.nul[i] = n
+    for i in 0 ..< g.nodes.len:
+      let n = g.nullableOf(g.nodes[i].pat)
+      if n != g.nodes[i].nullable:
+        g.nodes[i].nullable = n
         changed = true
     for r in 0 ..< g.rules.len:
-      let n = g.nul[g.rules[r]]
-      if n != g.ruleNul[r]:
-        g.ruleNul[r] = n
+      let n = g.nullable(g.rules[r].pat)
+      if n != g.rules[r].nullable:
+        g.rules[r].nullable = n
         changed = true
   g.checkLevel()
   g.checkParity()
   g.sealed = true
 
 # ================ JUDGMENT ================
+# One judgment's quality-of-service state lives in a Judge, not in the
+# grammar: the pool learns from a judgment, nothing else stays behind.
+
+type
+  Judge = object
+    steps: int # remaining budget
+    depth: int # judgment nesting
+
+  Verdict* = enum
+    vAccepted
+    vRejected
+    vRefused
 
 func markOk(req: MarkReq, v: Value): bool =
   case req
@@ -651,72 +691,74 @@ func markOk(req: MarkReq, v: Value): bool =
   of mrAny:
     true
 
-func deriv(g: var Grammar, p: PatId, v: Value): PatId
+func deriv(g: var Grammar, j: var Judge, p: PatId, v: Value): PatId
 
-func admits(g: var Grammar, p: PatId, v: Value): bool =
-  case g.pats[p].kind
+func admits(g: var Grammar, j: var Judge, p: PatId, v: Value): bool =
+  case g[p].kind
   of pKind:
-    v.kind in g.pats[p].kinds and markOk(g.pats[p].req, v) and
-      (g.pats[p].len < 0 or v.payloadLength == g.pats[p].len)
+    v.kind in g[p].kinds and markOk(g[p].req, v) and
+      (g[p].len < 0 or v.payloadLength == g[p].len)
   of pLit:
-    v == g.pats[p].lit
+    v == g[p].lit
   of pFrame:
-    if v.kind != g.pats[p].frameKind or not markOk(g.pats[p].frameReq, v):
+    if v.kind != g[p].frameKind or not markOk(g[p].frameReq, v):
       return false
     # children spells every frame the matcher's way: record head then
     # fields, dict keys and values alternating, set members in order
     let dead = g.never
-    var res = g.pats[p].children
+    var res = g[p].children
     for c in v.children:
-      res = g.deriv(res, c)
+      res = g.deriv(j, res, c)
       if res == dead:
         return false
-    g.nul[res]
+    g.nullable(res)
   else:
     false # sequence units and combinators admit no single value here
 
-func deriv(g: var Grammar, p: PatId, v: Value): PatId =
+func deriv(g: var Grammar, j: var Judge, p: PatId, v: Value): PatId =
   ## the residual of `p` after consuming `v`
-  dec g.steps
-  if g.steps <= 0:
+  dec j.steps
+  if j.steps <= 0:
     raise newException(BudgetError, "judgment budget spent")
-  inc g.jdepth
-  if g.jdepth > MaxJudgeDepth:
+  inc j.depth
+  if j.depth > MaxJudgeDepth:
     # refusal, not a crash: nesting is stack, and stack is not the
-    # budget's to bound. The counter resets with the next judgment.
+    # budget's to bound. The counter dies with this judgment's Judge.
     raise newException(BudgetError, "judgment nesting too deep")
   result =
-    case g.pats[p].kind
+    case g[p].kind
     of pEmpty, pNotAllowed:
       g.never
     of pChoice:
-      let (l, r) = (g.pats[p].left, g.pats[p].right)
-      g.choice(g.deriv(l, v), g.deriv(r, v))
+      let (l, r) = (g[p].left, g[p].right)
+      g.choice(g.deriv(j, l, v), g.deriv(j, r, v))
     of pGroup:
-      let (l, r) = (g.pats[p].left, g.pats[p].right)
-      let dl = g.group(g.deriv(l, v), r)
-      if g.nul[l]:
-        g.choice(dl, g.deriv(r, v))
+      let (l, r) = (g[p].left, g[p].right)
+      let dl = g.group(g.deriv(j, l, v), r)
+      if g.nullable(l):
+        g.choice(dl, g.deriv(j, r, v))
       else:
         dl
     of pStar:
-      let b = g.pats[p].body
-      g.group(g.deriv(b, v), p)
+      let b = g[p].body
+      g.group(g.deriv(j, b, v), p)
     of pRef:
-      g.deriv(g.rules[g.pats[p].rule], v)
+      g.deriv(j, g.rules[g[p].rule].pat, v)
     of pKind, pLit, pFrame:
-      if g.admits(p, v): g.empty else: g.never
-  dec g.jdepth
+      if g.admits(j, p, v): g.empty else: g.never
+  dec j.depth
 
 func judgeRule(g: var Grammar, r: RuleId, v: Value, budget: int): bool =
-  g.steps = budget
-  g.jdepth = 0
-  g.nul[g.deriv(g.rules[r], v)]
+  var j = Judge(steps: budget)
+  # two statements on purpose: deriv grows the pool, and folding it into
+  # nullable's argument list would snapshot the grammar before it grew
+  let res = g.deriv(j, g.rules[r].pat, v)
+  g.nullable(res)
 
 func matches*(g: var Grammar, name: string, v: Value, budget = DefaultBudget): bool =
   ## does the named rule admit `v`? Raises `BudgetError` on refusal.
   doAssert g.sealed, "seal the grammar before judging"
-  let r = g.ruleIds.getOrDefault(name, NoRule)
+  let r = g.byName.getOrDefault(name, NoRule)
   doAssert r != NoRule, "unknown rule: " & name
   g.judgeRule(r, v, budget)
 
@@ -742,15 +784,6 @@ func judge*(g: var Grammar, name: string, v: Value, budget = DefaultBudget): Ver
 func judge*(g: var Grammar, v: Value, budget = DefaultBudget): Verdict =
   verdictOf g.matches(v, budget)
 
-func classify*(
-    g: var Grammar, v: Value, names: openArray[string], budget = DefaultBudget
-): seq[string] =
-  ## every named rule that admits `v`. Raises `BudgetError` like
-  ## `matches`; judge rule by rule when refusal is an answer.
-  for n in names:
-    if g.matches(n, v, budget):
-      result.add n
-
 proc recognizer*(
     gr: ref Grammar, name: string, budget = DefaultBudget
 ): proc(v: Value): bool =
@@ -758,12 +791,10 @@ proc recognizer*(
   ## dispatch wiring; resolves the rule name now, so a bad name fails
   ## at wiring time instead of per value
   doAssert gr[].sealed, "seal the grammar before judging"
-  let r = gr[].ruleIds.getOrDefault(name, NoRule)
+  let r = gr[].byName.getOrDefault(name, NoRule)
   doAssert r != NoRule, "unknown rule: " & name
   result = proc(v: Value): bool =
     gr[].judgeRule(r, v, budget)
-
-# ================ READINGS ================
 
 type Readings* = object
   ## every rule that spoke for a value, and every rule that could not
@@ -775,8 +806,8 @@ type Readings* = object
 func readings*(
     g: var Grammar, v: Value, names: openArray[string], budget = DefaultBudget
 ): Readings =
-  ## `classify` that survives refusal: a pathological rule costs its own
-  ## lane an answer, never the whole classification
+  ## classification that survives refusal: a pathological rule costs its
+  ## own lane an answer, never the whole classification
   for n in names:
     case g.judge(n, v, budget)
     of vAccepted:
@@ -794,16 +825,20 @@ func readings*(
 
 const Unreachable = int32.high
 
-type Productivity* = object
-  ## Indexed by pattern id, and so a reading of one moment's pool. It
-  ## stays good for what construction needs, because the patterns a rule
-  ## can reach are fixed at sealing and residuals are never among them.
-  ok: seq[bool] # per pattern: admits at least one sequence
-  some: seq[bool] # per pattern: admits at least one non-empty sequence
-  rank: seq[int32] # per pattern: cost of its cheapest sequence
-  alts: seq[int32] # per pattern: productive alternatives beneath a choice
-  ruleOk, ruleSome: seq[bool]
-  ruleRank: seq[int32]
+type
+  Prod = object
+    ok: bool # admits at least one sequence
+    some: bool # admits at least one non-empty sequence
+    rank: int32 # cost of its cheapest sequence
+    alts: int32 # productive alternatives beneath a choice
+
+  Productivity* = object
+    ## Indexed by pattern id, and so a reading of one moment's pool. It
+    ## stays good for what construction needs, because the patterns a
+    ## rule can reach are fixed at sealing and residuals are never among
+    ## them.
+    pats: seq[Prod]
+    rules: seq[Prod]
 
 func satisfiable(k: BlKind, len: int): bool =
   ## is there a value of this kind with this payload length? Frames and
@@ -828,111 +863,97 @@ func productivity*(g: Grammar): Productivity =
   ## is a DAG apart from references, and a reference costs a rank, so
   ## the measure is well-founded through recursion too
   doAssert g.sealed, "seal the grammar before asking what it describes"
-  result.ok = newSeq[bool](g.pats.len)
-  result.some = newSeq[bool](g.pats.len)
-  result.rank = newSeq[int32](g.pats.len)
-  result.alts = newSeq[int32](g.pats.len)
-  result.ruleOk = newSeq[bool](g.rules.len)
-  result.ruleSome = newSeq[bool](g.rules.len)
-  result.ruleRank = newSeq[int32](g.rules.len)
-  for i in 0 ..< g.pats.len:
-    result.rank[i] = Unreachable
+  result.pats = newSeq[Prod](g.nodes.len)
+  result.rules = newSeq[Prod](g.rules.len)
+  for i in 0 ..< g.nodes.len:
+    result.pats[i].rank = Unreachable
   for r in 0 ..< g.rules.len:
-    result.ruleRank[r] = Unreachable
+    result.rules[r].rank = Unreachable
   var changed = true
   while changed:
     changed = false
-    for i in 0 ..< g.pats.len:
-      let p = g.pats[i]
-      var
-        ok = false
-        some = false
-        rank = Unreachable
-        alts = 0'i32
+    for i in 0 ..< g.nodes.len:
+      let p = g.nodes[i].pat
+      var n = Prod(rank: Unreachable)
       case p.kind
       of pEmpty:
-        ok = true
-        rank = 0
+        n.ok = true
+        n.rank = 0
       of pNotAllowed:
         discard
       of pChoice:
-        ok = result.ok[p.left] or result.ok[p.right]
-        some = result.some[p.left] or result.some[p.right]
-        rank = min(result.rank[p.left], result.rank[p.right])
+        n.ok = result.pats[p.left].ok or result.pats[p.right].ok
+        n.some = result.pats[p.left].some or result.pats[p.right].some
+        n.rank = min(result.pats[p.left].rank, result.pats[p.right].rank)
         # a choice tree is balanced for the matcher's sake, so walking it
         # coin-flip by coin-flip would favour whichever alternatives sit
         # nearer the root. Counting the leaves below each side makes the
         # draw uniform over the alternatives as written
-        alts = result.alts[p.left] + result.alts[p.right]
+        n.alts = result.pats[p.left].alts + result.pats[p.right].alts
       of pGroup:
-        ok = result.ok[p.left] and result.ok[p.right]
-        some =
-          (result.some[p.left] and result.ok[p.right]) or
-          (result.ok[p.left] and result.some[p.right])
-        if ok:
-          rank = 1 + max(result.rank[p.left], result.rank[p.right])
+        n.ok = result.pats[p.left].ok and result.pats[p.right].ok
+        n.some =
+          (result.pats[p.left].some and result.pats[p.right].ok) or
+          (result.pats[p.left].ok and result.pats[p.right].some)
+        if n.ok:
+          n.rank = 1 + max(result.pats[p.left].rank, result.pats[p.right].rank)
       of pStar:
         # zero repetitions always work; a run is only reachable when the
         # body itself consumes something
-        ok = true
-        some = result.some[p.body]
-        rank = 0
+        n.ok = true
+        n.some = result.pats[p.body].some
+        n.rank = 0
       of pKind:
-        ok = p.anyKind
-        some = ok
-        if ok:
-          rank = 0
+        n.ok = p.anyKind
+        n.some = n.ok
+        if n.ok:
+          n.rank = 0
       of pLit:
-        ok = true
-        some = true
-        rank = 0
+        n.ok = true
+        n.some = true
+        n.rank = 0
       of pFrame:
         # a record must carry a head, so its children must consume
-        ok =
-          result.ok[p.children] and (p.frameKind != bRecord or result.some[p.children])
-        some = ok
-        if ok:
-          rank = 1 + result.rank[p.children]
+        n.ok =
+          result.pats[p.children].ok and
+          (p.frameKind != bRecord or result.pats[p.children].some)
+        n.some = n.ok
+        if n.ok:
+          n.rank = 1 + result.pats[p.children].rank
       of pRef:
-        ok = result.ruleOk[p.rule]
-        some = result.ruleSome[p.rule]
-        if ok:
-          rank = 1 + result.ruleRank[p.rule]
-      if p.kind != pChoice and ok:
-        alts = 1
-      if ok != result.ok[i] or some != result.some[i] or rank != result.rank[i] or
-          alts != result.alts[i]:
-        result.ok[i] = ok
-        result.some[i] = some
-        result.rank[i] = rank
-        result.alts[i] = alts
+        n.ok = result.rules[p.rule].ok
+        n.some = result.rules[p.rule].some
+        if n.ok:
+          n.rank = 1 + result.rules[p.rule].rank
+      if p.kind != pChoice and n.ok:
+        n.alts = 1
+      if n != result.pats[i]:
+        result.pats[i] = n
         changed = true
     for r in 0 ..< g.rules.len:
-      let p = g.rules[r]
-      if result.ok[p] != result.ruleOk[r] or result.some[p] != result.ruleSome[r] or
-          result.rank[p] != result.ruleRank[r]:
-        result.ruleOk[r] = result.ok[p]
-        result.ruleSome[r] = result.some[p]
-        result.ruleRank[r] = result.rank[p]
+      var n = result.pats[g.rules[r].pat]
+      n.alts = 0
+      if n != result.rules[r]:
+        result.rules[r] = n
         changed = true
 
 func isEmpty*(pr: Productivity, p: PatId): bool =
   ## does this pattern describe no sequence at all?
-  not pr.ok[p]
+  not pr.pats[p].ok
 
 func isEmpty*(g: Grammar, name: string): bool =
   ## does this rule describe no sequence at all?
-  let r = g.ruleIds.getOrDefault(name, NoRule)
+  let r = g.byName.getOrDefault(name, NoRule)
   doAssert r != NoRule, "unknown rule: " & name
-  not g.productivity.ruleOk[r]
+  not g.productivity.rules[r].ok
 
 func emptyRules*(g: Grammar): seq[string] =
   ## the rules that describe nothing. Never a sealing refusal — a dead
   ## alternative can be deliberate — but almost always a mistake
   let pr = g.productivity
   for r in 0 ..< g.rules.len:
-    if not pr.ruleOk[r]:
-      result.add g.names[r]
+    if not pr.rules[r].ok:
+      result.add g.rules[r].name
 
 # ================ CONSTRUCTION ================
 # A productive pattern is a generator. Descending on rank terminates:
@@ -1063,12 +1084,12 @@ proc genSeq(
   ## append one sequence `p` admits. `quiet` suppresses runs of unknown
   ## members: a keyed frame falls back to it when rolling for an
   ## already-ordered arrangement has not come up
-  if int(p) >= pr.ok.len or not pr.ok[p]:
+  if int(p) >= pr.pats.len or not pr.pats[p].ok:
     # only rule-reachable patterns are walked and those predate sealing,
     # so a pattern the reading does not cover cannot arise here; answer
     # rather than fault if that ever stops being true
     return false
-  let pat = g.pats[p]
+  let pat = g[p]
   case pat.kind
   of pEmpty:
     true
@@ -1076,18 +1097,18 @@ proc genSeq(
     false
   of pChoice:
     var first, second = pat.left
-    if pr.ok[pat.left] and pr.ok[pat.right]:
+    if pr.pats[pat.left].ok and pr.pats[pat.right].ok:
       let takeLeft =
         if budget > 0:
           # by leaf count, so every alternative is equally likely however
           # the choice tree happens to be balanced
-          rng.rand(int(pr.alts[pat.left] + pr.alts[pat.right]) - 1) <
-            int(pr.alts[pat.left])
+          rng.rand(int(pr.pats[pat.left].alts + pr.pats[pat.right].alts) - 1) <
+            int(pr.pats[pat.left].alts)
         else:
-          pr.rank[pat.left] <= pr.rank[pat.right]
+          pr.pats[pat.left].rank <= pr.pats[pat.right].rank
       first = if takeLeft: pat.left else: pat.right
       second = if takeLeft: pat.right else: pat.left
-    elif pr.ok[pat.right]:
+    elif pr.pats[pat.right].ok:
       first = pat.right
       second = pat.right
     let taken = acc.len
@@ -1102,7 +1123,7 @@ proc genSeq(
       g.genSeq(pr, pat.right, rng, budget, quiet, acc)
   of pStar:
     var reps = 0
-    if budget > 0 and not quiet and pr.some[pat.body]:
+    if budget > 0 and not quiet and pr.pats[pat.body].some:
       # a share of what is left rather than a fixed handful, so --size
       # buys length instead of only buying whether a run happens at all.
       # Each repetition spends, so nested runs still come to an end
@@ -1141,7 +1162,7 @@ proc genSeq(
           return true
     false
   of pRef:
-    g.genSeq(pr, g.rules[pat.rule], rng, budget, quiet, acc)
+    g.genSeq(pr, g.rules[pat.rule].pat, rng, budget, quiet, acc)
 
 proc generate*(
     g: Grammar, pr: Productivity, p: PatId, rng: var Rand, size = 0
@@ -1156,9 +1177,9 @@ proc generate*(
   some acc[0]
 
 proc generate*(g: Grammar, name: string, rng: var Rand, size = 0): Option[Value] =
-  let r = g.ruleIds.getOrDefault(name, NoRule)
+  let r = g.byName.getOrDefault(name, NoRule)
   doAssert r != NoRule, "unknown rule: " & name
-  g.generate(g.productivity, g.rules[r], rng, size)
+  g.generate(g.productivity, g.rules[r].pat, rng, size)
 
 proc witness*(g: Grammar, name: string): Option[Value] =
   ## the smallest value the rule describes
@@ -1193,8 +1214,8 @@ proc counterexamples*(
     if b.judge(ruleB, v.get, budget) == vRejected:
       result.add v.get
 
-# ================ LOADING ================
-# The grammar dialect: a marked `(grammar {name: pattern, …})` record.
+# ================ THE DIALECT ================
+# The grammar dialect: a marked !(grammar {name: pattern …}) record.
 # In pattern position, marked records are operators and a marked symbol
 # is a rule reference; everything inert is the shape itself — an inert
 # frame is a template, an inert atom a literal, and a fully inert
@@ -1202,11 +1223,15 @@ proc counterexamples*(
 # all-or-nothing: any spelling outside the dialect is a GrammarError,
 # and the sealed grammar's own laws do the rest of the refusing. Loader
 # recursion follows value depth, which is the decoder's boundary.
+#
+# The spelling vocabulary here — `opv`, `opName`, `demanded`,
+# `fullyInert` — is shared with everything else that speaks the
+# dialect, `infer` included.
 
 func refuse(what: string) {.noreturn.} =
   raise newException(GrammarError, what)
 
-func fullyInert(v: Value): bool =
+func fullyInert*(v: Value): bool =
   ## no mark anywhere below: the template and literal readings coincide
   if v.marked:
     return false
@@ -1222,6 +1247,44 @@ func opHead(v: Value): string =
     string(v.head.text)
   else:
     ""
+
+func opv*(name: string, ops: varargs[Value]): Value =
+  ## a pattern operator: a marked record naming itself with an inert
+  ## symbol head
+  record(@[sym(name)] & @ops, marked = true)
+
+func opName*(k: BlKind): string =
+  case k
+  of bNil:
+    "nil"
+  # never an operator; nil is spelled as the literal
+  of bNum:
+    "num"
+  of bText:
+    "text"
+  of bSym:
+    "sym"
+  of bBytes:
+    "bytes"
+  of bList:
+    "list"
+  of bRecord:
+    "record"
+  of bDict:
+    "dict"
+  of bSet:
+    "set"
+
+func demanded*(v: Value, req: MarkReq): Value =
+  case req
+  of mrInert:
+    v
+  of mrMarked:
+    opv("marked", v)
+  of mrAny:
+    opv("anymark", v)
+
+# ---- loading ----
 
 func loadPattern(g: var Grammar, v: Value): PatId
 
@@ -1322,8 +1385,7 @@ func loadOpen(g: var Grammar, v: Value, req: MarkReq): PatId =
         refuse "a (* …) run is vacuous in an open set; close the set or drop the run"
     g.frame(bSet, g.gapped(g.rest(), g.litMembers(lits)), req)
   else:
-    discard # unreachable: isFrame guarded above
-    g.never
+    g.never # unreachable: isFrame guarded above
 
 func loadDemand(g: var Grammar, v: Value, req: MarkReq): PatId =
   ## the operand of (marked …) or (anymark …): a kind operator, a
@@ -1414,7 +1476,7 @@ func loadPattern(g: var Grammar, v: Value): PatId =
       " is not a pattern; a marked literal is spelled (lit …)"
 
 func load*(v: Value): Grammar =
-  ## read the grammar dialect: a marked `(grammar {name: pattern, …})`
+  ## read the grammar dialect: a marked !(grammar {name: pattern …})
   ## record whose rule table is a dictionary — so rule order is not
   ## spellable, duplicate names cannot arrive, and equal rule tables are
   ## equal values. The rule named `start`, when present, is the start.
@@ -1444,52 +1506,52 @@ func readGrammar*(text: string): Grammar =
   ## read a bare rule table — a dictionary in the grammar dialect —
   ## wrap it as the marked (grammar …) record, and load it: the
   ## ergonomic door for local definitions. A dialect that travels or
-  ## is named by digest is always the whole `(grammar …)` value
+  ## is named by digest is always the whole !(grammar …) value
   load(mark record(sym"grammar", readValue(text)))
 
 const grammarOfGrammar =
   readValue"""
-`(grammar {
-  start: `(marked (grammar `(dict `(* `(sym) `pattern))))
+!(grammar {
+  start: !(marked (grammar !(dict !(* !(sym) pattern!))))
 
-  pattern: `(or nil `(num) `(text) `(sym) `(bytes) `ref `template `operator)
-  ref: `(marked `(sym))
+  pattern: !(or nil !(num) !(text) !(sym) !(bytes) ref! template! operator!)
+  ref: !(marked !(sym))
 
-  template: `(or `(list `(* `pattern))
-                 `(record `(+ `pattern))
-                 `(dict `(* `key `pattern))
-                 `(set `(* `setmember)))
-  key: `(or `fullyinert `litop)
-  setmember: `(or `key `(marked (* `(* `pattern))))
-  fullyinert: `(or nil `(num) `(text) `(sym) `(bytes)
-                  `(list `(* `fullyinert))
-                  `(record `(+ `fullyinert))
-                  `(dict `(* `fullyinert `fullyinert))
-                  `(set `(* `fullyinert)))
+  template: !(or !(list !(* pattern!))
+                 !(record !(+ pattern!))
+                 !(dict !(* key! pattern!))
+                 !(set !(* setmember!)))
+  key: !(or fullyinert! litop!)
+  setmember: !(or key! !(marked (* !(* pattern!))))
+  fullyinert: !(or nil !(num) !(text) !(sym) !(bytes)
+                  !(list !(* fullyinert!))
+                  !(record !(+ fullyinert!))
+                  !(dict !(* fullyinert! fullyinert!))
+                  !(set !(* fullyinert!)))
 
-  operator: `(or `kindop `litop `openop `demandop `combop)
-  kindop: `(marked `(or (any)
-                        (num `(? `(num)))
-                        (text `(? `(num)))
-                        (sym `(? `(num)))
-                        (bytes `(? `(num)))
-                        (list `(* `pattern))
-                        (record `(* `pattern))
-                        (dict `(* `pattern))
-                        (set `(* `pattern))))
-  combop: `(marked `(or (or `(* `pattern))
-                        (cat `(* `pattern))
-                        (* `(* `pattern))
-                        (+ `(* `pattern))
-                        (? `(* `pattern))))
-  litop: `(marked (lit `(anymark `(any))))
-  openop: `(marked (open `opentarget))
-  opentarget: `(or `(list `(* `pattern))
-                   `(record `(+ `pattern))
-                   `(dict `(* `key `pattern))
-                   `(set `(* `key)))
-  demandop: `(marked `(or (marked `demandable) (anymark `demandable)))
-  demandable: `(or `kindop `template `openop `(marked (or `(* `demandable))))
+  operator: !(or kindop! litop! openop! demandop! combop!)
+  kindop: !(marked !(or (any)
+                        (num !(? !(num)))
+                        (text !(? !(num)))
+                        (sym !(? !(num)))
+                        (bytes !(? !(num)))
+                        (list !(* pattern!))
+                        (record !(* pattern!))
+                        (dict !(* pattern!))
+                        (set !(* pattern!))))
+  combop: !(marked !(or (or !(* pattern!))
+                        (cat !(* pattern!))
+                        (* !(* pattern!))
+                        (+ !(* pattern!))
+                        (? !(* pattern!))))
+  litop: !(marked (lit !(anymark !(any))))
+  openop: !(marked (open opentarget!))
+  opentarget: !(or !(list !(* pattern!))
+                   !(record !(+ pattern!))
+                   !(dict !(* key! pattern!))
+                   !(set !(* key!)))
+  demandop: !(marked !(or (marked demandable!) (anymark demandable!)))
+  demandable: !(or kindop! template! openop! !(marked (or !(* demandable!))))
 })
 """
 
@@ -1497,56 +1559,22 @@ func grammarGrammar*(): Value =
   ## the grammar dialect described in itself
   grammarOfGrammar
 
-# ================ UNPARSING ================
+# ---- unparsing ----
 # A pattern back into the dialect, in operator normal form. This is for
 # reading and for diagnosis, never for identity: the spelling it emits
 # describes the same language by a different definition, so a grammar
 # round-tripped through here is a different dialect by digest.
-
-func opv(name: string, ops: varargs[Value]): Value =
-  record(@[sym(name)] & @ops, marked = true)
-
-func opName(k: BlKind): string =
-  case k
-  of bNil:
-    "nil"
-  # never an operator; nil is spelled as the literal
-  of bNum:
-    "num"
-  of bText:
-    "text"
-  of bSym:
-    "sym"
-  of bBytes:
-    "bytes"
-  of bList:
-    "list"
-  of bRecord:
-    "record"
-  of bDict:
-    "dict"
-  of bSet:
-    "set"
-
-func demanded(v: Value, req: MarkReq): Value =
-  case req
-  of mrInert:
-    v
-  of mrMarked:
-    opv("marked", v)
-  of mrAny:
-    opv("anymark", v)
 
 func unparse*(g: Grammar, p: PatId): Value
 
 func operands(g: Grammar, p: PatId): seq[Value] =
   ## a sequence pattern as an operand list, since the quantifiers read
   ## their operands as one implicit cat
-  case g.pats[p].kind
+  case g[p].kind
   of pEmpty:
     @[]
   of pGroup:
-    g.operands(g.pats[p].left) & g.operands(g.pats[p].right)
+    g.operands(g[p].left) & g.operands(g[p].right)
   else:
     @[g.unparse(p)]
 
@@ -1592,7 +1620,7 @@ func unparseKind(p: Pattern): Value =
 
 func unparse*(g: Grammar, p: PatId): Value =
   ## one pattern as a dialect value
-  let pat = g.pats[p]
+  let pat = g[p]
   case pat.kind
   of pEmpty:
     opv"cat"
@@ -1629,23 +1657,28 @@ func unparse*(g: Grammar, p: PatId): Value =
       ops = @[opv"cat"]
     demanded(opv(opName(pat.frameKind), ops), pat.frameReq)
   of pRef:
-    sym(g.names[pat.rule], marked = true)
+    sym(g.rules[pat.rule].name, marked = true)
 
 func unparse*(g: Grammar): Value =
-  ## the whole grammar as a `(grammar {…})` value
+  ## the whole grammar as a !(grammar {…}) value
   doAssert g.sealed, "seal the grammar before writing it out"
   var es: seq[(Value, Value)]
-  for r in 0 ..< g.rules.len:
-    es.add (sym(g.names[r]), g.unparse(g.rules[r]))
+  for r in g.rules:
+    es.add (sym(r.name), g.unparse(r.pat))
   mark record(sym"grammar", dict(es))
 
-# ================ EXPECTATION ================
+# ================ DIAGNOSIS ================
+# Where a value stopped satisfying a rule. The position is exact, not a
+# guess: a residual is the union of every reading still alive, so when
+# it dies at a constituent, every reading died there. Only the descent
+# into that constituent is judgment, and it declines to guess — it
+# descends when exactly one frame pattern could have been meant.
 
 func firstsInto(g: Grammar, p: PatId, seen: var seq[bool], acc: var seq[PatId]) =
   if seen[p]:
     return
   seen[p] = true
-  let pat = g.pats[p]
+  let pat = g[p]
   case pat.kind
   of pEmpty, pNotAllowed:
     discard
@@ -1654,12 +1687,12 @@ func firstsInto(g: Grammar, p: PatId, seen: var seq[bool], acc: var seq[PatId]) 
     g.firstsInto(pat.right, seen, acc)
   of pGroup:
     g.firstsInto(pat.left, seen, acc)
-    if g.nul[pat.left]:
+    if g.nullable(pat.left):
       g.firstsInto(pat.right, seen, acc)
   of pStar:
     g.firstsInto(pat.body, seen, acc)
   of pRef:
-    g.firstsInto(g.rules[pat.rule], seen, acc)
+    g.firstsInto(g.rules[pat.rule].pat, seen, acc)
   of pKind, pLit, pFrame:
     acc.add p
 
@@ -1667,16 +1700,9 @@ func firsts*(g: Grammar, p: PatId): seq[PatId] =
   ## the leaf patterns that could consume the next value. A frame is one
   ## letter here: what is inside it is not head position
   doAssert g.sealed, "seal the grammar before asking what it admits"
-  var seen = newSeq[bool](g.pats.len)
+  var seen = newSeq[bool](g.nodes.len)
   g.firstsInto(p, seen, result)
   result.sort()
-
-# ================ EXPLANATION ================
-# Where a value stopped satisfying a rule. The position is exact, not a
-# guess: a residual is the union of every reading still alive, so when
-# it dies at a constituent, every reading died there. Only the descent
-# into that constituent is judgment, and it declines to guess — it
-# descends when exactly one frame pattern could have been meant.
 
 const MaxExpected* = 8
 
@@ -1688,22 +1714,28 @@ type Miss* = object
   complete*: bool ## the shape could also have ended here
 
 func foldPos(
-    g: var Grammar, start: PatId, vs: openArray[Value]
+    g: var Grammar, j: var Judge, start: PatId, vs: openArray[Value]
 ): tuple[ok: bool, idx: int, res: PatId] =
   ## consume `vs`; on failure `res` is the residual facing `vs[idx]`
   var res = start
   let dead = g.never
   for i in 0 ..< vs.len:
-    let nxt = g.deriv(res, vs[i])
+    let nxt = g.deriv(j, res, vs[i])
     if nxt == dead:
       return (false, i, res)
     res = nxt
-  (g.nul[res], vs.len, res)
+  (g.nullable(res), vs.len, res)
 
 func missAt(
-    g: var Grammar, p: PatId, vs: seq[Value], base: seq[int], top: bool, cap: int
+    g: var Grammar,
+    j: var Judge,
+    p: PatId,
+    vs: seq[Value],
+    base: seq[int],
+    top: bool,
+    cap: int,
 ): Option[Miss] =
-  let (ok, idx, res) = g.foldPos(p, vs)
+  let (ok, idx, res) = g.foldPos(j, p, vs)
   if ok:
     return none(Miss)
   let heads = g.firsts(res)
@@ -1720,15 +1752,15 @@ func missAt(
       cand = NoPat
       n = 0
     for h in heads:
-      if g.pats[h].kind == pFrame and g.pats[h].frameKind == child.kind and
-          markOk(g.pats[h].frameReq, child):
+      if g[h].kind == pFrame and g[h].frameKind == child.kind and
+          markOk(g[h].frameReq, child):
         inc n
         cand = h
     if n == 1:
       var kids: seq[Value]
       for c in child.children:
         kids.add c
-      let deeper = g.missAt(g.pats[cand].children, kids, here, false, cap)
+      let deeper = g.missAt(j, g[cand].children, kids, here, false, cap)
       if deeper.isSome:
         return deeper
   var exp: seq[Value]
@@ -1741,7 +1773,7 @@ func missAt(
     found: (if idx < vs.len: some(vs[idx]) else: none(Value)),
     expected: exp,
     more: heads.len - exp.len,
-    complete: g.nul[res],
+    complete: g.nullable(res),
   )
 
 func explain*(
@@ -1750,11 +1782,10 @@ func explain*(
   ## why the named rule does not admit `v`; none when it does. Refusal
   ## raises `BudgetError`, exactly as judging does
   doAssert g.sealed, "seal the grammar before judging"
-  let r = g.ruleIds.getOrDefault(name, NoRule)
+  let r = g.byName.getOrDefault(name, NoRule)
   doAssert r != NoRule, "unknown rule: " & name
-  g.steps = budget
-  g.jdepth = 0
-  g.missAt(g.rules[r], @[v], @[], true, cap)
+  var j = Judge(steps: budget)
+  g.missAt(j, g.rules[r].pat, @[v], @[], true, cap)
 
 func explain*(
     g: var Grammar, v: Value, budget = DefaultBudget, cap = MaxExpected
@@ -1762,9 +1793,8 @@ func explain*(
   doAssert g.sealed, "seal the grammar before judging"
   if g.startRule == NoRule:
     raise newException(GrammarError, "this grammar names no start rule")
-  g.steps = budget
-  g.jdepth = 0
-  g.missAt(g.rules[g.startRule], @[v], @[], true, cap)
+  var j = Judge(steps: budget)
+  g.missAt(j, g.rules[g.startRule].pat, @[v], @[], true, cap)
 
 func toValue*(m: Miss): Value =
   ## a miss as an ordinary value, so diagnosis stays in the stream
@@ -1793,16 +1823,16 @@ type Finding* = object
 
 func reachable(g: Grammar): seq[bool] =
   ## the patterns some rule can reach
-  result = newSeq[bool](g.pats.len)
+  result = newSeq[bool](g.nodes.len)
   var stack: seq[PatId]
-  for r in 0 ..< g.rules.len:
-    stack.add g.rules[r]
+  for r in g.rules:
+    stack.add r.pat
   while stack.len > 0:
     let p = stack.pop
     if result[p]:
       continue
     result[p] = true
-    let pat = g.pats[p]
+    let pat = g[p]
     case pat.kind
     of pChoice, pGroup:
       stack.add pat.left
@@ -1821,23 +1851,25 @@ func lint*(g: Grammar): seq[Finding] =
   let pr = g.productivity
   var dead: seq[string]
   for r in 0 ..< g.rules.len:
-    if not pr.ruleOk[r]:
-      dead.add g.names[r]
+    if not pr.rules[r].ok:
+      dead.add g.rules[r].name
       result.add Finding(
-        rule: g.names[r], reason: "describes no value", pattern: g.unparse(g.rules[r])
+        rule: g.rules[r].name,
+        reason: "describes no value",
+        pattern: g.unparse(g.rules[r].pat),
       )
   let live = g.reachable
-  for i in 0 ..< g.pats.len:
-    if not live[i] or g.pats[i].kind != pChoice:
+  for i in 0 ..< g.nodes.len:
+    if not live[i] or g.nodes[i].pat.kind != pChoice:
       continue
-    for side in [g.pats[i].left, g.pats[i].right]:
-      if pr.ok[side] or g.pats[side].kind == pNotAllowed:
+    for side in [g.nodes[i].pat.left, g.nodes[i].pat.right]:
+      if pr.pats[side].ok or g[side].kind == pNotAllowed:
         continue
       let owner = g.blameRule(PatId(i))
-      if owner == NoRule or g.names[owner] in dead:
+      if owner == NoRule or g.rules[owner].name in dead:
         continue # a rule already reported whole says it better
       result.add Finding(
-        rule: g.names[owner],
+        rule: g.rules[owner].name,
         reason: "alternative describes no value",
         pattern: g.unparse(side),
       )
