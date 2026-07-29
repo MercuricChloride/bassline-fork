@@ -201,6 +201,7 @@ func cmp*(a, b: Value): int
   ## Because frames are delimited with 0xA0 and since
   ## that byte is > all other CE header bytes it means that:
   ## a shorter frame is > a longer frame
+
 func cmp*(a, b: seq[byte]): int =
   for i in 0 ..< min(a.len, b.len):
     let c = cmp(a[i], b[i])
@@ -302,11 +303,8 @@ func unmark*(v: sink Value): Value =
 func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)
 
-func num*(text: string, marked = false): Value =
-  Value(kind: bNum, marked: marked, num: toDecimal(text))
-
-func num*(d: DecimalString, marked = false): Value =
-  Value(kind: bNum, marked: marked, num: d)
+func num*[T](text: T, marked = false): Value =
+    Value(kind: bNum, marked: marked, num: toDecimal(text))
 
 func text*[T](text: T, marked = false): Value =
   Value(kind: bText, text: toValidUtf8(text), marked: marked)
@@ -355,3 +353,6 @@ func dict*(entries: sink seq[(Value, Value)], marked = false): Value =
     if cmp(es[i - 1][0], es[i][0]) == 0:
       raise newException(ValueError, "dict: duplicate key")
   Value(kind: bDict, marked: marked, entries: Sorted[DictOrder, (Value, Value)](es))
+
+func dict*(entries: sink varargs[(Value, Value)]): Value =
+  dict(@entries, false)

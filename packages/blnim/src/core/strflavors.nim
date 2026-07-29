@@ -1,5 +1,7 @@
 {.experimental: "strictFuncs".}
 
+from std/parseutils import parseInt
+
 template strDefaults*(T: typedesc) =
 
   func len*(s: T): int {.borrow.}
@@ -16,7 +18,6 @@ template strDefaults*(T: typedesc) =
 
   func toString*(s: T): string =
     string(s)
-
 
 type
   DecimalString* = distinct string
@@ -56,12 +57,36 @@ func toDecimal*(str: string): DecimalString =
   else:
     raise newException(InvalidDecStr, "not a canonical decimal integer: " & str)
 
+func toDecimal*(n: int): DecimalString = toDecimal($n)
+
+func parseInt*(str: DecimalString): int =
+  discard parseInt(string(str), result)
+
+template binaryOp(name) =
+    func `name`*(a, b: DecimalString): DecimalString =
+      name(a.parseInt, b.parseInt).toDecimal
+    
+    func `name`*(a: DecimalString, b: int): DecimalString =
+      name(a.parseInt, b).toDecimal
+    
+    func `name`*(a: int, b: DecimalString): DecimalString =
+      name(a, b.parseInt).toDecimal
+
+binaryOp(`+`)
+binaryOp(`-`)
+binaryOp(`*`)
+binaryOp(`div`)
+binaryOp(`mod`)
+
+func `==`*(a: int, b: DecimalString): bool =
+  a == parseInt(b)
+func `==`*(a: DecimalString, b: int): bool =
+  parseInt(a) == b
 
 # ================ UTF-8 ================
 
 func isCont(b: byte): bool =
   (b and 0xC0) == 0x80
-
 
 func isValidUtf8*(s: openArray[byte]): bool =
   var i = 0
@@ -104,12 +129,10 @@ func isValidUtf8*(s: openArray[byte]): bool =
       return false
   true
 
-
 func toString*(s: openArray[byte]): string =
   result = newString(s.len)
   for i in 0 ..< s.len:
     result[i] = char(s[i])
-
 
 func toValidUtf8*(bytes: openArray[byte]): Utf8String =
   if bytes.isValidUtf8:
@@ -117,9 +140,7 @@ func toValidUtf8*(bytes: openArray[byte]): Utf8String =
   else:
     raise newException(InvalidUtf8Str, "malformed utf8 bytes")
 
-
 func toValidUtf8*(str: Utf8String): Utf8String = str
-
 
 func toValidUtf8*(str: string): Utf8String =
   str.toOpenArrayByte(0, str.high).toValidUtf8
