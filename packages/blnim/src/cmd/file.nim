@@ -20,6 +20,17 @@ Options:
           file record whose info gains zip: tarball
 """
 
+proc readBytes(path: string): seq[byte] =
+  var f: File
+  if not f.open(path, fmRead):
+    raise newException(IOError, "cannot open: " & path)
+  defer: f.close()
+  let n = f.getFileSize.int
+  result = newSeqUninit[byte](n)
+  if n > 0:
+    let got = f.readBuffer(addr result[0], n)
+    result.setLen(got)
+
 proc info(path: string, zip = ""): BlFileInfo =
   result.name = some lastPathPart(path)
   if zip != "":
@@ -54,16 +65,14 @@ proc valueOfPath(path: string, zip: bool): Value =
             stderr.writeLine "-- skipping " & entryPath & ": " & e.msg
         else:
           discard # symlinks and the like we just skip for now
-      toValue Directory(entries: entries, info: some info(path))
+      toValue Directory(entries: move(entries), info: some info(path))
+  elif zip:
+    BlFile(
+      contents: compress(readFile(path), dataFormat = dfGzip).toBytes,
+      info: some info(path, zip = "gzip"),
+    ).toValue
   else:
-    let contents = readFile(path)
-    if zip:
-      BlFile(
-        contents: compress(contents, dataFormat = dfGzip).toBytes,
-        info: some info(path, zip = "gzip"),
-      ).toValue
-    else:
-      toValue BlFile(contents: toBytes(contents), info: some info(path))
+    toValue BlFile(contents: readBytes(path), info: some info(path))
 
 proc run*(args: seq[string]) =
   var

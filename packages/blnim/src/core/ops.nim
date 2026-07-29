@@ -11,10 +11,9 @@ func hasHead*(v: Value, expected: Value): bool =
 func `[]`*(v: Value, i: int): Option[Value] =
   ## content by position for lists & records
   ## none when out of range or the kind isn't positional
-  doAssert(i >= 0, "I cannot be negative")
+  doAssert(i >= 0, "i cannot be negative")
   if v.isKind({bList, bRecord}) and i < v.items.len:
     return some v.items[i]
-
   none Value
 
 func `[]`*(v: Value, key: Value): Option[Value] =
@@ -23,38 +22,32 @@ func `[]`*(v: Value, key: Value): Option[Value] =
   ## element equal to key. none when absent or the kind isn't keyed.
   case v.kind
   of bDict:
-    let i = binarySearch(
-      v.entries.toOpenArray(low(v.entries), high(v.entries)),
-      key,
-      proc(e: (Value, Value), k: Value): int =
-        cmp(e[0], k),
-    )
-
+    let i = v.entries.find(key)
     if i < 0:
       none Value
     else:
-      some v.entries[i][1]
+      some v.ravel[i]
   of bSet:
     let i = binarySearch(
-      v.elements.toOpenArray(low(v.elements), high(v.elements)),
+      v.ravel,
       key,
-      proc(e, k: Value): int =
-        cmp(e, k),
+      cmp
     )
 
     if i < 0:
       none Value
     else:
-      some v.elements[i]
+      some v.ravel[i]
   else:
     none Value
 
 func contains*(v: Value, element: Value): bool =
   ## shallow containment
+  if not v.isFrame:
+    return false
   for c in v.children:
     if c == element:
       return true
-  false
 
 func find*(
     v: Value, pred: ValuePred, descendMarked = true
@@ -68,10 +61,11 @@ func find*(
   if not descendMarked and v.marked:
     return none Value
 
-  for c in v.children:
-    let r = find(c, pred, descendMarked)
-    if r.isSome:
-      return r
+  if v.isFrame:
+    for c in v.children:
+      let r = find(c, pred, descendMarked)
+      if r.isSome:
+        return r
 
   none Value
 
@@ -94,17 +88,17 @@ func map*(v: Value, f: proc(x: Value): Value): Value {.effectsOf: f.} =
     xs.add v.items[0]
     for i in 1 ..< v.items.len:
       xs.add f(v.items[i])
-    record(xs, v.marked)
+    record(xs).mark(v.marked)
   of bSet:
     var xs = newSeqOfCap[Value](v.elements.len)
     for x in v.elements:
       xs.add f(x)
-    values.set(xs, v.marked)
+    set(xs).mark(v.marked)
   of bDict:
     var es = newSeqOfCap[(Value, Value)](v.entries.len)
     for e in v.entries:
       es.add (e[0], f(e[1]))
-    dict(es, v.marked)
+    dict(es).mark(v.marked)
   else:
     v
 
@@ -124,18 +118,18 @@ func filter*(v: Value, pred: proc(x: Value): bool): Value {.effectsOf: pred.} =
     for i in 1 ..< v.items.len:
       if pred(v.items[i]):
         xs.add v.items[i]
-    record(xs, v.marked)
+    record(xs).mark(v.marked)
   of bSet:
     var xs: seq[Value]
     for x in v.elements:
       if pred(x):
         xs.add x
-    values.set(xs, v.marked)
+    set(xs).mark(v.marked)
   of bDict:
-    var es: seq[(Value, Value)]
+    var es: seq[Entry]
     for e in v.entries:
       if pred(e[1]):
-        es.add e
-    dict(es, v.marked)
+        es.add (e[0], e[1])
+    dict(es).mark(v.marked)
   else:
     v

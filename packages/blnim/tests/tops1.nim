@@ -48,7 +48,9 @@ suite "search is the spelling":
   test "children: heads and keys included, document order":
     check toSeq(point.children) == @[sym"point", num"3", num"4"]
     check toSeq(d.children) == @[sym"a", num"1", sym"b", num"2"]
-    check toSeq(text"x".children).len == 0
+    # a scalar has no children to spell, so asking is a caller error
+    expect ValueError:
+      discard toSeq(text"x".children)
 
   test "contains: anything among the children counts":
     let s = set(num"10", num"2", num"9")

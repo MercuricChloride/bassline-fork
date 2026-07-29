@@ -117,7 +117,7 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
     of 0x7:
       if children.len == 0:
         fail "record with no head"
-      record(children, marked)
+      record(children).mark(marked)
     of 0x8:
       if children.len mod 2 != 0:
         fail "dict with a key missing its value"
@@ -127,12 +127,12 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
       for i in 1 ..< entries.len:
         if cmp(entries[i - 1][0], entries[i][0]) >= 0:
           fail "dict keys out of order or duplicated"
-      dict(entries, marked)
+      dict(entries).mark(marked)
     of 0x9:
       for i in 1 ..< children.len:
         if cmp(children[i - 1], children[i]) >= 0:
           fail "set members out of order or duplicated"
-      set(children, marked)
+      set(children).mark(marked)
   of 0xA:
     if header == EndByte:
       fail "END where a value was expected"
@@ -167,7 +167,10 @@ func write*(buf: var seq[byte], b: byte) =
   buf.add b
 
 func write*(buf: var seq[byte], bytes: openArray[byte]) =
-  buf.add bytes
+  if bytes.len > 0:
+    let start = buf.len
+    buf.setLen(start + bytes.len)
+    copyMem(addr buf[start], addr bytes[0], bytes.len)
 
 func write*(w: var string, b: byte) =
   w.add char(b)
@@ -181,7 +184,6 @@ func write*(w: var string, bytes: openArray[byte]) =
 func encodeInto*[W](value: Value, w: var W) =
   ## Writes the CE bytes of `value` to any writer providing
   ## `write(var W, byte)` and `write(var W, openArray[byte])`.
-  mixin write
   let
     len = value.payloadLength
     hTag = byte(value.tag) shl 4
@@ -218,27 +220,28 @@ func encodeInto*[W](value: Value, w: var W) =
     w.write s.toOpenArrayByte(0, s.high)
   of bBytes:
     w.write value.bytes
-  of bList, bRecord:
-    for item in value.items:
+  of bList:
+    for item in value.children:
+      item.encodeInto w
+    w.write EndByte
+  of bRecord:
+    for item in value.children:
       item.encodeInto w
     w.write EndByte
   of bSet:
-    for el in value.elements:
+    for el in value.children:
       el.encodeInto w
     w.write EndByte
   of bDict:
-    for (key, val) in value.entries:
-      key.encodeInto w
-      val.encodeInto w
+    for el in value.children:
+      el.encodeInto w
     w.write EndByte
 
-func encode*[T: ValueLike](x: T): seq[byte] =
-  mixin toValue
-  encodeInto(x.toValue, result)
+func encode*(x: Value): seq[byte] =
+  encodeInto(x, result)
 
-func encodeToString*[T: ValueLike](x: T): string =
-  mixin toValue
-  encodeInto(x.toValue, result)
+func encodeToString*(x: Value): string =
+  encodeInto(x, result)
 
 # ================ STREAMING ================
 

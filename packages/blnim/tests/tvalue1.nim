@@ -33,15 +33,15 @@ suite "round trip":
       check roundTrips v
 
   test "frames":
-    let v = record(
+    let v = record(@[
       sym"h",
       list(num"1", text"two"),
       set(num"3", num"1"),
-      dict(@[(sym"a", num"1"), (sym"b", num"2")]),
-      mark(list(sym"q")),
-    )
+      dict([(sym"a", num"1"), (sym"b", num"2")]),
+      list(sym"q").mark
+    ])
     check roundTrips v
-    check roundTrips list()
+    check roundTrips list([])
     check roundTrips set(newSeq[Value]())
 
   test "length tier boundaries":

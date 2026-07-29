@@ -21,8 +21,8 @@ template strDefaults*(T: typedesc) =
 
 type
   DecimalString* = distinct string
-  InvalidDecStr* = object of CatchableError
   Utf8String* = distinct string
+  InvalidDecStr* = object of CatchableError
   InvalidUtf8Str* = object of CatchableError
 
 strDefaults(DecimalString)
@@ -41,8 +41,8 @@ func isDecimal*(str: string): bool =
   let start = if str.len > 0 and str[0] == '-': 1 else: 0
   if str.len == start:
     return false
-  for i in start ..< str.len:
-    if str[i] notin {'0'..'9'}:
+  for c in str.toOpenArray(start, str.high):
+    if c notin {'0'..'9'}:
       return false
   if str[start] == '0' and str.len - start > 1:
     return false
@@ -131,8 +131,13 @@ func isValidUtf8*(s: openArray[byte]): bool =
 
 func toString*(s: openArray[byte]): string =
   result = newString(s.len)
-  for i in 0 ..< s.len:
-    result[i] = char(s[i])
+  for i, b in s:
+    result[i] = char(b)
+
+func toBytes*(s: string): seq[byte] =
+  result = newSeqUninit[byte](s.len)
+  if s.len > 0:
+    copyMem(addr result[0], addr s[0], s.len)
 
 func toValidUtf8*(bytes: openArray[byte]): Utf8String =
   if bytes.isValidUtf8:
@@ -143,4 +148,4 @@ func toValidUtf8*(bytes: openArray[byte]): Utf8String =
 func toValidUtf8*(str: Utf8String): Utf8String = str
 
 func toValidUtf8*(str: string): Utf8String =
-  str.toOpenArrayByte(0, str.high).toValidUtf8
+  str.toOpenArrayByte(str.low, str.high).toValidUtf8

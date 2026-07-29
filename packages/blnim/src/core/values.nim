@@ -5,13 +5,19 @@ import ./strflavors
 export strflavors, options
 
 type
-  SetOrder = object
-  DictOrder = object
+  SetObj* = object
+    els: seq[Value]
 
-  Sorted*[Kind; T] = distinct seq[T]
+  Entry* = tuple[key: Value, val: Value]
+
+  DictObj* = object
+    els: seq[Value]
+
+  RecordObj* = object
+    els: seq[Value]
 
   BlKind* = enum
-    bNil # nil
+    bNil   # nil
     bNum
     bText
     bSym
@@ -19,7 +25,7 @@ type
     bList
     bRecord
     bDict
-    bSet # frame types
+    bSet   # frame types
 
   Value* = object
     marked: bool
@@ -32,12 +38,14 @@ type
       text: Utf8String
     of bBytes:
       bytes: seq[byte]
-    of bList, bRecord:
-      items: seq[Value]
+    of bList:
+      listv: seq[Value]
+    of bRecord:
+      rec: RecordObj
     of bSet:
-      elements: Sorted[SetOrder, Value]
+      elements: SetObj
     of bDict:
-      entries: Sorted[DictOrder, (Value, Value)]
+      entries: DictObj
 
   ValueLike* = concept x
     ## anything that can speak as a value or be made from a value
@@ -46,27 +54,134 @@ type
     toValue(x) is Value
     fromValue(Value, typeof(x)) is Option[typeof(x)]
 
-# ================ SORTED ================
-# We use a distinct type so we don't have to worry about
-# improper usage polluting our values
+template fail(msg: untyped) =
+  raise newException(ValueError, msg)
 
-template implSorted(ty, el: typedesc) =
-  iterator items*(v: ty): lent el {.borrow.}
+# ================ COLLECTIONS ================
 
-  func toOpenArray*(v: ty, first: int, last: int): openArray[el] {.borrow.}
+func ravel*(v: Value): lent seq[Value] =
+  ## every frame's contiguous payload in CE order; a dict's is its flat
+  ## k v k v -- exactly what `children` already promises
+  case v.kind
+  of bList:   return v.listv
+  of bRecord: return v.rec.els
+  of bSet:    return v.elements.els
+  of bDict:   return v.entries.els
+  else: fail("ravel: not a frame")
 
-  func low*(v: ty): int {.borrow.}
+template children*(v: Value): openArray[Value] =
+  v.ravel.toOpenArray(0, v.ravel.len - 1)
 
-  func high*(v: ty): int {.borrow.}
+func cmp*(a, b: Value): int
+func cmp*(a, b: Entry): int
+func `==`*(a, b: Value): bool
 
-  func len*(v: ty): int {.borrow.}
+# ---------------- the flat pair layout ----------------
+# a dict is held flat, k v k v
+# so no other reader has to know it.
 
-  func `[]`*[I: SomeOrdinal](v: ty, i: I): lent el =
-    seq[el](v)[i]
+func slotCount*(pairs: int): int = pairs * 2
+func pairCount*(slots: int): int = slots div 2
+func keySlot*(pair: int): int = pair * 2
+func valSlot*(pair: int): int = pair * 2 + 1
 
-implSorted(Sorted[SetOrder, Value], Value)
+func flatten*(entries: sink seq[Entry]): seq[Value] =
+  ## pairs laid out flat
+  result = newSeq[Value](slotCount(entries.len))
+  for i in 0 ..< entries.len:
+    result[keySlot(i)] = move(entries[i].key)
+    result[valSlot(i)] = move(entries[i].val)
 
-implSorted(Sorted[DictOrder, (Value, Value)], (Value, Value))
+func dedupSorted*(xs: var seq[Value]) =
+  ## drops repeats from an already sorted seq in place.
+  var n = 0
+  for i in 0 ..< xs.len:
+    if n == 0 or xs[i] != xs[n - 1]:
+      if n != i:
+        xs[n] = move(xs[i])
+      inc n
+  xs.setLen(n)
+
+func recordObj*(els: sink seq[Value]): RecordObj =
+  if els.len == 0:
+    fail("record: missing head")
+  RecordObj(els: els)
+
+func recordObj*(els: openArray[Value]): RecordObj =
+  recordObj(@els)
+
+func setObj*(els: sink seq[Value]): SetObj =
+  result = SetObj(els: els)
+  result.els.sort(cmp)
+  result.els.dedupSorted
+
+func setObj*(els: openArray[Value]): SetObj =
+  setObj(@els)
+
+func dictObj*(entries: sink seq[Entry]): DictObj =
+  var es = entries
+  es.sort(cmp)
+  let flat = flatten(es)
+  for i in 1 ..< pairCount(flat.len):
+    if flat[keySlot(i)] == flat[keySlot(i - 1)]:
+      fail("dict: duplicate key")
+  DictObj(els: flat)
+
+func dictObj*(entries: openArray[Entry]): DictObj =
+  dictObj(@entries)
+
+template containerOps(T) =
+  func `[]`*[I](v: T, i: I): lent Value =
+    v.els[i]
+  func high*(v: T): int =
+    high(v.els)
+  func len*(v: T): int =
+    v.els.len
+  func items*(v: T): lent seq[Value] =
+    v.els
+  iterator items*(v: T): lent Value =
+    for el in v.els:
+      yield el
+
+containerOps(RecordObj)
+containerOps(SetObj)
+
+func len*(v: DictObj): int = pairCount(v.els.len)
+func high*(v: DictObj): int = v.len - 1
+
+func keyAt*(v: DictObj, i: int): lent Value = v.els[keySlot(i)]
+func valAt*(v: DictObj, i: int): lent Value = v.els[valSlot(i)]
+
+iterator items*(v: DictObj): Entry =
+  for i in 0 ..< v.len:
+    yield (key: v.keyAt(i), val: v.valAt(i))
+
+func find*(v: DictObj, key: Value): int =
+  var lo = 0
+  var hi = v.len - 1
+  while lo <= hi:
+    let mid = (lo + hi) div 2
+    let c = cmp(v.keyAt(mid), key)
+    if c == 0: return mid
+    if c < 0: lo = mid + 1
+    else: hi = mid - 1
+  -1
+
+# ================ RECOGNITION ================
+func kind*(v: Value): BlKind =
+  v.kind
+
+func isKind*(v: Value, k: BlKind): bool =
+  v.kind == k
+
+func isKind*(v: Value, k: set[BlKind]): bool =
+  k.contains(v.kind)
+
+func isScalar*(v: Value): bool =
+  v.isKind({bNil, bNum, bText, bSym, bBytes})
+
+func isFrame*(v: Value): bool =
+  return v.isKind({bList, bRecord, bDict, bSet})
 
 # ================ ACCESSORS ================
 
@@ -82,9 +197,6 @@ func tag*(value: Value): 1 .. 9 =
   of bDict: 8
   of bSet: 9
 
-func kind*(v: Value): BlKind =
-  v.kind
-
 func marked*(v: Value): bool =
   v.marked
 
@@ -97,20 +209,56 @@ func text*(v: Value): lent Utf8String =
 func bytes*(v: Value): lent seq[byte] =
   v.bytes
 
-func elements*(v: Value): lent Sorted[SetOrder, Value] =
+func elements*(v: Value): lent SetObj =
   v.elements
 
-func entries*(v: Value): lent Sorted[DictOrder, (Value, Value)] =
+func entries*(v: Value): lent DictObj =
   v.entries
 
 func items*(v: Value): lent seq[Value] =
-  v.items
+  case v.kind
+  of bList:
+    return v.listv
+  of bRecord:
+    return v.rec.els
+  else:
+    raise newException(ValueError, "items: must be list or record")
+
+func high*(v: Value): int =
+  case v.kind
+  of bList:
+    v.listv.high
+  of bRecord:
+    v.rec.high
+  of bSet:
+    v.elements.high
+  of bDict:
+    v.entries.high
+  else:
+    raise newException(ValueError, "high: must be a frame")
 
 func head*(v: Value): lent Value =
-  v.items[0]
+  case v.kind
+  of bList, bRecord:
+    return v.children[0]
+  else:
+    raise newException(ValueError, "head: must be a list or record")
 
-func tail*(v: Value): seq[Value] =
-  v.items[1 .. high(v.items)]
+template tail*(v: Value): openArray[Value] =
+  v.children[min(1, v.items.len) .. v.items.len - 1]
+
+iterator tail*(v: Value): lent Value =
+  case v.kind
+  of bList, bRecord:
+    for i, el in v.items:
+      if i == 0:
+        continue
+      yield el
+  else:
+    raise newException(ValueError, "tail: must be a list or record")
+
+func rec*(v: Value): lent RecordObj =
+  v.rec
 
 func payloadLength*(value: Value): int =
   case value.kind
@@ -119,30 +267,13 @@ func payloadLength*(value: Value): int =
   of bBytes: value.bytes.len
   else: 0
 
-iterator children*(v: Value): lent Value =
-  ## Iterates a value as though it was a list
-  ##
-  ## So iteration of a dictionary yields key then yields val
-  ## sequentially
-  case v.kind
-  of bList, bRecord:
-    for item in v.items:
-      yield item
-  of bDict:
-    for (k, v) in v.entries:
-      yield k
-      yield v
-  of bSet:
-    for item in v.elements:
-      yield item
-  else:
-    discard
-
 iterator allChildren*(v: Value): lent Value {.closure.} =
-  for child in v.children:
-    yield child
-    for deep in child.allChildren:
-      yield deep
+  if v.isFrame:
+    for child in v.children:
+      yield child
+      if child.isFrame:
+        for deep in child.allChildren:
+          yield deep
 
 func hash*(v: Value): Hash =
   ## This is not a cryptographic hash!
@@ -161,34 +292,13 @@ func hash*(v: Value): Hash =
     h = h !& hash(string(v.text))
   of bBytes:
     h = h !& hash(v.bytes)
-  of bList, bRecord:
-    for c in v.items:
+  of bList, bRecord, bSet, bDict:
+    for c in v.children:
       h = h !& hash(c)
-  of bSet:
-    for c in v.elements:
-      h = h !& hash(c)
-  of bDict:
-    for (k, val) in v.entries:
-      h = h !& hash(k) !& hash(val)
-  !$h
-
-# ================ RECOGNITION ================
-
-func isKind*(v: Value, k: BlKind): bool =
-  v.kind == k
-
-func isKind*(v: Value, k: set[BlKind]): bool =
-  k.contains(v.kind)
-
-func isScalar*(v: Value): bool =
-  v.isKind({bNil, bNum, bText, bSym, bBytes})
-
-func isFrame*(v: Value): bool =
-  v.isKind({bList, bRecord, bDict, bSet})
+  result = !$h
 
 # ================ ORDERING ================
 
-func cmp*(a, b: Value): int
   ## A comparison that's faithful to a lexicographic CE byte order.
   ##
   ## The CE encoding gives all values a header byte like:
@@ -219,15 +329,15 @@ func cmp*(a, b: seq[Value]): int =
   # so a > b if a is a prefix of b
   cmp(b.len, a.len)
 
-func cmp*(a, b: seq[(Value, Value)]): int =
+func cmp*(a, b: seq[Entry]): int =
   for i in 0 ..< min(a.len, b.len):
     let
-      (aKey, aVal) = a[i]
-      (bKey, bVal) = b[i]
-    let byKey = cmp(aKey, bKey)
+      ae = a[i]
+      be = b[i]
+    let byKey = cmp(ae.key, be.key)
     if byKey != 0:
       return byKey
-    let byValue = cmp(aVal, bVal)
+    let byValue = cmp(ae.val, be.val)
     if byValue != 0:
       return byValue
   # Note! This looks backwards, but when comparing frames
@@ -257,15 +367,11 @@ func cmp*(a, b: Value): int =
     cmp(a.text, b.text)
   of bBytes:
     cmp(a.bytes, b.bytes)
-  of bList, bRecord:
-    cmp(a.items, b.items)
-  of bSet:
-    cmp(seq[Value](a.elements), seq[Value](b.elements))
-  of bDict:
-    cmp(seq[(Value, Value)](a.entries), seq[(Value, Value)](b.entries))
+  of bList, bRecord, bSet, bDict:
+    cmp(a.ravel, b.ravel)
 
-func cmpKeys(a, b: (Value, Value)): int =
-  cmp(a[0], b[0])
+func cmp*(a, b: Entry): int =
+  cmp(a.key, b.key)
 
 func `==`*(a, b: Value): bool =
   cmp(a, b) == 0
@@ -284,15 +390,14 @@ func `<=`*(a, b: Value): bool =
 
 # ================ CONVERSIONS ================
 
-func toValue*(v: Value): Value =
-  v
+func toValue*(v: sink Value): Value = v
 
 func fromValue*(v: Value, t: typedesc[Value]): Option[Value] =
   some v
 
-func mark*(v: sink Value): Value =
+func mark*(v: sink Value, marked: bool = true): Value =
   result = v
-  result.marked = true
+  result.marked = marked
 
 func unmark*(v: sink Value): Value =
   result = v
@@ -304,18 +409,13 @@ func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)
 
 func num*[T](text: T, marked = false): Value =
-    Value(kind: bNum, marked: marked, num: toDecimal(text))
+  Value(kind: bNum, marked: marked, num: toDecimal(text))
 
 func text*[T](text: T, marked = false): Value =
   Value(kind: bText, text: toValidUtf8(text), marked: marked)
 
 func sym*[T](text: T, marked = false): Value =
   Value(kind: bSym, text: toValidUtf8(text), marked: marked)
-
-func toBytes*(s: string): seq[byte] =
-  result = newSeq[byte](s.len)
-  if s.len > 0:
-    copyMem(addr result[0], addr s[0], s.len)
 
 func bytes*(bytes: sink seq[byte], marked = false): Value =
   Value(kind: bBytes, bytes: bytes, marked: marked)
@@ -324,35 +424,26 @@ func bytes*(s: string, marked = false): Value =
   Value(kind: bBytes, bytes: s.toBytes, marked: marked)
 
 func list*(items: sink seq[Value], marked = false): Value =
-  Value(kind: bList, items: items, marked: marked)
-
+  Value(kind: bList, listv: items, marked: marked)
 func list*(items: varargs[Value]): Value =
   list(@items, false)
 
-func record*(items: sink seq[Value], marked = false): Value =
-  if items.len == 0:
-    raise newException(ValueError, "record: missing head")
-  Value(kind: bRecord, items: items, marked: marked)
+func record*(rec: sink RecordObj, marked = false): Value =
+  Value(kind: bRecord, rec: rec, marked: marked)
 
-func record*(items: varargs[Value]): Value =
-  record(@items, false)
+func set*(elements: sink SetObj, marked = false): Value =
+  Value(kind: bSet, elements: elements, marked: marked)
 
-func set*(elements: sink seq[Value], marked = false): Value =
-  var es = elements
-  es.sort(cmp)
-  var unique = es.deduplicate(true)
-  Value(kind: bSet, marked: marked, elements: Sorted[SetOrder, Value](unique))
+func dict*(entries: sink DictObj, marked = false): Value =
+  Value(kind: bDict, entries: entries, marked: marked)
 
-func set*(elements: varargs[Value]): Value =
-  set(@elements, false)
+template withVarArgs(name, constructor, el: untyped) =
+  func name*(items: sink seq[el], marked = false): Value =
+    name(constructor(items), marked)
+  
+  func name*(items: varargs[el]): Value =
+    name(constructor(items), false)
 
-func dict*(entries: sink seq[(Value, Value)], marked = false): Value =
-  var es = entries
-  es.sort(cmpKeys)
-  for i in 1 ..< es.len:
-    if cmp(es[i - 1][0], es[i][0]) == 0:
-      raise newException(ValueError, "dict: duplicate key")
-  Value(kind: bDict, marked: marked, entries: Sorted[DictOrder, (Value, Value)](es))
-
-func dict*(entries: sink varargs[(Value, Value)]): Value =
-  dict(@entries, false)
+withVarArgs(record, recordObj, Value)
+withVarArgs(set, setObj, Value)
+withVarArgs(dict, dictObj, Entry)
