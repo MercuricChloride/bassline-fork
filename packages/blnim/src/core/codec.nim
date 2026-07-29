@@ -121,16 +121,18 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
     of 0x8:
       if children.len mod 2 != 0:
         fail "dict with a key missing its value"
-      var entries = newSeqOfCap[(Value, Value)](children.len div 2)
-      for i in countup(0, children.len - 1, 2):
-        entries.add (children[i], children[i + 1])
-      for i in 1 ..< entries.len:
-        if cmp(entries[i - 1][0], entries[i][0]) >= 0:
+      var entries = newSeqOfCap[Entry](pairCount(children.len))
+      for p in pairIndex(children):
+        entries.add (children[p.key], children[p.val])
+      for p in pairIndex(entries):
+        if p == 0: continue
+        if cmp(entries[p.prev].key, entries[p].key) >= 0:
           fail "dict keys out of order or duplicated"
       dict(entries).mark(marked)
     of 0x9:
-      for i in 1 ..< children.len:
-        if cmp(children[i - 1], children[i]) >= 0:
+      for s in slotIndex(children):
+        if s == 0: continue
+        if cmp(children[s.prev], children[s]) >= 0:
           fail "set members out of order or duplicated"
       set(children).mark(marked)
   of 0xA:

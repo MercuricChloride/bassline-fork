@@ -22,11 +22,11 @@ func `[]`*(v: Value, key: Value): Option[Value] =
   ## element equal to key. none when absent or the kind isn't keyed.
   case v.kind
   of bDict:
-    let i = v.entries.find(key)
-    if i < 0:
-      none Value
+    let p = v.entries.find(key)
+    if p.valid:
+      some v.entries[p.val]
     else:
-      some v.ravel[i]
+      none Value
   of bSet:
     let i = binarySearch(
       v.ravel,
@@ -95,9 +95,9 @@ func map*(v: Value, f: proc(x: Value): Value): Value {.effectsOf: f.} =
       xs.add f(x)
     set(xs).mark(v.marked)
   of bDict:
-    var es = newSeqOfCap[(Value, Value)](v.entries.len)
-    for e in v.entries:
-      es.add (e[0], f(e[1]))
+    var es = newSeqOfCap[Entry](v.entries.len)
+    for p in pairIndex(v.ravel):
+      es.add (v.ravel[p.key], f(v.ravel[p.val]))
     dict(es).mark(v.marked)
   else:
     v
@@ -127,9 +127,9 @@ func filter*(v: Value, pred: proc(x: Value): bool): Value {.effectsOf: pred.} =
     set(xs).mark(v.marked)
   of bDict:
     var es: seq[Entry]
-    for e in v.entries:
-      if pred(e[1]):
-        es.add (e[0], e[1])
+    for p in pairIndex(v.ravel):
+      if pred(v.ravel[p.val]):
+        es.add (v.ravel[p.key], v.ravel[p.val])
     dict(es).mark(v.marked)
   else:
     v

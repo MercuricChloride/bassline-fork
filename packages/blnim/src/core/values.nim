@@ -10,6 +10,9 @@ type
 
   Entry* = tuple[key: Value, val: Value]
 
+  Pair* = distinct int
+  Slot* = distinct int
+
   DictObj* = object
     els: seq[Value]
 
@@ -18,14 +21,14 @@ type
 
   BlKind* = enum
     bNil   # nil
-    bNum
+    bNum   # scalar types
     bText
     bSym
-    bBytes # scalar types
-    bList
+    bBytes
+    bList  # frame types
     bRecord
     bDict
-    bSet   # frame types
+    bSet   
 
   Value* = object
     marked: bool
@@ -57,6 +60,52 @@ type
 template fail(msg: untyped) =
   raise newException(ValueError, msg)
 
+# ================ INDICES ================
+# Slots are a flat offset just like a normal index
+# Pairs have a stride of 2
+
+func slot*(n: int): Slot =
+  Slot(n)
+func pair*(n: int): Pair =
+  Pair(n)
+
+func idx*(s: Slot): int = int(s)
+
+func key*(p: Pair): Slot =
+  slot(int(p) * 2)
+func val*(p: Pair): Slot =
+  slot(int(p) * 2 + 1)
+
+func next*(s: Slot): Slot =
+  slot s.idx + 1
+func next*(p: Pair): Pair =
+  pair int(p) + 1
+
+func prev*(s: Slot): Slot =
+  slot s.idx - 1
+func prev*(p: Pair): Pair =
+  pair int(p) - 1
+
+func `==`*(a: Slot, b: int): bool =
+  int(a) == b
+func `==`*(a: Pair, b: int): bool =
+  int(a) == b
+
+func `<=`*(a, b: Pair): bool =
+  int(a) <= int(b)
+func `mid`*(pa, pb: Pair): Pair =
+  let 
+    a = int(pa)
+    b = int(pb)
+  if a < 0 or b < 0:
+    return pair -1
+  pair((a + b) div 2)
+
+func valid*(s: Slot): bool =
+  int(s) >= 0
+func valid*(p: Pair): bool =
+  int(p) >= 0
+
 # ================ COLLECTIONS ================
 
 func ravel*(v: Value): lent seq[Value] =
@@ -76,21 +125,40 @@ func cmp*(a, b: Value): int
 func cmp*(a, b: Entry): int
 func `==`*(a, b: Value): bool
 
-# ---------------- the flat pair layout ----------------
-# a dict is held flat, k v k v
-# so no other reader has to know it.
+# ================ Flat Indexing ================
 
 func slotCount*(pairs: int): int = pairs * 2
 func pairCount*(slots: int): int = slots div 2
-func keySlot*(pair: int): int = pair * 2
-func valSlot*(pair: int): int = pair * 2 + 1
 
-func flatten*(entries: sink seq[Entry]): seq[Value] =
+iterator pairIndex*(s: seq[Value]): Pair =
+  ## the entries of a flat k v k v payload, by ordinal
+  for n in 0 ..< pairCount(s.len):
+    yield pair(n)
+
+iterator pairIndex*(s: seq[Entry]): Pair =
+  for n in 0 ..< len(s):
+    yield pair(n)
+
+iterator slotIndex*[T](s: T): Slot =
+  for n in 0 ..< len(s):
+    yield slot(n)
+
+func `[]`*(xs: seq[Value], s: Slot): lent Value = xs[s.idx]
+func `[]=`*(xs: var seq[Value], s: Slot, v: sink Value) = xs[s.idx] = v
+
+func `[]`*(xs: seq[Value], p: Pair): (lent Value, lent Value) =
+  (xs[p.key], xs[p.val])
+func `[]=`*(xs: var seq[Value], p: Pair, v: (sink Value, sink Value)) =
+  xs[p.key] = v[0]
+  xs[p.val] = v[1]
+func `[]`*(xs: seq[Entry], p: Pair): lent Entry =
+  xs[p.int]
+
+func flatten*(es: sink seq[Entry]): seq[Value] =
   ## pairs laid out flat
-  result = newSeq[Value](slotCount(entries.len))
-  for i in 0 ..< entries.len:
-    result[keySlot(i)] = move(entries[i].key)
-    result[valSlot(i)] = move(entries[i].val)
+  result = newSeq[Value](slotCount(es.len))
+  for i, e in es.toOpenArray(0, es.len - 1):
+    result[pair(i)] = (e.key, e.val)
 
 func dedupSorted*(xs: var seq[Value]) =
   ## drops repeats from an already sorted seq in place.
@@ -122,8 +190,9 @@ func dictObj*(entries: sink seq[Entry]): DictObj =
   var es = entries
   es.sort(cmp)
   let flat = flatten(es)
-  for i in 1 ..< pairCount(flat.len):
-    if flat[keySlot(i)] == flat[keySlot(i - 1)]:
+  for p in pairIndex(flat):
+    if p == 0: continue
+    if flat[p.key] == flat[p.prev.key]:
       fail("dict: duplicate key")
   DictObj(els: flat)
 
@@ -146,26 +215,33 @@ template containerOps(T) =
 containerOps(RecordObj)
 containerOps(SetObj)
 
-func len*(v: DictObj): int = pairCount(v.els.len)
-func high*(v: DictObj): int = v.len - 1
+func len*(v: DictObj): int =
+  ## The dict's ravel slot length
+  v.els.len
 
-func keyAt*(v: DictObj, i: int): lent Value = v.els[keySlot(i)]
-func valAt*(v: DictObj, i: int): lent Value = v.els[valSlot(i)]
+func `[]`*(v: DictObj, p: Pair): (lent Value, lent Value) =
+  v.els[p]
+func `[]`*(v: DictObj, s: Slot): Value =
+  v.els[s]
 
-iterator items*(v: DictObj): Entry =
-  for i in 0 ..< v.len:
-    yield (key: v.keyAt(i), val: v.valAt(i))
+func highPair(v: DictObj): Pair =
+  ## the last pair in a dict
+  pair pairCount(v.len) - 1
 
-func find*(v: DictObj, key: Value): int =
-  var lo = 0
-  var hi = v.len - 1
+func find*(v: DictObj, key: Value): Pair =
+  ## returns a pair with key of key or an invalid pair
+  var lo = pair 0
+  var hi = v.highPair
   while lo <= hi:
-    let mid = (lo + hi) div 2
-    let c = cmp(v.keyAt(mid), key)
-    if c == 0: return mid
-    if c < 0: lo = mid + 1
-    else: hi = mid - 1
-  -1
+    let 
+      m = mid(lo, hi)
+      c = cmp(v[m.key], key)
+    if c == 0: 
+      return m
+    if c < 0: 
+      lo = m.next
+    else: hi = m.prev
+  pair -1
 
 # ================ RECOGNITION ================
 func kind*(v: Value): BlKind =
@@ -224,19 +300,6 @@ func items*(v: Value): lent seq[Value] =
   else:
     raise newException(ValueError, "items: must be list or record")
 
-func high*(v: Value): int =
-  case v.kind
-  of bList:
-    v.listv.high
-  of bRecord:
-    v.rec.high
-  of bSet:
-    v.elements.high
-  of bDict:
-    v.entries.high
-  else:
-    raise newException(ValueError, "high: must be a frame")
-
 func head*(v: Value): lent Value =
   case v.kind
   of bList, bRecord:
@@ -245,17 +308,7 @@ func head*(v: Value): lent Value =
     raise newException(ValueError, "head: must be a list or record")
 
 template tail*(v: Value): openArray[Value] =
-  v.children[min(1, v.items.len) .. v.items.len - 1]
-
-iterator tail*(v: Value): lent Value =
-  case v.kind
-  of bList, bRecord:
-    for i, el in v.items:
-      if i == 0:
-        continue
-      yield el
-  else:
-    raise newException(ValueError, "tail: must be a list or record")
+  v.items.toOpenArray(min(1, v.items.len), v.items.len - 1)
 
 func rec*(v: Value): lent RecordObj =
   v.rec
