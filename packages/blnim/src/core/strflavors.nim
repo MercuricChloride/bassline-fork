@@ -15,6 +15,8 @@ template strDefaults*(T: typedesc) =
   func `cmp`*(a, b: T): int {.borrow.}
 
   func `$`*(a: T): string {.borrow.}
+  func `[]`*[I](a: T, i: I): char =
+    string(a)[i]
 
   func toString*(s: T): string =
     string(s)

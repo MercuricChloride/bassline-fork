@@ -60,6 +60,12 @@ type
 template fail(msg: untyped) =
   raise newException(ValueError, msg)
 
+# ================ FORWARD DECL ================
+
+func cmp*(a, b: Value): int
+func cmp*(a, b: Entry): int
+func `==`*(a, b: Value): bool
+
 # ================ INDICES ================
 # Slots are a flat offset just like a normal index
 # Pairs have a stride of 2
@@ -109,8 +115,8 @@ func valid*(p: Pair): bool =
 # ================ COLLECTIONS ================
 
 func ravel*(v: Value): lent seq[Value] =
-  ## every frame's contiguous payload in CE order; a dict's is its flat
-  ## k v k v -- exactly what `children` already promises
+  ## returns a frame's contiguous payload in CE order
+  ## For dicts this is k v k v
   case v.kind
   of bList:   return v.listv
   of bRecord: return v.rec.els
@@ -121,18 +127,16 @@ func ravel*(v: Value): lent seq[Value] =
 template children*(v: Value): openArray[Value] =
   v.ravel.toOpenArray(0, v.ravel.len - 1)
 
-func cmp*(a, b: Value): int
-func cmp*(a, b: Entry): int
-func `==`*(a, b: Value): bool
-
 # ================ Flat Indexing ================
 
-func slotCount*(pairs: int): int = pairs * 2
-func pairCount*(slots: int): int = slots div 2
+func slotLen*[T](col: T): int 
+  = len(col)
+func pairLen*[T](col: T): int
+  = len(col) div 2
 
 iterator pairIndex*(s: seq[Value]): Pair =
   ## the entries of a flat k v k v payload, by ordinal
-  for n in 0 ..< pairCount(s.len):
+  for n in 0 ..< pairLen(s):
     yield pair(n)
 
 iterator pairIndex*(s: seq[Entry]): Pair =
@@ -148,15 +152,15 @@ func `[]=`*(xs: var seq[Value], s: Slot, v: sink Value) = xs[s.idx] = v
 
 func `[]`*(xs: seq[Value], p: Pair): (lent Value, lent Value) =
   (xs[p.key], xs[p.val])
+func `[]`*(xs: seq[Entry], p: Pair): lent Entry =
+  xs[int(p)]
 func `[]=`*(xs: var seq[Value], p: Pair, v: (sink Value, sink Value)) =
   xs[p.key] = v[0]
   xs[p.val] = v[1]
-func `[]`*(xs: seq[Entry], p: Pair): lent Entry =
-  xs[p.int]
 
 func flatten*(es: sink seq[Entry]): seq[Value] =
   ## pairs laid out flat
-  result = newSeq[Value](slotCount(es.len))
+  result = newSeq[Value](slotLen(es) * 2)
   for i, e in es.toOpenArray(0, es.len - 1):
     result[pair(i)] = (e.key, e.val)
 
@@ -226,7 +230,7 @@ func `[]`*(v: DictObj, s: Slot): Value =
 
 func highPair(v: DictObj): Pair =
   ## the last pair in a dict
-  pair pairCount(v.len) - 1
+  pair pairLen(v.els) - 1
 
 func find*(v: DictObj, key: Value): Pair =
   ## returns a pair with key of key or an invalid pair
@@ -460,6 +464,8 @@ func unmark*(v: sink Value): Value =
 
 func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)
+
+const Nil* = nilValue()
 
 func num*[T](text: T, marked = false): Value =
   Value(kind: bNum, marked: marked, num: toDecimal(text))

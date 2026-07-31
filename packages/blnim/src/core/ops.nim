@@ -21,6 +21,11 @@ func `[]`*(v: Value, key: Value): Option[Value] =
   ## answers with the value under key, a set answers with its own
   ## element equal to key. none when absent or the kind isn't keyed.
   case v.kind
+  of bList, bRecord:
+    if key.kind != bNum:
+      return none Value
+    let n = key.num.parseInt()
+    some v.ravel[n]
   of bDict:
     let p = v.entries.find(key)
     if p.valid:

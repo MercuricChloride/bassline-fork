@@ -121,7 +121,7 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
     of 0x8:
       if children.len mod 2 != 0:
         fail "dict with a key missing its value"
-      var entries = newSeqOfCap[Entry](pairCount(children.len))
+      var entries = newSeqOfCap[Entry](children.len div 2)
       for p in pairIndex(children):
         entries.add (children[p.key], children[p.val])
       for p in pairIndex(entries):
@@ -183,7 +183,7 @@ func write*(w: var string, bytes: openArray[byte]) =
     w.setLen(start + bytes.len)
     copyMem(addr w[start], addr bytes[0], bytes.len)
 
-func encodeInto*[W](value: Value, w: var W) =
+proc encodeInto*[W](value: Value, w: var W) =
   ## Writes the CE bytes of `value` to any writer providing
   ## `write(var W, byte)` and `write(var W, openArray[byte])`.
   let
