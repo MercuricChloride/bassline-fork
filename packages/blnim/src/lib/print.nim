@@ -38,7 +38,12 @@ func `$`*(v: Value): string =
       if v.entries.len == 0:
         "{:}"
       else:
-        "{" & v.entries.mapIt($it[0] & ": " & $it[1]).join(" ") & "}"
+        var strings: seq[string] = @[]
+        for p in pairIndex(v.ravel):
+          strings.add (
+            $v.ravel[p.key] & ": " & $v.ravel[p.val]
+          )
+        "{" & strings.join(" ") & "}"
   if not v.marked:
     core
   elif v.isFrame:

@@ -79,6 +79,50 @@ proc eachValue*(input: File, action: proc(v: Value)) =
   if sd.buffered > 0:
     quit "input ends mid-value (" & $sd.buffered & " incomplete bytes)"
 
+proc eachValueTicking*(
+    input: File, action: proc(v: Value), everyMs: int, tick: proc()
+) =
+  ## `eachValue`, but `tick` also runs whenever `everyMs` goes by with
+  ## nothing to read, and once more at the end.
+  ##
+  ## A reader on a pipe that never closes has to be able to act on what
+  ## it already has; waiting for the end is waiting forever. The quiet
+  ## is also what makes the acting safe -- a burst that is still
+  ## arriving is not yet a thing to judge complete.
+  var sd = initStreamDecoder(maxValueBytes = high(int) div 2)
+  var buf = newSeq[byte](64 * 1024)
+  let fd = input.getFileHandle
+  var pfd = TPollfd(fd: cint(fd), events: POLLIN, revents: 0)
+  while true:
+    let ready = posix.poll(addr pfd, Tnfds(1), cint(everyMs))
+    if ready < 0:
+      if errno == EINTR:
+        continue
+      quit "poll failed: " & $strerror(errno)
+    if ready == 0:
+      tick()
+      continue
+    let n = posix.read(fd, addr buf[0], buf.len)
+    if n < 0:
+      if errno == EINTR:
+        continue
+      quit "read failed: " & $strerror(errno)
+    if n == 0:
+      break
+    sd.feed(buf.toOpenArray(0, n - 1))
+    while true:
+      let v =
+        try:
+          sd.next()
+        except DecodeError as e:
+          quit "input isn't a value stream: " & e.msg
+      if v.isNone:
+        break
+      action(v.get)
+  if sd.buffered > 0:
+    quit "input ends mid-value (" & $sd.buffered & " incomplete bytes)"
+  tick()
+
 proc seededRand*(seed: int, given: bool): Rand =
   ## Sampling repeats exactly when you say which run you want. When you
   ## don't, it picks one and says which, so any run can be had again --
@@ -90,12 +134,58 @@ proc seededRand*(seed: int, given: bool): Rand =
     stderr.writeLine "-- seed " & $s
   initRand(s)
 
+const WriterBuf = 256 * 1024
+
+type ValueWriter* = object
+  ## A bounded staging area in front of a File, so `encodeInto` never has
+  ## to hold a whole encoding. Headers, names and keys accumulate; a piece
+  ## already at least as big as the buffer goes straight to the descriptor
+  ## uncopied, so a large payload is never doubled to be written.
+  f: File
+  buf: seq[byte]
+
+proc writerOn*(f: File): ValueWriter =
+  ValueWriter(f: f, buf: newSeqOfCap[byte](WriterBuf))
+
+proc put(w: var ValueWriter, p: pointer, n: int) =
+  if w.f.writeBuffer(p, n) != n:
+    quit "short write to output"
+
+proc flush*(w: var ValueWriter) =
+  if w.buf.len > 0:
+    w.put(addr w.buf[0], w.buf.len)
+    w.buf.setLen(0)
+
+proc write*(w: var ValueWriter, b: byte) =
+  w.buf.add b
+  if w.buf.len >= WriterBuf:
+    w.flush()
+
+proc write*(w: var ValueWriter, bytes: openArray[byte]) =
+  if bytes.len == 0:
+    return
+  if bytes.len >= WriterBuf:
+    # big enough to be its own write; staging it would only copy it
+    w.flush()
+    w.put(addr bytes[0], bytes.len)
+  else:
+    let start = w.buf.len
+    w.buf.setLen(start + bytes.len)
+    copyMem(addr w.buf[start], addr bytes[0], bytes.len)
+    if w.buf.len >= WriterBuf:
+      w.flush()
+
+proc writeValue*(w: var ValueWriter, v: Value) =
+  ## `v` onto the writer. Nothing beyond the staging buffer is held.
+  encodeInto(v, w)
+
+var stdoutWriter = writerOn(stdout)
+
 proc emit*(v: Value) =
   ## One value onto stdout, flushed. A filter in a live pipeline must
   ## pass each value on now, not when its stdio buffer happens to fill.
-  let ce = encode(v)
-  if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
-    quit "short write to stdout"
+  stdoutWriter.writeValue v
+  stdoutWriter.flush()
   stdout.flushFile()
 
 proc runFilter*[T: ValueLike](f: proc(v: Value): Option[T]) =

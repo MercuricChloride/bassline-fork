@@ -1,5 +1,5 @@
 import std/[deques, tables, hashes, algorithm, strutils]
-import ../core/values
+import ../core
 import ./print
 
 type
@@ -11,16 +11,17 @@ type
     read*: Step ## hears inert values; nil discards them
     exec*: Step ## hears marked values; nil discards them
 
-  DestKind = enum
+  DestKind* = enum
     dPid
     dAlias
 
-  Dest = object
-    case kind: DestKind
+  Dest* = object
+    ## a route destination, readable through the window
+    case kind*: DestKind
     of dPid:
-      pid: Pid
+      pid*: Pid
     of dAlias:
-      name: Value
+      name*: Value
 
   Process* = object
     pid*: Pid
@@ -39,9 +40,10 @@ type
     routes: Table[(Pid, Value), seq[Dest]]
     runq: Deque[Pid]
     stepping: bool
+    lastReduced*: Pid ## bookkeeping: who reduced last; does not travel
 
 func `==`*(a, b: Pid): bool {.borrow.}
-func hash(a: Pid): Hash {.borrow.}
+func hash*(a: Pid): Hash {.borrow.}
 func `$`*(a: Pid): string {.borrow.}
 
 const
@@ -64,7 +66,7 @@ template stepIt*(body: untyped): Step =
   )
 
 proc initRuntime*(): Runtime =
-  Runtime()
+  Runtime(lastReduced: NoPid)
 
 # ================ RESHAPING ================
 # Everything here asserts it runs between steps, never during one.
@@ -110,6 +112,37 @@ proc wire*(rt: Runtime, src: Pid, label: Value, dst: Value) =
   ## late-bound: the alias re-resolves at every emission
   reshapes rt
   rt.routes.mgetOrPut((src, label), @[]).add Dest(kind: dAlias, name: dst)
+
+proc dropDest(rt: Runtime, src: Pid, label: Value, matches: proc(d: Dest): bool) =
+  let key = (src, label)
+  if key notin rt.routes:
+    return # unwiring what was never wired is silence, like unalias
+  var ds = rt.routes[key]
+  for i in 0 ..< ds.len:
+    if matches(ds[i]):
+      ds.delete(i)
+      break
+  if ds.len == 0:
+    rt.routes.del key
+  else:
+    rt.routes[key] = ds
+
+proc unwire*(rt: Runtime, src: Pid, label: Value, dst: Pid) =
+  ## remove one early-bound destination
+  reshapes rt
+  rt.dropDest(src, label, proc(d: Dest): bool =
+    d.kind == dPid and d.pid == dst)
+
+proc unwire*(rt: Runtime, src: Pid, label: Value, dst: Value) =
+  ## remove one late-bound destination
+  reshapes rt
+  rt.dropDest(src, label, proc(d: Dest): bool =
+    d.kind == dAlias and d.name == dst)
+
+proc unwire*(rt: Runtime, src: Pid, label: Value) =
+  ## remove the whole label
+  reshapes rt
+  rt.routes.del (src, label)
 
 # ================ DELIVERY ================
 
@@ -205,6 +238,7 @@ proc step*(rt: Runtime): bool =
       else:
         rt.behaviors[behavior].read
     inc rt.procs[i].reductions
+    rt.lastReduced = pid
     if lane == nil:
       inc rt.procs[i].dropped
       rt.report(UnheardName, record(sym"unheard", behavior, msg), pid)
@@ -252,13 +286,30 @@ func done*(rt: Runtime): bool =
 # outside the runtime can mutate through it. The loan is momentary —
 # read it and let go, never in the same expression as a reshaping
 # call, and taking its address is out of contract. `let p = rt[pid]`
-# copies deeply and is always safe.
+# usually binds a deep copy, but the optimizer may borrow: keep its
+# last use before any reshape.
 
 func len*(rt: Runtime): int =
   rt.procs.len
 
 func `[]`*(rt: Runtime, pid: Pid): lent Process =
   rt.procs[int(pid)]
+
+iterator eachRoute*(rt: Runtime): (Pid, Value, seq[Dest]) =
+  ## the wiring, for a screen: (from, label, destinations). The
+  ## tables are read where they lie — collect first if you mean to
+  ## reshape; never reshape mid-walk
+  for key, dests in rt.routes:
+    yield (key[0], key[1], dests)
+
+iterator eachAlias*(rt: Runtime): (Value, Pid) =
+  for name, pid in rt.aliases:
+    yield (name, pid)
+
+iterator eachBehavior*(rt: Runtime): Value =
+  ## the palette: every behavior key held
+  for k in rt.behaviors.keys:
+    yield k
 
 # ================ THE RUNTIME AS A VALUE ================
 # (runtime [procs] {aliases} [routes]) — a proc is
@@ -349,8 +400,8 @@ proc restore*(rt: Runtime, doc: Value) =
       bad "a proc is (proc <behavior> <state> [mail…]) or (gone)"
 
   var aliases: Table[Value, Pid]
-  for (name, pid) in als.entries:
-    aliases[name] = asPid(pid)
+  for p in pairIndex(als.entries):
+    aliases[als.entries[p.key]] = asPid(als.entries[p.val])
 
   var routes: Table[(Pid, Value), seq[Dest]]
   for r in rts.items:

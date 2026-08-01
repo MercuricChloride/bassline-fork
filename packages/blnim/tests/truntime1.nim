@@ -424,6 +424,75 @@ suite "the unheard name":
     check rt[d].dropped == 1
     check rt[d].state == list()
 
+suite "rewiring and looking around":
+  test "unwire removes one destination, or the label":
+    var rt = initRuntime()
+    let fwdRead = stepIt:
+      emit(sym"out", it)
+    rt.install sym"fwd", Behavior(read: fwdRead)
+    rt.install sym"rec", Behavior(read: recRead)
+    let f = rt.spawn(sym"fwd")
+    let r1 = rt.spawn(sym"rec", list())
+    let r2 = rt.spawn(sym"rec", list())
+    rt.wire f, sym"out", r1
+    rt.wire f, sym"out", r2
+    rt.wire f, sym"out", sym"printer"
+    rt.alias sym"printer", r1
+    rt.unwire f, sym"out", r1 # drop one early-bound ear
+    rt.post f, num"1"
+    rt.drive()
+    check rt[r1].state == list(num"1") # via the alias only
+    check rt[r2].state == list(num"1")
+    rt.unwire f, sym"out", sym"printer" # drop the late-bound one
+    rt.post f, num"2"
+    rt.drive()
+    check rt[r1].state == list(num"1")
+    check rt[r2].state == list(num"1", num"2")
+    rt.unwire f, sym"out" # drop the whole label
+    rt.post f, num"3"
+    rt.drive()
+    check rt[r2].state == list(num"1", num"2")
+    rt.unwire f, sym"never" # unwiring the unwired is silence
+
+  test "the window reaches the tables":
+    var rt = initRuntime()
+    rt.install sym"rec", Behavior(read: recRead)
+    let a = rt.spawn(sym"rec", list())
+    let b = rt.spawn(sym"rec", list())
+    rt.wire a, sym"out", b
+    rt.wire a, sym"out", sym"printer"
+    rt.wire b, sym"back", a
+    rt.alias sym"printer", b
+    var routeCount, destCount, aliasCount, behaviorCount = 0
+    for (src, label, dests) in rt.eachRoute:
+      inc routeCount
+      destCount += dests.len
+      for d in dests:
+        if d.kind == dAlias:
+          check d.name == sym"printer"
+    for (name, pid) in rt.eachAlias:
+      inc aliasCount
+      check name == sym"printer" and pid == b
+    for k in rt.eachBehavior:
+      inc behaviorCount
+      check k == sym"rec"
+    check routeCount == 2
+    check destCount == 3
+    check aliasCount == 1
+    check behaviorCount == 1
+
+  test "lastReduced points at the turn just taken":
+    var rt = initRuntime()
+    rt.install sym"rec", Behavior(read: recRead)
+    let a = rt.spawn(sym"rec", list())
+    let b = rt.spawn(sym"rec", list())
+    rt.post a, num"1"
+    rt.post b, num"2"
+    discard rt.step()
+    check rt.lastReduced == a
+    discard rt.step()
+    check rt.lastReduced == b
+
 suite "restore refuses the unspoken":
   test "refusal is whole: nothing commits, and a retry succeeds":
     var rt = initRuntime()

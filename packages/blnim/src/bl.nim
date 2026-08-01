@@ -1,8 +1,8 @@
 import std/parseopt
 import
   cmd/[
-    listen, file, send, hash, cat, keygen, sign, verify, put, get, read, grep, classify,
-    gen, gram,
+    listen, file, assemble, send, hash, cat, keygen, sign, verify, put, get, read,
+    borth
   ]
 
 proc printHelp() =
@@ -12,7 +12,8 @@ bl -- bassline cli
 Usage:
   bl listen [on] [--echo]        open a landing for values to stdout
   bl file <path>                 write a file or directory to stdout
-                                 as a value
+                                 as chunks and manifests
+  bl assemble --into <path>      put a chunked tree back
   bl send [dest]                 send values from stdin to a landing
   bl hash                        name each stdin value by content
   bl cat [file ...]              print values as text
@@ -22,10 +23,7 @@ Usage:
   bl verify                      check signed values, emit the inner
   bl put [--store:PATH]          hold stdin values, emit their names
   bl get [--store:PATH]          resolve digest names to content
-  bl grep <grammar>              pass on the values a grammar admits
-  bl classify <grammar>          name every rule that admits each value
-  bl gen <grammar>               write values a grammar admits
-  bl grammar <what> <grammar>    show, digest, lint, diff
+  bl borth [file ...]            run borth documents, or stdin live
   bl <command> --help            command-specific help
   bl -h | --help
   bl -v | --version
@@ -58,6 +56,9 @@ proc main() =
       of "file":
         file.run(p.remainingArgs())
         return
+      of "assemble":
+        assemble.run(p.remainingArgs())
+        return
       of "send":
         send.run(p.remainingArgs())
         return
@@ -85,17 +86,8 @@ proc main() =
       of "get":
         get.run(p.remainingArgs())
         return
-      of "grep":
-        grep.run(p.remainingArgs())
-        return
-      of "classify":
-        classify.run(p.remainingArgs())
-        return
-      of "gen":
-        gen.run(p.remainingArgs())
-        return
-      of "grammar":
-        gram.run(p.remainingArgs())
+      of "borth":
+        borth.run(p.remainingArgs())
         return
       else:
         echo "unknown command: ", p.key

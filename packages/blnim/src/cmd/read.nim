@@ -22,10 +22,10 @@ proc emit(src, name: string) =
       readDocument(src)
     except ReadError as e:
       quit name & ": " & e.msg
+  var w = writerOn(stdout)
   for v in vs:
-    let ce = encode(v)
-    if stdout.writeBuffer(addr ce[0], ce.len) != ce.len:
-      quit "short write to stdout"
+    w.writeValue v
+  w.flush()
   stdout.flushFile()
 
 proc run*(args: seq[string]) =

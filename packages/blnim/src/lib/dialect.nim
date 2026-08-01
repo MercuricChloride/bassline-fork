@@ -62,15 +62,18 @@ func litOf[S: static string](t: typedesc[Lit[S]]): string =
 
 # ================ TO VALUE ================
 
-func toValue*[T](x: T): Value
+func toValue*[T](x: sink T): Value
 
-func toValueObj[T: object](x: T): Value =
+func toValueObj[T: object](x: sink T): Value =
   mixin toValue
+  var y = x
   when T.hasCustomPragma(blRecord):
     var fields = @[sym(T.getCustomPragmaVal(blRecord))]
-    for name, f in x.fieldPairs:
+    for name, f in y.fieldPairs:
       when hasCustomPragma(f, blSet):
-        when typeof(f) is seq:
+        when typeof(f) is seq[Value]:
+          fields.add values.set(move(f))
+        elif typeof(f) is seq:
           var els = newSeqOfCap[Value](f.len)
           for it in f:
             els.add toValue(it)
@@ -78,11 +81,11 @@ func toValueObj[T: object](x: T): Value =
         else:
           {.error: "blSet needs a seq field".}
       else:
-        fields.add toValue(f)
+        fields.add toValue(move(f))
     record(fields)
   elif T.hasCustomPragma(blDict):
     var entries: seq[(Value, Value)]
-    for name, f in x.fieldPairs:
+    for name, f in y.fieldPairs:
       const key =
         when hasCustomPragma(f, blKey):
           getCustomPragmaVal(f, blKey)
@@ -90,14 +93,14 @@ func toValueObj[T: object](x: T): Value =
           name
       when typeof(f) is Option:
         if f.isSome:
-          entries.add (sym(key), toValue(f.get))
+          entries.add (sym(key), toValue(move(f.get)))
       else:
-        entries.add (sym(key), toValue(f))
+        entries.add (sym(key), toValue(move(f)))
     dict(entries)
   else:
     {.error: $T & " needs {.blRecord: \"head\".} or {.blDict.} to be a dialect".}
 
-func toValue*[T](x: T): Value =
+func toValue*[T](x: sink T): Value =
   mixin toValue
   when T is Value:
     x
@@ -166,7 +169,8 @@ func fromValue*[X](v: Value, t: typedesc[seq[X]]): Option[seq[X]] =
     if v.kind != bList or v.marked:
       return none(seq[X])
     var res: seq[X]
-    for item in v.items:
+    # children borrows the payload; items copies it to iterate
+    for item in v.children:
       let p = fromValue(item, X)
       if p.isNone:
         return none(seq[X])
@@ -181,15 +185,15 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
   when T.hasCustomPragma(blRecord):
     if v.kind != bRecord or v.marked:
       return none(T)
-    if v.items[0] != sym(T.getCustomPragmaVal(blRecord)):
+    if v.rec[0] != sym(T.getCustomPragmaVal(blRecord)):
       return none(T)
     var res: T
     var i = 1
     for name, f in res.fieldPairs:
-      if i >= v.items.len:
+      if i >= v.rec.len:
         return none(T)
       when hasCustomPragma(f, blSet):
-        let el = v.items[i]
+        let el = v.rec[i]
         if el.kind != bSet or el.marked:
           return none(T)
         for j in 0 ..< el.elements.len:
@@ -198,12 +202,12 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
             return none(T)
           f.add p.get
       else:
-        let p = fromValue(v.items[i], typeof(f))
+        let p = fromValue(v.rec[i], typeof(f))
         if p.isNone:
           return none(T)
         f = p.get
       inc i
-    if i != v.items.len:
+    if i != v.rec.len:
       return none(T)
     some(res)
   elif T.hasCustomPragma(blDict):
@@ -218,20 +222,20 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
         else:
           name
       let keyVal = sym(key)
-      var found = false
-      for j in 0 ..< v.entries.len:
-        if v.entries[j][0] == keyVal:
-          let p = fromValue(v.entries[j][1], typeof(f))
-          if p.isNone:
-            return none(T)
-          f = p.get
-          found = true
-          inc matched
-          break
-      if not found:
+      # keys are canonically sorted and unique, so the scan was a binary
+      # search spelled long
+      let j = v.entries.find(keyVal)
+      if j.valid:
+        let p = fromValue(v.entries[j.val], typeof(f))
+        if p.isNone:
+          return none(T)
+        f = p.get
+        inc matched
+      else:
         when typeof(f) isnot Option:
           return none(T)
-    if matched != v.entries.len:
+    # a dict's len counts slots, and an entry is two of them
+    if matched != (v.entries.len div 2):
       # unknown keys: this shape is closed
       return none(T)
     some(res)
