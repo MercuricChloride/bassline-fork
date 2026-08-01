@@ -1,0 +1,69 @@
+;; Hello bassline/borth
+;; This is lowkey garbage, but it's just proving a point.
+[ read-value! read-value! swap! macro! ]
+macro macro!
+
+macro def [ read-value! read-value! swap! define! ]
+macro var [ read-value! var! ]
+macro = [ read-value! swap! set! ]
+macro fry [ read-value! fry! ]
+macro lit [ read-value! ]
+
+def case [ swap! at! do! ]
+
+def over [ [ dup! ] dip! swap! ]
+def keep [ over! [ do! ] dip! ]
+def rot [ [ swap! ] dip! swap! ]
+macro .dump [ stack-height! take! dup! echo! splice! ]
+
+def cons [ [ 2! -1! ] fry! ]
+def cat [ [ -2! -1! ] fry! ]
+def ->list [ [ -1! ] fry! ]
+def ->record [ ( -1! ) fry! ]
+def ->set [ { -1! } fry! ]
+
+def drop-keys [
+  [ over! 1! swap! has?!
+    { present: [ drop! drop! ] absent: [ ->entry! merge! ] }
+    case!
+  ] fry!
+  [ {:} swap! ] dip!
+  each!
+]
+
+def sym-diff [ over! over! swap! difference! [ difference! ] dip! merge! ]
+def included? [
+  difference! len! 0 num-cmp!
+  { eq: [ included ] lt: [ excluded ] gt: [ excluded ] }
+  case!
+]
+
+def splice [ [] each! ]
+
+def first [ 0 at! ]
+def list-rest [ dup! len! 1 sub! [ splice! ] dip! take! swap! drop! ]
+def rest [
+  dup! kind!
+  { list: [ list-rest! ] record: [ ->list! list-rest! ] }
+  case!
+]
+
+def marked? [
+  dup! mark! cmp!
+  { lt: [ unmarked ] eq: [ marked ] gt: [ unmarked ] }
+  case!
+]
+
+; entries are a 1-ary dict
+; and we can produce a big dict by folding
+; entries together
+def ->entry [ { 2! : 1! } fry! ]
+
+def iota-go [
+  dup! 0 num-cmp! { 
+    gt: [ 1 sub! dup! rot! cons! swap! iota-go! ]
+    eq: [ drop! ]
+    lt: [ drop! ]
+  } case!
+]
+def iota [ [] swap! iota-go! ]

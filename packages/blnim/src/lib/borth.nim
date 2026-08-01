@@ -1,2 +1,2 @@
-import ./borth/[runtime, bcore]
-export runtime, bcore
+import ./borth/[runtime, words, bcore]
+export runtime, words, bcore

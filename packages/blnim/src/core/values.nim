@@ -174,14 +174,6 @@ func dedupSorted*(xs: var seq[Value]) =
       inc n
   xs.setLen(n)
 
-func recordObj*(els: sink seq[Value]): RecordObj =
-  if els.len == 0:
-    fail("record: missing head")
-  RecordObj(els: els)
-
-func recordObj*(els: openArray[Value]): RecordObj =
-  recordObj(@els)
-
 func setObj*(els: sink seq[Value]): SetObj =
   result = SetObj(els: els)
   result.els.sort(cmp)
@@ -189,6 +181,14 @@ func setObj*(els: sink seq[Value]): SetObj =
 
 func setObj*(els: openArray[Value]): SetObj =
   setObj(@els)
+
+func recordObj*(els: sink seq[Value]): RecordObj =
+  if els.len == 0:
+    fail("record: missing head")
+  RecordObj(els: els)
+
+func recordObj*(els: openArray[Value]): RecordObj =
+  recordObj(@els)
 
 func dictObj*(entries: sink seq[Entry]): DictObj =
   var es = entries
@@ -202,6 +202,15 @@ func dictObj*(entries: sink seq[Entry]): DictObj =
 
 func dictObj*(entries: openArray[Entry]): DictObj =
   dictObj(@entries)
+
+func dictFromRavel*(kv: seq[Value]): DictObj =
+  ## a flat k v k v payload as a dict
+  if kv.len mod 2 != 0:
+    fail("dict: a ravel alternates key, value")
+  var es = newSeqOfCap[Entry](kv.len div 2)
+  for p in pairIndex(kv):
+    es.add (kv[p.key], kv[p.val])
+  dictObj(es)
 
 template containerOps(T) =
   func `[]`*[I](v: T, i: I): lent Value =
@@ -246,6 +255,22 @@ func find*(v: DictObj, key: Value): Pair =
       lo = m.next
     else: hi = m.prev
   pair -1
+
+iterator pairIndex*(v: DictObj): Pair =
+  for p in pairIndex(v.els):
+    yield p
+
+func keySet*(v: sink DictObj): SetObj =
+  var items: seq[Value] = @[]
+  for p in pairIndex(v):
+    items.add v[p.key]
+  setObj(items)
+
+func valueSet*(v: sink DictObj): SetObj =
+  var items: seq[Value] = @[]
+  for p in pairIndex(v):
+    items.add v[p.val]
+  setObj(items)
 
 # ================ RECOGNITION ================
 func kind*(v: Value): BlKind =

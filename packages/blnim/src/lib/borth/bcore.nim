@@ -1,206 +1,286 @@
 import pkg/core
 import pkg/lib/print
 import ./runtime
+import ./words
 
-func allKind(kinds: set[BlKind], values: varargs[Value]): bool =
-  for v in values:
-    if not v.isKind(kinds):
-      return false
-  true
+const
+  Lt = sym"lt"
+  Gt = sym"gt"
+  Eq = sym"eq"
 
-template op*(name, body) =
-  proc name(
-    rt {.inject.}: var Runtime,
-    w {.inject.}: var Word) =
-    body
-
-template unary(a, body) =
-  let a = pop rt
-  body
-
-template binary(a, b, body) =
-  let
-    b = pop rt
-    a = pop rt
-  body
-
-template numeric(name, body) =
+template numeric(body) {.dirty.} =
   binary a, b:
     if not allKind({bNum}, a, b):
-      fail name & ": requires 2 numbers"
-    body
+      refuse "requires 2 numbers"
+    lifted:
+      body
 
-## numeric ops ================
-op addOp:
-  numeric "add":
-    rt.push num(a.num + b.num)
+wordSet installCore:
+  ## numeric ================
 
-op subOp:
-  numeric "sub":
-    rt.push num(a.num - b.num)
+  word "add":
+    numeric:
+      rt.push num(a.num + b.num)
 
-op mulOp:
-  numeric "mul":
-    rt.push num(a.num * b.num)
+  word "sub":
+    numeric:
+      rt.push num(a.num - b.num)
 
-op divOp:
-  numeric "div":
-    rt.push num(a.num div b.num)
+  word "mul":
+    numeric:
+      rt.push num(a.num * b.num)
 
-## collections ================
+  word "div":
+    numeric:
+      if b.num == 0:
+        refuse "division by zero"
+      rt.push num(a.num div b.num)
 
-op atOp:
-  binary val, key:
-    rt.push get(val[key])
+  ## recognition ================
 
-## stack manipulation ================
+  word "cmp":
+    binary a, b:
+      let c = cmp(a, b)
+      rt.push (if c < 0: Lt elif c == 0: Eq else: Gt)
 
-op dupOp:
-  unary a:
-    rt.push a, a
+  word "num-cmp":
+    ## numeric order between two numbers with a symbol
+    ## result. This is because CE order isn't numeric
+    ## order. Since based on CE ordering -5 > 5
+    ## This is bounded by the machine range currently,
+    ## and refuses on overflow!
+    binary a, b:
+      if not allKind({bNum}, a, b):
+        refuse "requires 2 numbers"
+      let c = cmp(a.asInt, b.asInt)
+      rt.push (if c < 0: Lt elif c == 0: Eq else: Gt)
 
-op dropOp:
-  discard rt.pop()
+  word "kind":
+    unary a:
+      rt.push sym(
+        case a.kind
+        of bNil: "nil"
+        of bNum: "num"
+        of bText: "text"
+        of bSym: "sym"
+        of bBytes: "bytes"
+        of bList: "list"
+        of bRecord: "record"
+        of bDict: "dict"
+        of bSet: "set"
+      )
 
-op swapOp:
-  binary a, b:
-    rt.push b, a
+  word "mark":
+    unary a:
+      rt.push a.mark(true)
 
-op rotOp:
-  let 
-    c = rt.pop
-    b = rt.pop
-    a = rt.pop
-  rt.push c, a, b
+  word "unmark":
+    unary a:
+      rt.push a.unmark
 
-op takeOp:
-  unary amount:
-    if amount.kind != bNum:
-      fail "take: amount not a number"
-    let n = amount.num.parseInt()
-    if n > rt.height:
-      fail "take: amount > stack height"
-    var items = newSeq[Value](n)
-    for i in countDown(n - 1, 0):
-      items[i] = rt.pop()
-    rt.push list(items)
+  ## collections ================
 
-op heightOp:
-  rt.push num(rt.height)
+  word "at":
+    binary val, key:
+      if val.isKind(bSet):
+        refuse "sets answer has?, not at"
+      let r = val[key]
+      if r.isNone:
+        refuse "nothing under " & $key
+      rt.push r.get
 
-op spliceOp:
-  unary a:
-    if not a.isKind(bList):
-      fail "splice-all: requires a list"
-    for v in a.ravel:
-      rt.push v
+  word "has?":
+    binary coll, k:
+      let present =
+        case coll.kind
+        of bDict: coll.entries.find(k).valid
+        of bSet: coll[k].isSome
+        of bList, bRecord: coll.contains(k)
+        else: refuse "not a frame"
+      rt.push sym(if present: "present" else: "absent")
 
-## definitions ================
-
-op defOp:
-  binary quote, name:
-    if not quote.isKind(bList):
-      fail "def: quote must be a list"
-    if name.marked:
-      fail "def: name must not be marked!"
-    rt.define(name.mark(true), Word(prim: docol, value: quote, protected: false))
-
-op defMacroOp:
-  binary quote, name:
-    if not quote.isKind(bList):
-      fail "macro: quote must be a list"
-    if not name.isKind(bSym):
-      fail "macro: name must be an unmarked symbol"
-    if name.marked:
-      fail "macro: name cannot be marked!"
-    rt.defineMacro(name, Word(prim: docol, value: quote, protected: false))
-
-op varOp:
-  unary name:
-    if name.marked:
-      fail "def: name must not be marked!"
-    if rt.isDefined(name):
-      return
-    rt.define(
-      name.mark(true), 
-      Word(prim: dovar, value: Nil, protected: false))
-
-op setOp:
-  binary val, name:
-    rt.words[name.mark(true)].value = val
-
-op readOp:
-  unary name:
-    rt.push rt.words[name.mark(true)].value
-
-op wordsOp:
-  var wordSet: seq[Value] = @[]
-  for k in rt.words.keys:
-    wordSet.add k
-  rt.push set(wordSet)
-
-# ================ evaluation ================
-
-op doOp:
-  docol(rt, rt.pop())
-
-# ================ io ================
-
-op readValueOp:
-  rt.push rt.readValue()
-
-op readUntilOp:
-  unary stop:
-    if stop.marked:
-      fail "readUntil: stop cannot be marked!"
-    var items: seq[Value] = @[]
-    while true:
-      let v = rt.readValue()
-      if v == stop:
-        break
+  word "len":
+    unary a:
+      case a.kind
+      of bList, bRecord, bSet:
+        rt.push num(a.ravel.len)
+      of bDict:
+        rt.push num(pairLen(a.ravel))
       else:
-        items.add v
-    rt.push list(items)
+        refuse "not a frame"
 
-op iotaOp:
-  unary n:
-    var items: seq[Value] = @[]
-    if not n.isKind(bNum):
-      fail "iota: not a number"
-    for i in countup(0, n.num.parseInt() - 1, 1):
-      items.add num(i)
-    rt.push list(items)
+  word "keys":
+    unary a:
+      if not a.isKind(bDict):
+        refuse "not a dict"
+      rt.push set(keySet(a.entries))
 
-op echoOp:
-  echo rt.pop
+  word "vals":
+    unary a:
+      if not a.isKind(bDict):
+        refuse "not a dict"
+      rt.push set(valueSet(a.entries))
 
-proc installCore*(rt: var Runtime) =
-  rt.primitive "add", addOp
-  rt.primitive "sub", subOp
-  rt.primitive "mul", mulOp
-  rt.primitive "div", divOp
+  word "->dict":
+    unary a:
+      if not a.isKind(bList):
+        refuse "needs a list"
+      lifted:
+        rt.push dict(dictFromRavel(a.items))
 
-  rt.primitive "dup", dupOp
-  rt.primitive "drop", dropOp
-  rt.primitive "swap", swapOp
-  rt.primitive "rot", rotOp
-  rt.primitive "take", takeOp
-  rt.primitive "splice", spliceOp
+  word "merge":
+    binary a, b:
+      lifted:
+        rt.push merge(a, b)
 
-  rt.primitive "stack-height", heightOp
+  word "put":
+    let v = rt.pop
+    let k = rt.pop
+    let coll = rt.pop
+    lifted:
+      rt.push put(coll, k, v)
 
-  rt.primitive "define", defOp
-  rt.primitive "macro", defMacroOp
-  rt.primitive "var", varOp
-  rt.primitive "set", setOp
-  rt.primitive "read", readOp
-  rt.primitive "words", wordsOp
+  word "difference":
+    binary a, b:
+      lifted:
+        rt.push difference(a, b)
 
-  rt.primitive "at", atOp
+  word "fry":
+    unary temp:
+      lifted:
+        let n = fryReach(temp)
+        if n > rt.height:
+          refuse "the template reaches " & $n & " deep; the stack holds " &
+            $rt.height
+        rt.charge n
+        let r = fry(temp, rt.stack.toOpenArray(rt.height - n, rt.height - 1))
+        rt.stack.setLen(rt.height - n)
+        rt.push r
 
-  rt.primitive "do", doOp
+  ## stack manipulation ================
 
-  rt.primitive "read-until", readUntilOp
-  rt.primitive "read-value", readValueOp
-  rt.primitive "echo", echoOp
-  rt.primitive "iota", iotaOp
+  word "dup":
+    unary a:
+      rt.push a, a
+
+  word "drop":
+    discard rt.pop()
+
+  word "swap":
+    binary a, b:
+      rt.push b, a
+
+  word "take":
+    unary amount:
+      let n = amount.asInt
+      if n < 0:
+        refuse "negative amount"
+      if n > rt.height:
+        refuse "amount > stack height"
+      var items = newSeq[Value](n)
+      for i in countdown(n - 1, 0):
+        items[i] = rt.pop()
+      rt.push list(items)
+
+  word "stack-height":
+    rt.push num(rt.height)
+
+  ## definitions ================
+
+  word "define":
+    binary quote, name:
+      if not quote.isKind(bList):
+        refuse "quote must be a list"
+      if name.marked:
+        refuse "name must not be marked"
+      rt.define(name.mark(true), quoteWord(quote))
+
+  word "macro":
+    binary quote, name:
+      if not quote.isKind(bList):
+        refuse "quote must be a list"
+      rt.defineMacro(name, quoteWord(quote))
+
+  word "var":
+    unary name:
+      if name.marked:
+        refuse "name must not be marked"
+      if rt.isDefined(name.mark(true)):
+        return
+      rt.define(name.mark(true), cellWord())
+
+  word "set":
+    binary val, name:
+      let key = name.mark(true)
+      if not rt.isDefined(key):
+        refuse "no cell named " & $name
+      if rt.words[key].kind != wCell:
+        refuse $name & " is not a cell"
+      if rt.words[key].protected:
+        refuse $name & " is protected"
+      rt.words[key].value = val
+
+  word "read":
+    unary name:
+      let key = name.mark(true)
+      if not rt.isDefined(key):
+        refuse "no cell named " & $name
+      if rt.words[key].kind != wCell:
+        refuse $name & " is not a cell"
+      rt.push rt.words[key].value
+
+  word "words":
+    var installed: seq[Value] = @[]
+    for k in rt.words.keys:
+      installed.add k
+    rt.push set(installed)
+
+  word "binding":
+    unary name:
+      rt.push rt.bindingOf(name)
+
+  word "annotate":
+    binary name, patch:
+      rt.annotate(name, patch)
+
+  word "dictionary":
+    rt.push rt.dictionaryOf()
+
+  ## evaluation ================
+
+  word "do":
+    rt.doQuote(rt.pop())
+
+  word "dip":
+    binary x, quote:
+      rt.doDip(x, quote)
+
+  word "each":
+    binary coll, quote:
+      rt.doLoop(coll, quote, collecting = false)
+
+  word "map":
+    binary coll, quote:
+      rt.doLoop(coll, quote, collecting = true)
+
+  ## io ================
+
+  word "read-value":
+    rt.push rt.readValue()
+
+  word "read-until":
+    unary stop:
+      if stop.marked:
+        refuse "stop cannot be marked"
+      var items: seq[Value] = @[]
+      while true:
+        rt.charge()
+        let v = rt.readValue()
+        if v == stop:
+          break
+        else:
+          items.add v
+      rt.push list(items)
+
+  word "echo":
+    echo rt.pop
