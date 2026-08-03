@@ -1,6 +1,6 @@
-import ../core
-import ../lib/[print, common]
-import ./[store, util]
+import ./util
+import pkg/lib/common
+import pkg/lib/stores/filestore
 
 const help = """
 bl get [--store:PATH]
@@ -12,7 +12,7 @@ place. A name the store doesn't hold is fatal.
 """
 
 proc run*(args: seq[string]) =
-  var root = defaultStoreRoot()
+  var fs = fileStore()
   for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
@@ -23,26 +23,16 @@ proc run*(args: seq[string]) =
       of "store":
         if val == "":
           quit "--store needs a path"
-        root = val
+        fs.root = val
       else:
         quit "unknown get option: " & key & "\n\n" & help
     else:
       quit "get takes no arguments\n\n" & help
 
-  let s = openStore(root)
   runFilter(
     proc(v: Value): Option[Value] =
       let d = fromValue(v, Digest)
       if d.isNone:
-        return some v
-      let raw =
-        try:
-          s.load(d.get)
-        except StoreError as e:
-          quit e.msg
-
-      if raw.isNone:
-        quit "not in store: " & $v
-
-      some decode raw.get
+        return none Value
+      fs.get(d.get)
   )

@@ -14,7 +14,7 @@ import std/[os, sets, tables, algorithm, strutils]
 from std/strutils import nil
 import ../core
 import ../lib/[common, print]
-import ./[store, util]
+import ../lib/stores/filestore
 
 const help = """
 bl assemble [--store:PATH] [--into PATH]
@@ -47,10 +47,6 @@ Options:
   --every:MS      how long a quiet counts as settled (default 500)
 """
 
-type Stores = object
-  chunks: Store
-  manifests: Store
-
 proc fail(msg: string) =
   quit "assemble: " & msg
 
@@ -60,41 +56,9 @@ func namePart(info: Option[BlFileInfo]): string =
   else:
     ""
 
-proc safeName(n: string): string =
-  ## Names arrive off the wire and become path segments. Anything that
-  ## could climb out of the directory we were pointed at is refused
-  ## rather than sanitized: a tree that cannot be laid down honestly
-  ## should not be laid down at all.
-  if n.len == 0:
-    fail "a manifest has no name to land under"
-  if n == "." or n == ".." or n.contains('/') or n.contains('\\') or n.contains('\0'):
-    fail "unspeakable name in a manifest: " & n
-  n
-
-proc fetch(s: Store, d: Digest): Option[Value] =
-  let raw = s.load(d)
-  if raw.isNone:
-    return none Value
-  try:
-    some decode(raw.get)
-  except DecodeError as e:
-    fail "stored value won't decode: " & e.msg
-    none Value
-
-# ================ WHAT ARRIVED ================
-
-type Arrivals = object
-  ## What this run has been told about. Names are kept whole rather than
-  ## reduced to their bytes: a digest says which algo made it, and
-  ## dropping that would send the lookup to the wrong shelf.
-  held: Table[seq[byte], Digest] ## manifests that came past
-  named: HashSet[seq[byte]] ## manifests some dir names
-
-proc take(st: Stores, a: var Arrivals, v: Value) =
-  ## One value onto its shelf. Chunks and manifests are told apart by
-  ## what they are, never by when they showed up.
+proc take[S](chunks, manifests: var S, v: sink Value) =
   if fromValue(v, Chunk).isSome:
-    discard st.chunks.put(v)
+    discard chunks.put(v)
     return
 
   let dm = fromValue(v, DirManifest)

@@ -188,19 +188,17 @@ proc emit*(v: Value) =
   stdoutWriter.flush()
   stdout.flushFile()
 
-proc runFilter*[T: ValueLike](f: proc(v: Value): Option[T]) =
-  ## Lifts a function from values to ValueLikes into a
+proc runFilter*(f: proc(v: Value): Option[Value]) =
+  ## Lifts a partial function into a
   ## stdin -> stdout stream filter.
   ## None drops the value indicating refusal;
   ## everything else is one value in, one out.
   ## ie:
   ## bl listen | bl x | ...
-  mixin toValue
   eachValue(
     stdin,
     proc(v: Value) =
       let o = f(v)
       if o.isSome:
-        emit o.get.toValue
-    ,
+        emit o.get
   )

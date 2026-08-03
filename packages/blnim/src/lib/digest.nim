@@ -1,21 +1,15 @@
 {.experimental: "strictFuncs".}
 
 import checksums/sha2
-import monocypher
 import ../core
 import ./[dialect, common]
 
 # ================ BLAKE2B ================
-#
-# Monocypher already compiles into this binary and its C carries an
-# incremental blake2b; only the generated wrapper leaves the context
-# opaque, so the struct is spelled out here to match the header. It is
-# plain 8-byte data throughout, so there is nothing for padding to
-# disagree about.
-#
-# Why not sha256: the scalar sha256 we had runs at about 0.3 GB/s, and
-# hashing every byte is the whole cost of naming a tree by content.
-# This is the same portable C on every platform, five times over.
+# 
+# WARNING! EXTREMELY HACKY SHIT AHEAD!
+# Monocypher has support for incremental blake2b hashing
+# but the nim wrapper we are using doesn't expose it
+# THIS IS NOT GOOD AND I WILL FIX THIS LATER!
 
 type Blake2bCtx = object
   hash: array[8, uint64]
@@ -97,22 +91,12 @@ func sha256*(bytes: openArray[byte]): array[32, byte] =
   copyMem(addr result[0], addr d[0], 32)
 
 const DigestAlgo* = "blake2b"
-  ## What `digest` names things with. Every digest says its own algo, so
-  ## this is a default and not a law -- values named another way stay
-  ## readable, and the store keeps them apart by name.
 
 func digest*(x: Value): Digest =
-  ## A value's name by content
   Digest(algo: Sym(DigestAlgo), hash: @(blake2b x))
 
 func verifies*(d: Digest, ce: openArray[byte]): bool =
-  ## Whether stored bytes still answer to the name they are filed under.
-  ## An algo we don't know how to compute can't be checked, and says so
-  ## by refusing rather than by waving it through.
-  case string(d.algo)
+  case $d.algo
   of "blake2b": @(blake2b(ce)) == d.hash
   of "sha256": @(sha256(ce)) == d.hash
   else: false
-
-func knownAlgo*(algo: string): bool =
-  algo == "blake2b" or algo == "sha256"

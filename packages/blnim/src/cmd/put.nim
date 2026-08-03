@@ -1,4 +1,6 @@
-import ./[store, util]
+import ./util
+import pkg/lib/common
+import pkg/lib/stores/filestore
 
 const help = """
 bl put [--store:PATH]
@@ -11,7 +13,7 @@ The default store lives at ~/.bl/store.
 """
 
 proc run*(args: seq[string]) =
-  var root = defaultStoreRoot()
+  var fs = fileStore()
   for kind, key, val in cmdOpts(args, shortNoVal = {'h'}, longNoVal = @["help"]):
     case kind
     of cmdShortOption, cmdLongOption:
@@ -22,14 +24,13 @@ proc run*(args: seq[string]) =
       of "store":
         if val == "":
           quit "--store needs a path"
-        root = val
+        fs.root = val
       else:
         quit "unknown put option: " & key & "\n\n" & help
     else:
       quit "put takes no arguments\n\n" & help
 
-  let s = openStore(root)
   runFilter(
-    proc(v: Value): Option[Digest] =
-      some s.put(v)
+    proc(v: Value): Option[Value] =
+      some toValue fs.put(v)
   )

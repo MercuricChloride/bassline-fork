@@ -1,8 +1,9 @@
 import std/parseopt
 import
   cmd/[
-    listen, file, assemble, send, hash, cat, keygen, sign, verify, put, get, read,
-    borth
+    listen, file,  send, hash, cat, keygen, sign, verify, put, get, read,
+    borth,
+    #assemble
   ]
 
 proc printHelp() =
@@ -56,9 +57,9 @@ proc main() =
       of "file":
         file.run(p.remainingArgs())
         return
-      of "assemble":
-        assemble.run(p.remainingArgs())
-        return
+      # of "assemble":
+      #   assemble.run(p.remainingArgs())
+      #   return
       of "send":
         send.run(p.remainingArgs())
         return

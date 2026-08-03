@@ -23,6 +23,6 @@ proc run*(args: seq[string]) =
       quit "hash takes no arguments\n\n" & help
 
   runFilter(
-    proc(v: Value): Option[Digest] =
-      some digest v
+    proc(v: Value): Option[Value] =
+      some toValue digest v
   )
