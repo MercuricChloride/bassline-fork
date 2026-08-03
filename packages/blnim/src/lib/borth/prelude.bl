@@ -59,11 +59,11 @@ def marked? [
 ; entries together
 def ->entry [ { 2! : 1! } fry! ]
 
-def iota-go [
+def iota* [
   dup! 0 num-cmp! { 
-    gt: [ 1 sub! dup! rot! cons! swap! iota-go! ]
+    gt: [ 1 sub! dup! rot! cons! swap! iota*! ]
     eq: [ drop! ]
     lt: [ drop! ]
   } case!
 ]
-def iota [ [] swap! iota-go! ]
+def iota [ [] swap! iota*! ]

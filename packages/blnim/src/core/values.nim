@@ -50,13 +50,6 @@ type
     of bDict:
       entries: DictObj
 
-  ValueLike* = concept x
-    ## anything that can speak as a value or be made from a value
-    ##
-    ## toValue is total, fromValue is partial
-    toValue(x) is Value
-    fromValue(Value, typeof(x)) is Option[typeof(x)]
-
 template fail(msg: untyped) =
   raise newException(ValueError, msg)
 
@@ -306,18 +299,28 @@ func marked*(v: Value): bool =
   v.marked
 
 func num*(v: Value): lent DecimalString =
+  if v.kind != bNum:
+    fail "num: not a number"
   v.num
 
 func text*(v: Value): lent Utf8String =
+  if not (v.kind in {bText, bSym}):
+    fail "text: not text or a symbol"
   v.text
 
 func bytes*(v: Value): lent seq[byte] =
+  if v.kind != bBytes:
+    fail "bytes: not bytes"
   v.bytes
 
 func elements*(v: Value): lent SetObj =
+  if v.kind != bSet:
+    fail "elements: not a set"
   v.elements
 
 func entries*(v: Value): lent DictObj =
+  if v.kind != bDict:
+    fail "entries: not a dict"
   v.entries
 
 func items*(v: Value): lent seq[Value] =
@@ -327,19 +330,21 @@ func items*(v: Value): lent seq[Value] =
   of bRecord:
     return v.rec.els
   else:
-    raise newException(ValueError, "items: must be list or record")
+    fail "items: must be list or record"
 
 func head*(v: Value): lent Value =
   case v.kind
   of bList, bRecord:
     return v.children[0]
   else:
-    raise newException(ValueError, "head: must be a list or record")
+    fail "head: must be a list or record"
 
 template tail*(v: Value): openArray[Value] =
   v.items.toOpenArray(min(1, v.items.len), v.items.len - 1)
 
 func rec*(v: Value): lent RecordObj =
+  if v.kind != bRecord:
+    fail "rec: not a record"
   v.rec
 
 func payloadLength*(value: Value): int =
@@ -472,18 +477,12 @@ func `<=`*(a, b: Value): bool =
 
 # ================ CONVERSIONS ================
 
-func toValue*(v: sink Value): Value = v
-
 func fromValue*(v: Value, t: typedesc[Value]): Option[Value] =
   some v
 
 func mark*(v: sink Value, marked: bool = true): Value =
   result = v
   result.marked = marked
-
-func unmark*(v: sink Value): Value =
-  result = v
-  result.marked = false
 
 # ================ CONSTRUCTORS ================
 

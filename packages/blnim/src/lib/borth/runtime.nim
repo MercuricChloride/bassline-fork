@@ -7,10 +7,7 @@ export tables, deques
 type
   Primitive* = proc(rt: var Runtime)
 
-  WordKind* = enum
-    wPrim ## native code
-    wQuote ## a stored quotation
-    wCell ## a slot holding one value
+  WordKind* = enum wPrim, wQuote, wCell
 
   Word* = ref object
     ## A word is logically a dictionary:
@@ -21,13 +18,11 @@ type
     ## `meta` holds the open ones, and `bindingView` speaks
     ## the whole as one dict
     protected*: bool
-    meta*: Value ## open keyed bindings; a dict when present
+    meta*: Table[Value, Value]
     case kind*: WordKind
     of wPrim:
       prim*: Primitive
-    of wQuote:
-      body*: Value
-    of wCell:
+    of wQuote, wCell:
       value*: Value
 
   FrameKind* = enum
@@ -52,10 +47,10 @@ type
       collected*: seq[Value]
 
   Runtime* = object
-    stack*: seq[Value]
+    stack*: seq[Value] ## the main data stack
+    frames*: seq[Frame]
     input*: Deque[Value]
     words*: Table[Value, Word]
-    frames*: seq[Frame]
     spent*: int ## fuel used so far
     maxDepth*: int ## control-stack ceiling
 
@@ -79,7 +74,7 @@ func primWord*(prim: Primitive, protected = true): Word =
   Word(kind: wPrim, prim: prim, protected: protected)
 
 func quoteWord*(body: sink Value, protected = false): Word =
-  Word(kind: wQuote, body: body, protected: protected)
+  Word(kind: wQuote, value: body, protected: protected)
 
 func cellWord*(value: sink Value = Nil, protected = false): Word =
   Word(kind: wCell, value: value, protected: protected)
@@ -100,7 +95,7 @@ proc charge*(rt: var Runtime, n = 1) =
   ## Each primitive has a cost associated with it.
   rt.spent += n
 
-# data stack ================
+# stack manipulation ================
 
 proc push*(rt: var Runtime, v: varargs[Value]) =
   rt.stack.add v
@@ -195,15 +190,14 @@ proc bindingView*(w: Word): Value =
     es.add (sym"evaluator", sym"primitive")
   of wQuote:
     es.add (sym"evaluator", sym"quote")
-    es.add (sym"value", w.body)
+    es.add (sym"value", w.value)
   of wCell:
     es.add (sym"evaluator", sym"cell")
     es.add (sym"value", w.value)
   if w.protected:
     es.add (sym"traits", set(sym"protected"))
-  if w.meta.isKind(bDict):
-    for p in pairIndex(w.meta.ravel):
-      es.add (w.meta.ravel[p.key], w.meta.ravel[p.val])
+  for k, v in w.meta:
+    es.add (k, v)
   dict(es)
 
 proc bindingOf*(rt: Runtime, key: Value): Value =
@@ -225,11 +219,8 @@ proc annotate*(rt: var Runtime, key: Value, patch: Value) =
     if patch.ravel[p.key] in Reserved:
       fail "annotate: " & $patch.ravel[p.key] & " is not open"
   var m = rt.words[key].meta
-  if not m.isKind(bDict):
-    var empty: seq[Entry]
-    m = dict(empty)
   for p in pairIndex(patch.ravel):
-    m = put(m, patch.ravel[p.key], patch.ravel[p.val])
+    m[patch.ravel[p.key]] = patch.ravel[p.val]
   rt.words[key].meta = m
 
 proc dictionaryOf*(rt: Runtime): Value =
@@ -239,6 +230,14 @@ proc dictionaryOf*(rt: Runtime): Value =
   dict(es)
 
 # machinery ================
+
+func contentLen(coll: Value): int =
+  ## how many content elements a loop visits
+  case coll.kind
+  of bList, bSet: coll.ravel.len
+  of bRecord: coll.ravel.len - 1
+  of bDict: pairLen(coll.ravel)
+  else: 0
 
 proc pushFrame(rt: var Runtime, f: sink Frame) =
   if rt.frames.len >= rt.maxDepth:
@@ -251,74 +250,34 @@ proc doQuote*(rt: var Runtime, quote: sink Value) =
     fail "do: requires a list"
   rt.pushFrame Frame(kind: fCode, body: quote, ip: 0)
 
-proc doDip*(rt: var Runtime, saved: sink Value, quote: sink Value) =
-  ## X [P] -> ... X : 
-  ## 
-  ## run P with X parked on the control stack
-  if not quote.isKind(bList):
-    fail "dip: requires a list"
-  rt.pushFrame Frame(kind: fPush, saved: saved)
-  rt.pushFrame Frame(kind: fCode, body: quote, ip: 0)
-
-func contentLen(coll: Value): int =
-  ## how many content elements a loop visits
-  case coll.kind
-  of bList, bSet: coll.ravel.len
-  of bRecord: coll.ravel.len - 1
-  of bDict: pairLen(coll.ravel)
-  else: 0
-
-proc doLoop*(rt: var Runtime, coll: sink Value, quote: sink Value, collecting: bool) =
-  ## schedules an iteration over a frame's content.
-  ## 
-  ## For dicts each entry pushes key then value.
-  ## 
-  ## when used with map this will hold the quote to 
-  ## a height contract and rebuilds the same frame.
-  ## 
-  ## when used with each this will leave the stack to the quote.
+proc doEach*(rt: var Runtime, coll: sink Value, quote: sink Value) =
   if not coll.isFrame:
     fail "each: not a frame"
   if not quote.isKind(bList):
     fail "each: quote must be a list"
-  if collecting:
-    rt.pushFrame Frame(kind: fMap, coll: coll, quote: quote, idx: 0, base: 0)
-  else:
-    rt.pushFrame Frame(kind: fEach, coll: coll, quote: quote, idx: 0, base: 0)
+  rt.pushFrame Frame(kind: fEach, coll: coll, quote: quote, idx: 0, base: 0)
 
-proc rebuilt(coll: Value, collected: sink seq[Value]): Value =
-  ## the same frame kind from mapped content
-  case coll.kind
-  of bList:
-    list(collected, coll.marked)
-  of bRecord:
-    var xs = @[coll.head]
-    xs.add collected
-    record(xs, coll.marked)
-  of bSet:
-    set(collected, coll.marked)
-  of bDict:
-    var es = newSeqOfCap[Entry](pairLen(collected))
-    for p in pairIndex(collected):
-      es.add (collected[p.key], collected[p.val])
-    try:
-      dict(es, coll.marked)
-    except ValueError as e:
-      fail "map: " & e.msg
-  else:
-    coll # unreachable
+proc doMap*(rt: var Runtime, coll: sink Value, quote: sink Value) =
+  if not coll.isFrame:
+    fail "map: not a frame"
+  if not quote.isKind(bList):
+    fail "map: quote must be a list"
+  rt.pushFrame Frame(kind: fMap, coll: coll, quote: quote, idx: 0, base: 0)
+
+proc doDip*(rt: var Runtime, saved: sink Value, quote: sink Value) =
+  rt.pushFrame Frame(kind: fPush, saved: saved)
+  rt.pushFrame Frame(kind: fCode, body: quote, ip: 0)
 
 proc eval*(rt: var Runtime, v: sink Value) =
   ## When a value is defined, it will execute it's word.
   ## "define!" only defines marked values and never unmarked ones.
   ## So unless a value is marked we don't have to look it up for execution.
   ## 
-  ## When a defined value is evaluted we execute it.
+  ## With a defined marked value we execute it.
   ## When an unmarked value that's not defined is evaluated,
   ## we just push it to the data-stack.
   ## Marked lists not defined are implicit docol invocations.
   ## And a marked symbol that's not defined refuses as "idk".
-  ## 
   rt.charge()
   if (v.marked or v.isKind(bSym)) and rt.words.hasKey(v):
     let w = rt.words[v]
@@ -327,45 +286,62 @@ proc eval*(rt: var Runtime, v: sink Value) =
       w.prim(rt)
     of wQuote:
       if v.marked:
-        rt.pushFrame Frame(kind: fCode, body: w.body, ip: 0)
+        rt.pushFrame Frame(kind: fCode, body: w.value, ip: 0)
       else:
-        rt.pushFrame Frame(kind: fExpand, body: w.body, ip: 0)
+        rt.pushFrame Frame(kind: fExpand, body: w.value, ip: 0)
     of wCell:
       rt.push w.value
   elif v.marked:
     if v.isKind(bList):
       rt.pushFrame Frame(kind: fCode, body: v, ip: 0)
     else:
-      fail "eval: an instruction I don't know: " & $v
+      fail "eval: idk what this is " & $v
   else:
     rt.push v
 
-proc stepLoop(rt: var Runtime, ti: int) =
+proc stepEach(rt: var Runtime, ti: int) =
   rt.charge()
-  let collecting = rt.frames[ti].kind == fMap
+  # done?
+  let n = contentLen(rt.frames[ti].coll)
+  if rt.frames[ti].idx >= n:
+    rt.frames.setLen(ti)
+    return
+  # schedule the next iteration
+  let i = rt.frames[ti].idx
+  inc rt.frames[ti].idx
+  rt.frames[ti].base = rt.height
+  if rt.frames[ti].coll.kind == bDict:
+    let p = pair(i)
+    rt.push rt.frames[ti].coll.ravel[p.key]
+    rt.push rt.frames[ti].coll.ravel[p.val]
+  elif rt.frames[ti].coll.kind == bRecord:
+    rt.push rt.frames[ti].coll.ravel[i + 1]
+  else:
+    rt.push rt.frames[ti].coll.ravel[i]
+  let quote = rt.frames[ti].quote
+  rt.pushFrame Frame(kind: fCode, body: quote, ip: 0)
+
+func stepMap(rt: var Runtime, ti: int) =
+  rt.charge()
   let isDict = rt.frames[ti].coll.kind == bDict
   let outN = if isDict: 2 else: 1
   # harvest the iteration that just finished
-  if collecting and rt.frames[ti].idx > 0:
+  if rt.frames[ti].idx > 0:
     let base = rt.frames[ti].base
     if rt.height != base + outN:
       fail "map: the quote left " & $(rt.height - base) & " values, wanted " & $outN
     if isDict:
       let v = rt.pop
       let k = rt.pop
-      rt.frames[ti].collected.add k
-      rt.frames[ti].collected.add v
+      rt.frames[ti].collected.add [k, v]
     else:
       rt.frames[ti].collected.add rt.pop
   # done?
   let n = contentLen(rt.frames[ti].coll)
   if rt.frames[ti].idx >= n:
-    if collecting:
-      let r = rebuilt(rt.frames[ti].coll, move rt.frames[ti].collected)
-      rt.frames.setLen(ti)
-      rt.push r
-    else:
-      rt.frames.setLen(ti)
+    let r = rebuild(rt.frames[ti].coll, move rt.frames[ti].collected)
+    rt.frames.setLen(ti)
+    rt.push r
     return
   # schedule the next iteration
   let i = rt.frames[ti].idx
@@ -404,8 +380,10 @@ proc step*(rt: var Runtime): bool =
         if rt.frames[ti].ip >= rt.frames[ti].body.items.len:
           rt.frames.setLen(ti) # eager pop: tail position
         rt.eval(item)
-    of fEach, fMap:
-      rt.stepLoop(ti)
+    of fEach:
+      rt.stepEach(ti)
+    of fMap:
+      rt.stepMap(ti)
     true
   elif rt.input.len > 0:
     rt.eval(rt.input.popFirst)

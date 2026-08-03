@@ -84,6 +84,25 @@ func find*(
 
   none Value
 
+proc rebuild*(coll: Value, collected: sink seq[Value]): Value =
+  ## the same frame kind from mapped content
+  case coll.kind
+  of bList:
+    list(collected, coll.marked)
+  of bRecord:
+    var xs = @[coll.head]
+    xs.add collected
+    record(xs, coll.marked)
+  of bSet:
+    set(collected, coll.marked)
+  of bDict:
+    try:
+      dict(dictFromRavel(collected), coll.marked)
+    except ValueError as e:
+      fail "rebuild: " & e.msg
+  else:
+    coll
+
 func map*(v: Value, f: proc(x: Value): Value): Value {.effectsOf: f.} =
   ## the same value with f over its content:
   ## 
@@ -92,27 +111,21 @@ func map*(v: Value, f: proc(x: Value): Value): Value {.effectsOf: f.} =
   ## dicts apply f to the values, not the keys
   ## Scalars are returned untouched
   case v.kind
-  of bList:
-    var xs = newSeqOfCap[Value](v.items.len)
-    for x in v.items:
-      xs.add f(x)
-    list(xs, v.marked)
+  of bList, bSet:
+    var es = newSeq[Value](v.ravel.len)
+    for s in slotIndex(v.ravel):
+      es[s] = f(v.ravel[s])
+    rebuild(v, es)
   of bRecord:
-    var xs = newSeqOfCap[Value](v.items.len)
-    xs.add v.items[0]
-    for i in 1 ..< v.items.len:
-      xs.add f(v.items[i])
-    record(xs).mark(v.marked)
-  of bSet:
-    var xs = newSeqOfCap[Value](v.elements.len)
-    for x in v.elements:
-      xs.add f(x)
-    set(xs).mark(v.marked)
+    var es: seq[Value] = @[]
+    for el in v.tail:
+      es.add f(el)
+    rebuild(v, es)
   of bDict:
-    var es = newSeqOfCap[Entry](v.entries.len)
+    var es = newSeq[Value](v.ravel.len)
     for p in pairIndex(v.ravel):
-      es.add (v.ravel[p.key], f(v.ravel[p.val]))
-    dict(es).mark(v.marked)
+      es[p] = (v.ravel[p.key], f(v.ravel[p.val]))
+    rebuild(v, es)
   else:
     v
 
@@ -120,41 +133,28 @@ func filter*(v: Value, pred: proc(x: Value): bool): Value {.effectsOf: pred.} =
   ## see the docs for map, this works the same way, but instead of mapping
   ## values, it applies a filter to the values.
   case v.kind
-  of bList:
-    var xs: seq[Value]
-    for x in v.items:
-      if pred(x):
-        xs.add x
-    list(xs, v.marked)
+  of bList, bSet:
+    var es: seq[Value] = @[]
+    for s in slotIndex(v.ravel):
+      if pred(v.ravel[s]):
+        es.add v.ravel[s]
+    rebuild(v, es)
   of bRecord:
-    var xs = @[v.items[0]]
-    for i in 1 ..< v.items.len:
-      if pred(v.items[i]):
-        xs.add v.items[i]
-    record(xs).mark(v.marked)
-  of bSet:
-    var xs: seq[Value]
-    for x in v.elements:
-      if pred(x):
-        xs.add x
-    set(xs).mark(v.marked)
+    var es: seq[Value] = @[]
+    for el in v.tail:
+      if pred(el):
+        es.add el
+    rebuild(v, es)
   of bDict:
-    var es: seq[Entry]
+    var es: seq[Value] = @[]
     for p in pairIndex(v.ravel):
       if pred(v.ravel[p.val]):
-        es.add (v.ravel[p.key], v.ravel[p.val])
-    dict(es).mark(v.marked)
+        es.add [v.ravel[p.key], v.ravel[p.val]]
+    rebuild(v, es)
   else:
     v
 
 # ================ STRUCTURAL ALGEBRA ================
-
-
-
-func asIndex(k: Value): int =
-  if not k.isKind(bNum):
-    fail "an index is a number"
-  k.num.parseInt()
 
 func merge*(a, b: DictObj): DictObj =
   ## keyed combination; a collision is refused like the decoder would
@@ -229,8 +229,8 @@ func difference*(a: Value, b: Value): Value =
 func put*(a: Value, k: Value, v: Value): Value =
   case a.kind
   of bDict: dict(put(a.entries, k, v), a.marked)
-  of bList: list(put(a.ravel, k.asIndex, v), a.marked)
-  of bRecord: record(put(a.ravel, k.asIndex, v), a.marked)
+  of bList: list(put(a.ravel, k.num.parseInt, v), a.marked)
+  of bRecord: record(put(a.ravel, k.num.parseInt, v), a.marked)
   of bSet: fail "sets take union"
   else: fail "not a frame"
 

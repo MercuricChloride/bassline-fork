@@ -101,9 +101,9 @@ const DigestAlgo* = "blake2b"
   ## this is a default and not a law -- values named another way stay
   ## readable, and the store keeps them apart by name.
 
-func digest*[T: ValueLike](x: T): Digest =
+func digest*(x: Value): Digest =
   ## A value's name by content
-  Digest(algo: Sym(DigestAlgo), hash: @(blake2b toValue(x)))
+  Digest(algo: Sym(DigestAlgo), hash: @(blake2b x))
 
 func verifies*(d: Digest, ce: openArray[byte]): bool =
   ## Whether stored bytes still answer to the name they are filed under.

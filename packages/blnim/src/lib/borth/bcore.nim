@@ -76,7 +76,7 @@ wordSet installCore:
 
   word "unmark":
     unary a:
-      rt.push a.unmark
+      rt.push a.mark(false)
 
   ## collections ================
 
@@ -257,11 +257,11 @@ wordSet installCore:
 
   word "each":
     binary coll, quote:
-      rt.doLoop(coll, quote, collecting = false)
+      rt.doEach(coll, quote)
 
   word "map":
     binary coll, quote:
-      rt.doLoop(coll, quote, collecting = true)
+      rt.doMap(coll, quote)
 
   ## io ================
 

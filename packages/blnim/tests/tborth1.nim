@@ -130,7 +130,7 @@ suite "each and map":
       @[dict((sym"a", num"10"), (sym"b", num"20"))]
 
   test "map that rewrites keys into collision refuses":
-    expect RuntimeError:
+    expect ValueError:
       discard runText("{ a: 1 b: 2 } [ drop! drop! zz 0 ] map!")
 
   test "map holds the quote to its height contract":

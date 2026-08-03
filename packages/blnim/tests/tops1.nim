@@ -1,16 +1,6 @@
 import std/[unittest, sequtils]
 import pkg/core
-import pkg/lib/[print, common]
-
-suite "recognition":
-  test "hasHead: any value as head, compared by CE equality":
-    check record(sym"digest", sym"sha256").hasHead(sym"digest")
-    check record(sym"digest").hasHead(sym"digest")
-    check mark(record(sym"q")).hasHead(sym"q") # v's own mark not consulted
-    check record(text"digest").hasHead(text"digest")
-    check not record(sym"other").hasHead(sym"digest")
-    check not list(sym"digest").hasHead(sym"digest")
-    check not record(sym"q").hasHead(mark(sym"q")) # the head's mark is CE
+import pkg/lib/print
 
 suite "accessing":
   let point = record(sym"point", num"3", num"4")
@@ -118,27 +108,3 @@ suite "shallow rewriting is the content lens":
       proc(x: Value): bool =
         x == num"1"
     ) == list(num"1")
-
-suite "composition":
-  test "a file record reads through option chains and dialect types":
-    let doc = toValue BlFile(
-      contents: @[byte 1, 2], info: some BlFileInfo(name: some "a.txt", zip: none Sym)
-    )
-    check doc.hasHead(sym"file")
-    check doc[1] == some bytes(@[byte 1, 2])
-    check doc[2].flatMap(
-      proc(info: Value): Option[Value] =
-        info[sym"name"]
-    ) == some text"a.txt"
-
-  test "find a digest anywhere, then read it as a type":
-    let held = list(sym"stuff", record(sym"digest", sym"sha256", bytes(@[byte 0xAB])))
-    let hit = held.find(
-      proc(x: Value): bool =
-        x.hasHead(sym"digest")
-    )
-    check hit.isSome
-    let d = fromValue(hit.get, Digest)
-    check d.isSome
-    check d.get.algo == "sha256"
-    check d.get.hash == @[byte 0xAB]

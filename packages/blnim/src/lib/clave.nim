@@ -58,8 +58,8 @@ func keypairFromSeed*(seed: Seed): Keypair =
   result.secret = secret
   result.public = public
 
-func sign*[T: ValueLike](kp: Keypair, x: T): monocypher.Signature =
-  crypto_eddsa_sign(kp.secret, encode(toValue(x)))
+func sign*(kp: Keypair, x: Value): monocypher.Signature =
+  crypto_eddsa_sign(kp.secret, x.encode)
 
 func toValue*(kp: Keypair): Value =
   KeypairShape(seed: kp.seed, public: kp.public).toValue
@@ -72,11 +72,10 @@ func fromValue*(v: Value, t: typedesc[Keypair]): Option[Keypair] =
   else:
     none Keypair
 
-func signedValue*[T: ValueLike](kp: Keypair, x: T): Value =
-  ## x as a value, wrapped with its attestation.
-  let v = toValue(x)
-  let sig = Signature(sig: sign(kp, v), public: kp.public)
-  toValue(Signed(value: v, signature: sig))
+func signedValue*(kp: Keypair, x: Value): Value =
+  ## returns x wrapped with its attestation
+  let sig = Signature(sig: sign(kp, x), public: kp.public)
+  Signed(value: x, signature: sig).toValue
 
 func holds*(s: Signed): bool =
   crypto_eddsa_check(s.signature.sig, s.signature.public, encode(s.value))
