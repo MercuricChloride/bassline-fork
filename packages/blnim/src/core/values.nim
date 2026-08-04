@@ -73,16 +73,7 @@ func marked*(v: Value): bool =
   v.marked
 
 func tag*(value: Value): 1 .. 9 =
-  case value.kind
-  of bNil: 1
-  of bNum: 2
-  of bText: 3
-  of bSym: 4
-  of bBytes: 5
-  of bList: 6
-  of bRecord: 7
-  of bDict: 8
-  of bSet: 9
+  ord(value.kind) + 1
 
 # ================ SCALAR ACCESSORS ================
 

@@ -1,3 +1,4 @@
+include pkg/prelude
 import std/[deques, tables, hashes, algorithm, strutils]
 import ../core
 import ./print

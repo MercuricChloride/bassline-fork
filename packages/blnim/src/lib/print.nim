@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 from std/strutils import toHex, toLowerAscii
 import ../core/values
 import ./read

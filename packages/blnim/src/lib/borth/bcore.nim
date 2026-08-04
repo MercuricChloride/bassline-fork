@@ -1,3 +1,4 @@
+include pkg/prelude
 import pkg/core
 import pkg/lib/print
 import ./runtime

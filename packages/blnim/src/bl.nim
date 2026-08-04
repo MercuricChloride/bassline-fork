@@ -1,3 +1,4 @@
+include pkg/prelude
 import std/parseopt
 import
   cmd/[

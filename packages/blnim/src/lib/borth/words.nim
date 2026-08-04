@@ -1,3 +1,4 @@
+include pkg/prelude
 import std/[macros, strutils, sets]
 import pkg/core
 import ./runtime

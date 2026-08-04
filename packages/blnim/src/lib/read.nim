@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 import ../core/values
 
 type ReadError* = object of CatchableError

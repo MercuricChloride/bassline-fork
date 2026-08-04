@@ -1,3 +1,4 @@
+include pkg/prelude
 import std/os
 import ./util
 

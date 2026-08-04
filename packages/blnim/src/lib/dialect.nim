@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 ## dialect: declare a bassline dialect shape as an ordinary Nim type;
 ## toValue / fromValue are derived from the type's structure.
 ##

@@ -1,3 +1,4 @@
+include pkg/prelude
 import std/[tables, sets]
 import ./util
 

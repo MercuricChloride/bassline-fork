@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 import ./values
 
 type ValuePred* = proc(v: Value): bool {.noSideEffect.}

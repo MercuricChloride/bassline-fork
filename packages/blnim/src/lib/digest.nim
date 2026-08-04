@@ -27,24 +27,46 @@ proc blake2bUpdate(ctx: ptr Blake2bCtx, message: ptr uint8, size: uint) {.
 proc blake2bFinal(ctx: ptr Blake2bCtx, hash: ptr uint8) {.
   importc: "crypto_blake2b_final", cdecl.}
 
+# a staging buffer in front of the hasher, like ValueWriter's in
+# front of the File: a deep value is tens of thousands of tiny
+# writes, and each update call has a fixed cost
+const DigestBuf = 4096
+
 type Blake2bWriter = object
   ctx: Blake2bCtx
+  buf: array[DigestBuf, byte]
+  n: int
+
+func flush(w: var Blake2bWriter) =
+  if w.n > 0:
+    {.cast(noSideEffect).}:
+      blake2bUpdate(addr w.ctx, addr w.buf[0], uint(w.n))
+    w.n = 0
 
 func write(w: var Blake2bWriter, b: byte) =
-  var one = b
-  {.cast(noSideEffect).}:
-    blake2bUpdate(addr w.ctx, addr one, 1)
+  if w.n >= DigestBuf:
+    w.flush()
+  w.buf[w.n] = b
+  inc w.n
 
 func write(w: var Blake2bWriter, bytes: openArray[byte]) =
-  if bytes.len > 0:
+  if bytes.len >= DigestBuf:
+    # big enough to be its own update; staging it would only copy it
+    w.flush()
     {.cast(noSideEffect).}:
       blake2bUpdate(addr w.ctx, cast[ptr uint8](addr bytes[0]), uint(bytes.len))
+  elif bytes.len > 0:
+    if w.n + bytes.len > DigestBuf:
+      w.flush()
+    copyMem(addr w.buf[w.n], addr bytes[0], bytes.len)
+    w.n += bytes.len
 
 func initBlake2b(): Blake2bWriter =
   {.cast(noSideEffect).}:
     blake2bInit(addr result.ctx, 32)
 
 func finish(w: var Blake2bWriter): array[32, byte] =
+  w.flush()
   {.cast(noSideEffect).}:
     blake2bFinal(addr w.ctx, cast[ptr uint8](addr result[0]))
 
@@ -65,20 +87,39 @@ func blake2b*(bytes: openArray[byte]): array[32, byte] =
 
 type Sha256Writer = object
   ctx: ShaStateStatic[Sha_256]
+  buf: array[DigestBuf, byte]
+  n: int
+
+func flush(w: var Sha256Writer) =
+  if w.n > 0:
+    w.ctx.update(
+      cast[ptr UncheckedArray[char]](addr w.buf[0]).toOpenArray(0, w.n - 1)
+    )
+    w.n = 0
 
 func write(w: var Sha256Writer, b: byte) =
-  w.ctx.update([char(b)])
+  if w.n >= DigestBuf:
+    w.flush()
+  w.buf[w.n] = b
+  inc w.n
 
 func write(w: var Sha256Writer, bytes: openArray[byte]) =
-  if bytes.len > 0:
+  if bytes.len >= DigestBuf:
+    w.flush()
     w.ctx.update(
       cast[ptr UncheckedArray[char]](addr bytes[0]).toOpenArray(0, bytes.len - 1)
     )
+  elif bytes.len > 0:
+    if w.n + bytes.len > DigestBuf:
+      w.flush()
+    copyMem(addr w.buf[w.n], addr bytes[0], bytes.len)
+    w.n += bytes.len
 
 func sha256*(v: Value): array[32, byte] =
   ## The sha256 of the value's CE bytes
   var w = Sha256Writer(ctx: initSha_256())
   v.encodeInto(w)
+  w.flush()
   let d = w.ctx.digest()
   copyMem(addr result[0], addr d[0], 32)
 
@@ -87,6 +128,7 @@ func sha256*(bytes: openArray[byte]): array[32, byte] =
   ## equals sha256 of the value
   var w = Sha256Writer(ctx: initSha_256())
   w.write(bytes)
+  w.flush()
   let d = w.ctx.digest()
   copyMem(addr result[0], addr d[0], 32)
 
