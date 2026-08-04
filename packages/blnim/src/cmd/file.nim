@@ -3,7 +3,8 @@ from std/strutils import nil
 import zippy
 import zippy/tarballs
 import ../core
-import ../lib/[common, digest, print]
+import ../lib/[common, print]
+import ../lib/crypto/digest
 import ./util
 
 const help = """

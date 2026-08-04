@@ -1,5 +1,4 @@
 import std/os
-import ../core/codec
 import ../lib/read as textread
 import util
 

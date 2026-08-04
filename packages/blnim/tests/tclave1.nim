@@ -1,7 +1,8 @@
 import std/unittest
 import std/sequtils
 import pkg/core
-import pkg/lib/[clave, common]
+import pkg/lib/common
+import pkg/lib/crypto/clave
 
 let
   seed: Seed = block:

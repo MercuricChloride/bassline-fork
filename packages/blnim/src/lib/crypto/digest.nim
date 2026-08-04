@@ -1,31 +1,14 @@
 include pkg/prelude
-import checksums/sha2
-import monocypher
-import ../core
-import ./[dialect, common]
+import nimcrypto/[blake2, sha2]
+import ../../core
+import ../[dialect, common]
 
 # ================ BLAKE2B ================
-# 
-# WARNING! EXTREMELY HACKY SHIT AHEAD!
-# Monocypher has support for incremental blake2b hashing
-# but the nim wrapper we are using doesn't expose it
-# THIS IS NOT GOOD AND I WILL FIX THIS LATER!
-
-type Blake2bCtx = object
-  hash: array[8, uint64]
-  inputOffset: array[2, uint64]
-  input: array[16, uint64]
-  inputIdx: uint
-  hashSize: uint
-
-proc blake2bInit(ctx: ptr Blake2bCtx, hashSize: uint) {.
-  importc: "crypto_blake2b_init", cdecl.}
-
-proc blake2bUpdate(ctx: ptr Blake2bCtx, message: ptr uint8, size: uint) {.
-  importc: "crypto_blake2b_update", cdecl.}
-
-proc blake2bFinal(ctx: ptr Blake2bCtx, hash: ptr uint8) {.
-  importc: "crypto_blake2b_final", cdecl.}
+#
+# blake2b-256 streams through nimcrypto's Blake2bContext[256]; its init
+# builds the parameter block from the bit width, so this is the real
+# parameterized blake2b-256, not a truncation. monocypher remains the
+# eddsa backend in clave.
 
 # a staging buffer in front of the hasher, like ValueWriter's in
 # front of the File: a deep value is tens of thousands of tiny
@@ -33,14 +16,13 @@ proc blake2bFinal(ctx: ptr Blake2bCtx, hash: ptr uint8) {.
 const DigestBuf = 4096
 
 type Blake2bWriter = object
-  ctx: Blake2bCtx
+  ctx: Blake2bContext[256]
   buf: array[DigestBuf, byte]
   n: int
 
 func flush(w: var Blake2bWriter) =
   if w.n > 0:
-    {.cast(noSideEffect).}:
-      blake2bUpdate(addr w.ctx, addr w.buf[0], uint(w.n))
+    w.ctx.update(w.buf.toOpenArray(0, w.n - 1))
     w.n = 0
 
 func write(w: var Blake2bWriter, b: byte) =
@@ -53,8 +35,7 @@ func write(w: var Blake2bWriter, bytes: openArray[byte]) =
   if bytes.len >= DigestBuf:
     # big enough to be its own update; staging it would only copy it
     w.flush()
-    {.cast(noSideEffect).}:
-      blake2bUpdate(addr w.ctx, cast[ptr uint8](addr bytes[0]), uint(bytes.len))
+    w.ctx.update(bytes)
   elif bytes.len > 0:
     if w.n + bytes.len > DigestBuf:
       w.flush()
@@ -62,13 +43,11 @@ func write(w: var Blake2bWriter, bytes: openArray[byte]) =
     w.n += bytes.len
 
 func initBlake2b(): Blake2bWriter =
-  {.cast(noSideEffect).}:
-    blake2bInit(addr result.ctx, 32)
+  result.ctx.init()
 
 func finish(w: var Blake2bWriter): array[32, byte] =
   w.flush()
-  {.cast(noSideEffect).}:
-    blake2bFinal(addr w.ctx, cast[ptr uint8](addr result[0]))
+  discard w.ctx.finish(result)
 
 func blake2b*(v: Value): array[32, byte] =
   ## The blake2b-256 of the value's CE bytes
@@ -86,15 +65,13 @@ func blake2b*(bytes: openArray[byte]): array[32, byte] =
 # ================ SHA256 ================
 
 type Sha256Writer = object
-  ctx: ShaStateStatic[Sha_256]
+  ctx: sha2.sha256
   buf: array[DigestBuf, byte]
   n: int
 
 func flush(w: var Sha256Writer) =
   if w.n > 0:
-    w.ctx.update(
-      cast[ptr UncheckedArray[char]](addr w.buf[0]).toOpenArray(0, w.n - 1)
-    )
+    w.ctx.update(w.buf.toOpenArray(0, w.n - 1))
     w.n = 0
 
 func write(w: var Sha256Writer, b: byte) =
@@ -106,36 +83,41 @@ func write(w: var Sha256Writer, b: byte) =
 func write(w: var Sha256Writer, bytes: openArray[byte]) =
   if bytes.len >= DigestBuf:
     w.flush()
-    w.ctx.update(
-      cast[ptr UncheckedArray[char]](addr bytes[0]).toOpenArray(0, bytes.len - 1)
-    )
+    w.ctx.update(bytes)
   elif bytes.len > 0:
     if w.n + bytes.len > DigestBuf:
       w.flush()
     copyMem(addr w.buf[w.n], addr bytes[0], bytes.len)
     w.n += bytes.len
 
+func initSha256(): Sha256Writer =
+  result.ctx.init()
+
 func sha256*(v: Value): array[32, byte] =
   ## The sha256 of the value's CE bytes
-  var w = Sha256Writer(ctx: initSha_256())
+  var w = initSha256()
   v.encodeInto(w)
   w.flush()
-  let d = w.ctx.digest()
-  copyMem(addr result[0], addr d[0], 32)
+  w.ctx.finish().data
 
 func sha256*(bytes: openArray[byte]): array[32, byte] =
   ## Over raw bytes. For bytes that are already a value's CE, this
   ## equals sha256 of the value
-  var w = Sha256Writer(ctx: initSha_256())
+  var w = initSha256()
   w.write(bytes)
   w.flush()
-  let d = w.ctx.digest()
-  copyMem(addr result[0], addr d[0], 32)
+  w.ctx.finish().data
 
 const DigestAlgo* = "blake2b"
 
 func digest*(x: Value): Digest =
   Digest(algo: Sym(DigestAlgo), hash: @(blake2b x))
+
+func knownAlgo*(algo: string): bool =
+  ## the digest algos this build can check; `verifies` speaks exactly these
+  case algo
+  of "blake2b", "sha256": true
+  else: false
 
 func verifies*(d: Digest, ce: openArray[byte]): bool =
   case $d.algo

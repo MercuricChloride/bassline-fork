@@ -1,5 +1,5 @@
 import ./util
-import pkg/lib/common
+import pkg/lib/[common, print]
 import pkg/lib/stores/filestore
 
 const help = """
@@ -33,6 +33,13 @@ proc run*(args: seq[string]) =
     proc(v: Value): Option[Value] =
       let d = fromValue(v, Digest)
       if d.isNone:
-        return none Value
-      fs.get(d.get)
+        return some v
+      let got =
+        try:
+          fs.get(d.get)
+        except ValueError as e:
+          quit "get: " & e.msg
+      if got.isNone:
+        quit "get: the store doesn't hold " & $v
+      got
   )

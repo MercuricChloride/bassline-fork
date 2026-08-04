@@ -20,19 +20,19 @@ include pkg/prelude
 ## to support other schemes later, but i'm one person! This is also
 ## what the scheme slot is for.
 
-import monocypher
-import ../core
-import ./dialect
+import ../../core
+import ../dialect
+import ./eddsa
 
 const Scheme* = "eddsa-blake2b"
 
 type
-  Seed* = monocypher.Seed
-  Key* = monocypher.Key
+  Seed* = eddsa.Seed
+  Key* = eddsa.Key
 
   Keypair* = object
     seed*: Seed
-    secret: EddsaPrivateKey
+    secret: SecretKey
     public*: Key
 
   KeypairShape {.blRecord: "keypair".} = object
@@ -42,7 +42,7 @@ type
 
   Signature* {.blRecord: "signature".} = object
     scheme*: Lit[Scheme]
-    sig*: monocypher.Signature
+    sig*: Sig
     public*: Key
 
   Signed* {.blRecord: "signed".} = object
@@ -54,12 +54,12 @@ func keypairFromSeed*(seed: Seed): Keypair =
   # by hidden pointer, so the wipe would reach the caller's copy
   result.seed = seed
   var scratch = seed
-  let (secret, public) = crypto_eddsa_key_pair(scratch)
+  let (secret, public) = keyPair(scratch)
   result.secret = secret
   result.public = public
 
-func sign*(kp: Keypair, x: Value): monocypher.Signature =
-  crypto_eddsa_sign(kp.secret, x.encode)
+func sign*(kp: Keypair, x: Value): Sig =
+  eddsa.sign(kp.secret, x.encode)
 
 func toValue*(kp: Keypair): Value =
   KeypairShape(seed: kp.seed, public: kp.public).toValue
@@ -78,4 +78,4 @@ func signedValue*(kp: Keypair, x: Value): Value =
   Signed(value: x, signature: sig).toValue
 
 func holds*(s: Signed): bool =
-  crypto_eddsa_check(s.signature.sig, s.signature.public, encode(s.value))
+  check(s.signature.sig, s.signature.public, encode(s.value))

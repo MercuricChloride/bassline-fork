@@ -1,5 +1,6 @@
 import ../core
-import ../lib/[common, clave]
+import ../lib/common
+import ../lib/crypto/clave
 import util
 
 const help = """

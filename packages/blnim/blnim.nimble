@@ -13,9 +13,7 @@ binDir = "bin"
 
 requires "nim >= 2.2.10"
 requires "zippy >= 0.10.19"
-
-requires "checksums >= 0.2.1"
-requires "monocypher >= 0.3.0"
+requires "nimcrypto >= 0.6.2"
 
 task build_release, "Build for production":
   switch("mm", "orc")

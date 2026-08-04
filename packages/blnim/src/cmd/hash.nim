@@ -1,5 +1,6 @@
 import ../core
-import ../lib/[common, digest]
+import ../lib/common
+import ../lib/crypto/digest
 import ./util
 
 const help = """
