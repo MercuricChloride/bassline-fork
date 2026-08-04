@@ -315,3 +315,23 @@ suite "prelude":
 
   test "assignment reads infix":
     check runPrelude("var x x = 42 x!").stack == @[num"42"]
+
+suite "the machine range refuses":
+  test "arithmetic at the edge is a refusal, not a defect":
+    expect RuntimeError:
+      discard runText("9223372036854775807 1 add!")
+    expect RuntimeError:
+      discard runText("-9223372036854775808 1 sub!")
+    expect RuntimeError:
+      discard runText("9223372036854775807 2 mul!")
+    expect RuntimeError:
+      discard runText("-9223372036854775808 -1 div!")
+
+suite "casts change the reading":
+  test "keys, vals and ->dict do not carry the mark":
+    check runText("{ a: 1 b: 2 } mark! keys!").stack ==
+      @[set(sym"a", sym"b")]
+    check runText("{ a: 1 b: 2 } mark! vals!").stack ==
+      @[set(num"1", num"2")]
+    check runText("[ a 1 ] mark! '->dict'!").stack ==
+      @[dict(@[(sym"a", num"1")])]

@@ -102,38 +102,27 @@ func decodeValue(bytes: openArray[byte], pos: var int, depth: int): Value =
   of 0x6 .. 0x9:
     if lenBits != 0:
       fail "frame header with nonzero length bits"
-    var children: seq[Value]
-    let t: 0x6 .. 0x9 = tag
+    let k =
+      case tag
+      of 0x6: bList
+      of 0x7: bRecord
+      of 0x8: bDict
+      else: bSet
+    var b = open(k, marked)
     while true:
       need(bytes, pos, 1)
       if bytes[pos] == EndByte:
         inc pos
         break
-      children.add decodeValue(bytes, pos, depth - 1)
-    case t
-    of 0x6:
-      list(children, marked)
-    of 0x7:
-      if children.len == 0:
-        fail "record with no head"
-      record(children).mark(marked)
-    of 0x8:
-      if children.len mod 2 != 0:
-        fail "dict with a key missing its value"
-      var entries = newSeqOfCap[Entry](children.len div 2)
-      for p in pairIndex(children):
-        entries.add (children[p.key], children[p.val])
-      for p in pairIndex(entries):
-        if p == 0: continue
-        if cmp(entries[p.prev].key, entries[p].key) >= 0:
-          fail "dict keys out of order or duplicated"
-      dict(entries).mark(marked)
-    of 0x9:
-      for s in slotIndex(children):
-        if s == 0: continue
-        if cmp(children[s.prev], children[s]) >= 0:
-          fail "set members out of order or duplicated"
-      set(children).mark(marked)
+      b.add decodeValue(bytes, pos, depth - 1)
+    try:
+      # we use seal here which will throw if the values aren't
+      # in canonical form.
+      # This is because we should only be receiving values
+      # in the correct CE form
+      seal b
+    except ValueError as e:
+      fail e.msg
   of 0xA:
     if header == EndByte:
       fail "END where a value was expected"
@@ -182,7 +171,7 @@ func write*(w: var string, bytes: openArray[byte]) =
     w.setLen(start + bytes.len)
     copyMem(addr w[start], addr bytes[0], bytes.len)
 
-proc encodeInto*[W](value: sink Value, w: var W) =
+proc encodeInto*[W](value: Value, w: var W) =
   ## Writes the CE bytes of `value` to any writer providing
   ## `write(var W, byte)` and `write(var W, openArray[byte])`.
   let
@@ -221,21 +210,9 @@ proc encodeInto*[W](value: sink Value, w: var W) =
     w.write s.toOpenArrayByte(0, s.high)
   of bBytes:
     w.write value.bytes
-  of bList:
-    for item in value.children:
+  of bList, bRecord, bSet, bDict:
+    for item in value.contents:
       item.encodeInto w
-    w.write EndByte
-  of bRecord:
-    for item in value.children:
-      item.encodeInto w
-    w.write EndByte
-  of bSet:
-    for el in value.children:
-      el.encodeInto w
-    w.write EndByte
-  of bDict:
-    for el in value.children:
-      el.encodeInto w
     w.write EndByte
 
 func encode*(x: Value): seq[byte] =

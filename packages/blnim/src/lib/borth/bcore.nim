@@ -84,18 +84,15 @@ wordSet installCore:
     binary val, key:
       if val.isKind(bSet):
         refuse "sets answer has?, not at"
-      let r = val[key]
-      if r.isNone:
-        refuse "nothing under " & $key
-      rt.push r.get
+      lifted:
+        rt.push val.at(key)
 
   word "has?":
     binary coll, k:
       let present =
         case coll.kind
-        of bDict: coll.entries.find(k).valid
-        of bSet: coll[k].isSome
-        of bList, bRecord: coll.contains(k)
+        of bDict: coll.hasKey(k)
+        of bSet, bList, bRecord: coll.contains(k)
         else: refuse "not a frame"
       rt.push sym(if present: "present" else: "absent")
 
@@ -103,47 +100,49 @@ wordSet installCore:
     unary a:
       case a.kind
       of bList, bRecord, bSet:
-        rt.push num(a.ravel.len)
+        rt.push num(a.contents.len)
       of bDict:
-        rt.push num(pairLen(a.ravel))
+        rt.push num(pairsLen(a))
       else:
         refuse "not a frame"
 
   word "keys":
     unary a:
-      if not a.isKind(bDict):
-        refuse "not a dict"
-      rt.push set(keySet(a.entries))
+      lifted:
+        # a cast changes the reading; the declaration does not travel
+        rt.push mark(open(a).keys.seal, false)
 
   word "vals":
     unary a:
-      if not a.isKind(bDict):
-        refuse "not a dict"
-      rt.push set(valueSet(a.entries))
+      lifted:
+        rt.push mark(open(a).vals().close(), false)
 
   word "->dict":
     unary a:
       if not a.isKind(bList):
         refuse "needs a list"
       lifted:
-        rt.push dict(dictFromRavel(a.items))
+        var b = open(a)
+        b.rekind(bDict)
+        b.marked = false
+        rt.push close b
 
   word "merge":
     binary a, b:
       lifted:
-        rt.push merge(a, b)
+        rt.push close merge(open(a), open(b))
 
   word "put":
     let v = rt.pop
     let k = rt.pop
     let coll = rt.pop
     lifted:
-      rt.push put(coll, k, v)
+      rt.push close put(open(coll), k, v)
 
   word "difference":
     binary a, b:
       lifted:
-        rt.push difference(a, b)
+        rt.push seal difference(open(a), open(b))
 
   word "fry":
     unary temp:

@@ -358,12 +358,12 @@ proc restore*(rt: Runtime, doc: Value) =
     raise newException(ValueError, "restore: " & msg)
 
   if doc.kind != bRecord or doc.marked or doc.head != sym"runtime" or
-      doc.items.len != 4:
+      doc.contents.len != 4:
     bad "a snapshot is an inert (runtime [procs] {aliases} [routes])"
-  let (ps, als, rts) = (doc.items[1], doc.items[2], doc.items[3])
+  let (ps, als, rts) = (doc.contents[1], doc.contents[2], doc.contents[3])
   if ps.kind != bList or als.kind != bDict or rts.kind != bList:
     bad "a snapshot is an inert (runtime [procs] {aliases} [routes])"
-  let count = ps.items.len
+  let count = ps.contents.len
 
   proc asPid(v: Value): Pid =
     if v.kind != bNum or v.marked:
@@ -378,47 +378,47 @@ proc restore*(rt: Runtime, doc: Value) =
     Pid(int32(n))
 
   var procs: seq[Process]
-  for p in ps.items:
+  for p in ps.contents:
     if p.kind != bRecord or p.marked:
       bad "a proc is an inert record"
     if p.head == sym"gone":
-      if p.items.len != 1:
+      if p.contents.len != 1:
         bad "gone is (gone)"
       procs.add Process(pid: Pid(procs.len), live: false)
-    elif p.head == sym"proc" and p.items.len == 4 and p.items[3].kind == bList:
-      let behavior = p.items[1]
+    elif p.head == sym"proc" and p.contents.len == 4 and p.contents[3].kind == bList:
+      let behavior = p.contents[1]
       if behavior notin rt.behaviors:
         bad "a behavior you don't hold: " & $behavior
       var mb = initDeque[Value]()
-      for m in p.items[3].items:
+      for m in p.contents[3].contents:
         mb.addLast m
       procs.add Process(
         pid: Pid(procs.len), live: true, behavior: behavior,
-        state: p.items[2], mailbox: mb
+        state: p.contents[2], mailbox: mb
       )
     else:
       bad "a proc is (proc <behavior> <state> [mail…]) or (gone)"
 
   var aliases: Table[Value, Pid]
-  for p in pairIndex(als.entries):
-    aliases[als.entries[p.key]] = asPid(als.entries[p.val])
+  for k, pd in als.pairs:
+    aliases[k] = asPid(pd)
 
   var routes: Table[(Pid, Value), seq[Dest]]
-  for r in rts.items:
+  for r in rts.contents:
     if r.kind != bRecord or r.marked or r.head != sym"route" or
-        r.items.len != 4 or r.items[3].kind != bList:
+        r.contents.len != 4 or r.contents[3].kind != bList:
       bad "a route is an inert (route <from> <label> [dests…])"
-    let key = (asPid(r.items[1]), r.items[2])
+    let key = (asPid(r.contents[1]), r.contents[2])
     if key in routes:
-      bad "two routes for one (from, label): " & $r.items[1] & " " & $r.items[2]
+      bad "two routes for one (from, label): " & $r.contents[1] & " " & $r.contents[2]
     var ds: seq[Dest]
-    for d in r.items[3].items:
+    for d in r.contents[3].contents:
       if d.kind == bRecord and not d.marked and d.head == sym"pid" and
-          d.items.len == 2:
-        ds.add Dest(kind: dPid, pid: asPid(d.items[1]))
+          d.contents.len == 2:
+        ds.add Dest(kind: dPid, pid: asPid(d.contents[1]))
       elif d.kind == bRecord and not d.marked and d.head == sym"alias" and
-          d.items.len == 2:
-        ds.add Dest(kind: dAlias, name: d.items[1])
+          d.contents.len == 2:
+        ds.add Dest(kind: dAlias, name: d.contents[1])
       else:
         bad "a destination is an inert (pid <n>) or (alias <name>)"
     routes[key] = ds
@@ -434,105 +434,3 @@ proc restore*(rt: Runtime, doc: Value) =
     if rt.procs[i].live and rt.procs[i].mailbox.len > 0:
       rt.procs[i].queued = true
       rt.runq.addLast Pid(i)
-
-# ================ A BASIC SETUP ================
-
-when isMainModule:
-  proc asInt(v: Value): int =
-    parseInt(string(v.num))
-
-  # a driver at the edge: its effect is the screen. The prefix is
-  # configuration, so it arrives as init state, never as a capture
-  let echoRead = stepIt:
-    echo string(state.text) & $it
-
-  # 1. a running sum: state is a value, wiring is the runtime's
-  echo "-- summing --"
-  var rt = initRuntime()
-  let sumRead = stepIt:
-    state = num($(state.asInt + it.asInt))
-    emit(sym"out", state)
-  rt.install sym"summing", Behavior(read: sumRead)
-  rt.install sym"echo", Behavior(read: echoRead)
-  let summer = rt.spawn(sym"summing", num"0")
-  let ear = rt.spawn(sym"echo", text"total: ")
-  rt.wire summer, sym"out", ear
-  for i in 1 .. 5:
-    rt.post summer, num($i)
-  rt.drive()
-
-  # 2. the mark split: one process, reading data and obeying commands
-  echo "-- a cell --"
-  let cellRead = stepIt:
-    state = list(state.items & it)
-  let cellExec = stepIt:
-    if it.head == sym"dump":
-      emit(sym"out", state)
-    elif it.head == sym"clear":
-      state = list()
-  rt.install sym"cell", Behavior(read: cellRead, exec: cellExec)
-  let cell = rt.spawn(sym"cell", list())
-  let cellEar = rt.spawn(sym"echo", text"cell: ")
-  rt.wire cell, sym"out", cellEar
-  rt.post cell, sym"a"
-  rt.post cell, sym"b"
-  rt.post cell, mark(record(sym"dump")) # !(dump): something to do
-  rt.post cell, mark(record(sym"clear"))
-  rt.post cell, sym"c"
-  rt.post cell, mark(record(sym"dump"))
-  rt.drive()
-
-  # 3. late binding: everyone speaks to the alias, the alias moves
-  echo "-- retargeting --"
-  let fwdRead = stepIt:
-    emit(sym"out", it)
-  rt.install sym"fwd", Behavior(read: fwdRead)
-  let speaker = rt.spawn(sym"fwd")
-  let earA = rt.spawn(sym"echo", text"A hears: ")
-  let earB = rt.spawn(sym"echo", text"B hears: ")
-  rt.wire speaker, sym"out", sym"printer" # a late-bound destination
-  rt.alias sym"printer", earA
-  rt.alias record(sym"someone", dict(@[(sym"named", sym"printer")])), earA
-  rt.post speaker, text"first"
-  rt.drive()
-  rt.alias sym"printer", earB # every speaker follows
-  rt.post speaker, text"second"
-  rt.post record(sym"someone", dict(@[(sym"named", sym"printer")])), text"by description"
-  rt.drive()
-
-  # 4. a cycle: 100_000 self-sends, flat stack, counted reductions
-  echo "-- countdown --"
-  let countRead = stepIt:
-    if it.asInt == 0:
-      emit(sym"landed", it)
-    else:
-      emit(sym"next", num($(it.asInt - 1)))
-  rt.install sym"countdown", Behavior(read: countRead)
-  let down = rt.spawn(sym"countdown")
-  let landedEar = rt.spawn(sym"echo", text"landed: ")
-  rt.wire down, sym"next", down
-  rt.wire down, sym"landed", landedEar
-  rt.post down, num"100000"
-  rt.drive()
-  echo "reductions: ", rt[down].reductions
-
-  # 5. frozen mid-flight, spoken as a value, resumed elsewhere
-  echo "-- freeze and resume --"
-  proc chainish(rt: Runtime) =
-    rt.install sym"countdown", Behavior(read: countRead)
-    rt.install sym"echo", Behavior(read: echoRead)
-
-  var rt2 = initRuntime()
-  rt2.chainish()
-  let d2 = rt2.spawn(sym"countdown")
-  let e2 = rt2.spawn(sym"echo", text"landed after resume: ")
-  rt2.wire d2, sym"next", d2
-  rt2.wire d2, sym"landed", e2
-  rt2.post d2, num"6"
-  discard rt2.pump(3) # part way down
-  let frozen = rt2.snapshot()
-  echo $frozen
-  var rt3 = initRuntime()
-  rt3.chainish()
-  rt3.restore frozen
-  rt3.drive()

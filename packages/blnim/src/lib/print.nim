@@ -1,7 +1,6 @@
 {.experimental: "strictFuncs".}
 
-from std/strutils import join, toHex, toLowerAscii
-import std/sequtils
+from std/strutils import toHex, toLowerAscii
 import ../core/values
 import ./read
 
@@ -27,23 +26,39 @@ func `$`*(v: Value): string =
     of bText:
       "\"" & escaped($v.text, '"') & "\""
     of bBytes:
-      "0x" & v.bytes.mapIt(it.toHex).join.toLowerAscii
-    of bList:
-      "[" & v.items.mapIt($it).join(" ") & "]"
-    of bRecord:
-      "(" & v.items.mapIt($it).join(" ") & ")"
+      var hex = "0x"
+      for b in v.bytes:
+        hex.add b.toHex.toLowerAscii
+      hex
+    of bList, bRecord:
+      var parts = ""
+      for c in v.contents:
+        if parts.len > 0:
+          parts.add ' '
+        parts.add $c
+      if v.kind == bList:
+        "[" & parts & "]"
+      else:
+        "(" & parts & ")"
     of bSet:
-      "{" & v.elements.mapIt($it).join(" ") & "}"
+      var parts = ""
+      for c in v.contents:
+        if parts.len > 0:
+          parts.add ' '
+        parts.add $c
+      "{" & parts & "}"
     of bDict:
-      if v.entries.len == 0:
+      if v.contents.len == 0:
         "{:}"
       else:
-        var strings: seq[string] = @[]
-        for p in pairIndex(v.ravel):
-          strings.add (
-            $v.ravel[p.key] & ": " & $v.ravel[p.val]
-          )
-        "{" & strings.join(" ") & "}"
+        var parts = ""
+        for k, val in v.pairs:
+          if parts.len > 0:
+            parts.add ' '
+          parts.add $k
+          parts.add ": "
+          parts.add $val
+        "{" & parts & "}"
   if not v.marked:
     core
   elif v.isFrame:

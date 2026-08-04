@@ -94,7 +94,7 @@ func datum(s: string, pos: var int): Value =
   case s[pos]
   of '[':
     inc pos
-    var items: seq[Value]
+    var b = open(bList)
     while true:
       skipWs(s, pos)
       if pos >= s.len:
@@ -102,50 +102,50 @@ func datum(s: string, pos: var int): Value =
       if s[pos] == ']':
         inc pos
         break
-      items.add value(s, pos)
-    list(items)
+      b.add value(s, pos)
+    close b
   of '(':
     inc pos
-    var items: seq[Value]
+    var b = open(bRecord)
     while true:
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed (")
       if s[pos] == ')':
-        if items.len == 0:
+        if b.len == 0:
           fail(s, pos, "record with no head")
         inc pos
         break
-      items.add value(s, pos)
-    record(items)
+      b.add value(s, pos)
+    close b
   of '{':
-    # one brace family: the first element decides. A ':' after it makes
-    # a dictionary; no ':' makes a set. {} is the empty set, {:} the
-    # empty dictionary — no colon, no dict, even at zero elements.
+    # the open frame starts as a set and the first ':'
+    # rekinds it to a dictionary.
     inc pos
+    var b = open(bSet)
     skipWs(s, pos)
     if pos >= s.len:
       fail(s, pos, "unclosed {")
     if s[pos] == '}':
       inc pos
-      values.set(newSeq[Value]())
     elif s[pos] == ':':
       inc pos
+      b.rekind(bDict)
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed {")
       if s[pos] != '}':
         fail(s, pos, "'{:' is the empty dictionary; expected '}'")
       inc pos
-      dict(newSeq[(Value, Value)]())
     else:
       let first = value(s, pos)
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed {")
       if s[pos] == ':':
+        b.rekind(bDict)
         inc pos
-        var entries = @[(first, value(s, pos))]
+        b.add(first, value(s, pos))
         while true:
           skipWs(s, pos)
           if pos >= s.len:
@@ -158,13 +158,9 @@ func datum(s: string, pos: var int): Value =
           if pos >= s.len or s[pos] != ':':
             fail(s, pos, "dict entry needs ':' after its key")
           inc pos
-          entries.add (k, value(s, pos))
-        try:
-          dict(entries)
-        except ValueError:
-          fail(s, pos, "duplicate dict key")
+          b.add(k, value(s, pos))
       else:
-        var els = @[first]
+        b.add first
         while true:
           skipWs(s, pos)
           if pos >= s.len:
@@ -174,11 +170,18 @@ func datum(s: string, pos: var int): Value =
             break
           if s[pos] == ':':
             fail(s, pos, "':' in a set; a dictionary is {key: value}")
-          els.add value(s, pos)
-        let v = values.set(els)
-        if v.elements.len != els.len:
-          fail(s, pos, "duplicate set member")
-        v
+          b.add value(s, pos)
+    if b.kind == bDict:
+      try:
+        close b
+      except ValueError:
+        fail(s, pos, "duplicate dict key")
+    else:
+      let n = b.len
+      let v = close b
+      if v.contents.len != n:
+        fail(s, pos, "duplicate set member")
+      v
   of '"':
     let raw = quotedScan(s, pos, '"')
     try:

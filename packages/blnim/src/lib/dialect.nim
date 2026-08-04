@@ -169,7 +169,6 @@ func fromValue*[X](v: Value, t: typedesc[seq[X]]): Option[seq[X]] =
     if v.kind != bList or v.marked:
       return none(seq[X])
     var res: seq[X]
-    # children borrows the payload; items copies it to iterate
     for item in v.children:
       let p = fromValue(item, X)
       if p.isNone:
@@ -185,29 +184,29 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
   when T.hasCustomPragma(blRecord):
     if v.kind != bRecord or v.marked:
       return none(T)
-    if v.rec[0] != sym(T.getCustomPragmaVal(blRecord)):
+    if v.contents[0] != sym(T.getCustomPragmaVal(blRecord)):
       return none(T)
     var res: T
     var i = 1
     for name, f in res.fieldPairs:
-      if i >= v.rec.len:
+      if i >= v.contents.len:
         return none(T)
       when hasCustomPragma(f, blSet):
-        let el = v.rec[i]
+        let el = v.contents[i]
         if el.kind != bSet or el.marked:
           return none(T)
-        for j in 0 ..< el.elements.len:
-          let p = fromValue(el.elements[j], typeof(f[0]))
+        for j in 0 ..< el.contents.len:
+          let p = fromValue(el.contents[j], typeof(f[0]))
           if p.isNone:
             return none(T)
           f.add p.get
       else:
-        let p = fromValue(v.rec[i], typeof(f))
+        let p = fromValue(v.contents[i], typeof(f))
         if p.isNone:
           return none(T)
         f = p.get
       inc i
-    if i != v.rec.len:
+    if i != v.contents.len:
       return none(T)
     some(res)
   elif T.hasCustomPragma(blDict):
@@ -222,11 +221,8 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
         else:
           name
       let keyVal = sym(key)
-      # keys are canonically sorted and unique, so the scan was a binary
-      # search spelled long
-      let j = v.entries.find(keyVal)
-      if j.valid:
-        let p = fromValue(v.entries[j.val], typeof(f))
+      if v.hasKey(keyVal):
+        let p = fromValue(v.at(keyVal), typeof(f))
         if p.isNone:
           return none(T)
         f = p.get
@@ -234,8 +230,7 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
       else:
         when typeof(f) isnot Option:
           return none(T)
-    # a dict's len counts slots, and an entry is two of them
-    if matched != (v.entries.len div 2):
+    if matched != pairsLen(v):
       # unknown keys: this shape is closed
       return none(T)
     some(res)

@@ -60,24 +60,62 @@ func toDecimal*(str: sink string): DecimalString =
 
 func toDecimal*(n: int): DecimalString = toDecimal($n)
 
-func parseInt*(str: sink DecimalString): int =
-  discard parseInt(str.toString, result)
+func parseInt*(str: DecimalString): int =
+  discard parseInt(string(str), result)
 
-template binaryOp(name) =
-    func `name`*(a, b: DecimalString): DecimalString =
-      name(a.parseInt, b.parseInt).toDecimal
-    
-    func `name`*(a: DecimalString, b: int): DecimalString =
-      name(a.parseInt, b).toDecimal
-    
-    func `name`*(a: int, b: DecimalString): DecimalString =
-      name(a, b.parseInt).toDecimal
+func outOfRange() {.noreturn.} =
+  raise newException(ValueError, "past the machine range")
 
-binaryOp(`+`)
-binaryOp(`-`)
-binaryOp(`*`)
-binaryOp(`div`)
-binaryOp(`mod`)
+func checkedAdd(a, b: int): int =
+  if (b > 0 and a > high(int) - b) or (b < 0 and a < low(int) - b):
+    outOfRange()
+  a + b
+
+func checkedSub(a, b: int): int =
+  if (b < 0 and a > high(int) + b) or (b > 0 and a < low(int) + b):
+    outOfRange()
+  a - b
+
+func checkedMul(a, b: int): int =
+  if a != 0 and b != 0:
+    if (a > 0 and b > 0 and a > high(int) div b) or
+        (a > 0 and b < 0 and b < low(int) div a) or
+        (a < 0 and b > 0 and a < low(int) div b) or
+        (a < 0 and b < 0 and b < high(int) div a):
+      outOfRange()
+  a * b
+
+func checkedDiv(a, b: int): int =
+  if b == 0:
+    raise newException(ValueError, "division by zero")
+  if a == low(int) and b == -1:
+    outOfRange()
+  a div b
+
+func checkedMod(a, b: int): int =
+  if b == 0:
+    raise newException(ValueError, "division by zero")
+  if b == -1:
+    # anything mod -1 is 0 — the identity, spoken directly, because
+    # the machine op faults on low(int) even though 0 fits
+    return 0
+  a mod b
+
+template binaryOp(name, checked) =
+  func `name`*(a, b: DecimalString): DecimalString =
+    checked(a.parseInt, b.parseInt).toDecimal
+
+  func `name`*(a: DecimalString, b: int): DecimalString =
+    checked(a.parseInt, b).toDecimal
+
+  func `name`*(a: int, b: DecimalString): DecimalString =
+    checked(a, b.parseInt).toDecimal
+
+binaryOp(`+`, checkedAdd)
+binaryOp(`-`, checkedSub)
+binaryOp(`*`, checkedMul)
+binaryOp(`div`, checkedDiv)
+binaryOp(`mod`, checkedMod)
 
 func `==`*(a: int, b: DecimalString): bool =
   a == parseInt(b)

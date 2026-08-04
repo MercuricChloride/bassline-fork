@@ -15,11 +15,11 @@ const Prelude = staticRead("../lib/borth/prelude.bl")
 
 proc frameLine(f: Frame): string =
   case f.kind
-  of fCode: "code @" & $f.ip & " in " & $f.body
-  of fExpand: "expansion @" & $f.ip & " in " & $f.body
+  of fCode: "code @" & $f.ip & "/" & $f.body.len
+  of fExpand: "expansion @" & $f.ip & "/" & $f.body.len
   of fPush: "restore " & $f.saved
-  of fEach: "each @" & $f.idx & " over " & $f.coll
-  of fMap: "map @" & $f.idx & " over " & $f.coll
+  of fEach: "each @" & $f.idx & " over a " & $f.src.kind
+  of fMap: "map @" & $f.idx & " over a " & $f.src.kind
 
 proc run*(args: seq[string]) =
   var runtime = initRuntime()

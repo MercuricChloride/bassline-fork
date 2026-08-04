@@ -27,7 +27,7 @@ suite "clave":
 
   test "a different value does not verify against the same signature":
     let wrapped = signedValue(kp, doc)
-    let forged = record(sym"signed", text"other", wrapped.rec[2])
+    let forged = record(sym"signed", text"other", wrapped.contents[2])
     let s = fromValue(forged, Signed)
     check s.isSome # the shape is fine
     check not s.get.holds # the attestation is not

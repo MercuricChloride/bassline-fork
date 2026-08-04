@@ -7,7 +7,7 @@ proc asInt(v: Value): int =
 
 # a recorder: the transcript is its state
 let recRead = stepIt:
-  state = list(state.items & it)
+  state = list(state.contents & it)
 
 suite "delivery":
   test "a mailbox is fifo and drive is to quiescence":
@@ -59,15 +59,15 @@ suite "delivery":
     check not rt.done
     check rt[rec].mailbox.len == 6
     rt.drive()
-    check rt[rec].state.items.len == 10
+    check rt[rec].state.contents.len == 10
 
 suite "the mark split":
   test "read hears inert, exec hears marked":
     var rt = initRuntime()
     let countingRead = stepIt:
-      state = list(num($(state.items[0].asInt + 1)), state.items[1])
+      state = list(num($(state.contents[0].asInt + 1)), state.contents[1])
     let countingExec = stepIt:
-      state = list(state.items[0], num($(state.items[1].asInt + 1)))
+      state = list(state.contents[0], num($(state.contents[1].asInt + 1)))
     rt.install sym"counter", Behavior(read: countingRead, exec: countingExec)
     let c = rt.spawn(sym"counter", list(num"0", num"0"))
     rt.post c, sym"data"
@@ -331,7 +331,7 @@ suite "errors are messages when someone listens":
   let angryRead = stepIt:
     if it == sym"boom":
       raise newException(CatchableError, "bang")
-    state = list(state.items & it)
+    state = list(state.contents & it)
 
   test "held: a raise becomes (raised …) and the runtime keeps going":
     var rt = initRuntime()
@@ -412,7 +412,7 @@ suite "the unheard name":
     check rt[ear].state == list(record(sym"gone", sym"rec", num"5"))
     rt.post r, num"6" # a direct post to the dead reports too
     rt.drive()
-    check rt[ear].state.items.len == 2
+    check rt[ear].state.contents.len == 2
 
   test "reports are never about their own listener":
     var rt = initRuntime()
