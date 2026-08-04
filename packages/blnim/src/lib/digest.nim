@@ -1,6 +1,6 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 import checksums/sha2
+import monocypher
 import ../core
 import ./[dialect, common]
 

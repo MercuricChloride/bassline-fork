@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 import std/[algorithm, sequtils, options, hashes]
 import ./strflavors
 export strflavors, options
@@ -28,7 +27,7 @@ type
     bList  # frame types
     bRecord
     bDict
-    bSet   
+    bSet
 
   Value* = object
     marked: bool
@@ -93,7 +92,7 @@ func `==`*(a: Pair, b: int): bool =
 func `<=`*(a, b: Pair): bool =
   int(a) <= int(b)
 func `mid`*(pa, pb: Pair): Pair =
-  let 
+  let
     a = int(pa)
     b = int(pb)
   if a < 0 or b < 0:
@@ -122,7 +121,7 @@ template children*(v: Value): openArray[Value] =
 
 # ================ Flat Indexing ================
 
-func slotLen*[T](col: T): int 
+func slotLen*[T](col: T): int
   = len(col)
 func pairLen*[T](col: T): int
   = len(col) div 2
@@ -239,12 +238,12 @@ func find*(v: DictObj, key: Value): Pair =
   var lo = pair 0
   var hi = v.highPair
   while lo <= hi:
-    let 
+    let
       m = mid(lo, hi)
       c = cmp(v[m.key], key)
-    if c == 0: 
+    if c == 0:
       return m
-    if c < 0: 
+    if c < 0:
       lo = m.next
     else: hi = m.prev
   pair -1
@@ -299,29 +298,34 @@ func marked*(v: Value): bool =
   v.marked
 
 func num*(v: Value): lent DecimalString =
-  if v.kind != bNum:
-    fail "num: not a number"
-  v.num
+  if v.kind == bNum:
+    return v.num
+  fail "num: not a number"
 
 func text*(v: Value): lent Utf8String =
-  if not (v.kind in {bText, bSym}):
-    fail "text: not text or a symbol"
-  v.text
+  if v.kind in {bText, bSym}:
+    return v.text
+  fail "text: not text or a symbol"
 
 func bytes*(v: Value): lent seq[byte] =
-  if v.kind != bBytes:
-    fail "bytes: not bytes"
-  v.bytes
+  if v.kind == bBytes:
+    return v.bytes
+  fail "bytes: not bytes"
 
 func elements*(v: Value): lent SetObj =
-  if v.kind != bSet:
-    fail "elements: not a set"
-  v.elements
+  if v.kind == bSet:
+    return v.elements
+  fail "elements: not a set"
 
 func entries*(v: Value): lent DictObj =
-  if v.kind != bDict:
-    fail "entries: not a dict"
-  v.entries
+  if v.kind == bDict:
+    return v.entries
+  fail "entries: not a dict"
+
+func rec*(v: Value): lent RecordObj =
+  if v.kind == bRecord:
+    return v.rec
+  fail "rec: not a record"
 
 func items*(v: Value): lent seq[Value] =
   case v.kind
@@ -342,10 +346,13 @@ func head*(v: Value): lent Value =
 template tail*(v: Value): openArray[Value] =
   v.items.toOpenArray(min(1, v.items.len), v.items.len - 1)
 
-func rec*(v: Value): lent RecordObj =
-  if v.kind != bRecord:
-    fail "rec: not a record"
-  v.rec
+iterator allChildren*(v: Value): lent Value {.closure.} =
+  if v.isFrame:
+    for child in v.children:
+      yield child
+      if child.isFrame:
+        for deep in child.allChildren:
+          yield deep
 
 func payloadLength*(value: Value): int =
   case value.kind
@@ -354,13 +361,7 @@ func payloadLength*(value: Value): int =
   of bBytes: value.bytes.len
   else: 0
 
-iterator allChildren*(v: Value): lent Value {.closure.} =
-  if v.isFrame:
-    for child in v.children:
-      yield child
-      if child.isFrame:
-        for deep in child.allChildren:
-          yield deep
+
 
 func hash*(v: Value): Hash =
   ## This is not a cryptographic hash!
@@ -523,7 +524,7 @@ func dict*(entries: sink DictObj, marked = false): Value =
 template withVarArgs(name, constructor, el: untyped) =
   func name*(items: sink seq[el], marked = false): Value =
     name(constructor(items), marked)
-  
+
   func name*(items: varargs[el]): Value =
     name(constructor(items), false)
 

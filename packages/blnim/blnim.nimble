@@ -16,3 +16,9 @@ requires "zippy >= 0.10.19"
 
 requires "checksums >= 0.2.1"
 requires "monocypher >= 0.3.0"
+
+task build_release, "Build for production":
+  switch("mm", "orc")
+  switch("d", "release")
+  switch("outdir", "bin")
+  setCommand "c", "src/bl.nim"

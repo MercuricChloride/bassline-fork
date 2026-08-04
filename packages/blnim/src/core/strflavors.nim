@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 from std/parseutils import parseInt
 
 template strDefaults*(T: typedesc) =
@@ -18,7 +17,7 @@ template strDefaults*(T: typedesc) =
   func `[]`*[I](a: T, i: I): char =
     string(a)[i]
 
-  func toString*(s: T): string =
+  func toString*(s: sink T): string =
     string(s)
 
 type
@@ -53,7 +52,7 @@ func isDecimal*(str: string): bool =
   true
 
 func toDecimal*(str: DecimalString): DecimalString = str
-func toDecimal*(str: string): DecimalString =
+func toDecimal*(str: sink string): DecimalString =
   if str.isDecimal:
     DecimalString(str)
   else:
@@ -61,8 +60,8 @@ func toDecimal*(str: string): DecimalString =
 
 func toDecimal*(n: int): DecimalString = toDecimal($n)
 
-func parseInt*(str: DecimalString): int =
-  discard parseInt(string(str), result)
+func parseInt*(str: sink DecimalString): int =
+  discard parseInt(str.toString, result)
 
 template binaryOp(name) =
     func `name`*(a, b: DecimalString): DecimalString =
@@ -147,7 +146,7 @@ func toValidUtf8*(bytes: openArray[byte]): Utf8String =
   else:
     raise newException(InvalidUtf8Str, "malformed utf8 bytes")
 
-func toValidUtf8*(str: Utf8String): Utf8String = str
+func toValidUtf8*(str: sink Utf8String): Utf8String = str
 
-func toValidUtf8*(str: string): Utf8String =
+func toValidUtf8*(str: sink string): Utf8String =
   str.toOpenArrayByte(str.low, str.high).toValidUtf8

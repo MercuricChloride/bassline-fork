@@ -1,5 +1,4 @@
-{.experimental: "strictFuncs".}
-
+include pkg/prelude
 import ./values
 
 type
@@ -165,14 +164,14 @@ func payloadSize(len: int): PayloadSize =
     else:
       raise newException(InvalidPayloadSize, "payload too large: " & $len)
 
-func write*(buf: var seq[byte], b: byte) =
+func write*(buf: var seq[byte], b: varargs[byte]) =
   buf.add b
 
-func write*(buf: var seq[byte], bytes: openArray[byte]) =
-  if bytes.len > 0:
-    let start = buf.len
-    buf.setLen(start + bytes.len)
-    copyMem(addr buf[start], addr bytes[0], bytes.len)
+# func write*(buf: var seq[byte], bytes: openArray[byte]) =
+#   if bytes.len > 0:
+#     let start = buf.len
+#     buf.setLen(start + bytes.len)
+#     copyMem(addr buf[start], addr bytes[0], bytes.len)
 
 func write*(w: var string, b: byte) =
   w.add char(b)
@@ -183,7 +182,7 @@ func write*(w: var string, bytes: openArray[byte]) =
     w.setLen(start + bytes.len)
     copyMem(addr w[start], addr bytes[0], bytes.len)
 
-proc encodeInto*[W](value: Value, w: var W) =
+proc encodeInto*[W](value: sink Value, w: var W) =
   ## Writes the CE bytes of `value` to any writer providing
   ## `write(var W, byte)` and `write(var W, openArray[byte])`.
   let
@@ -247,8 +246,8 @@ func encodeToString*(x: Value): string =
 
 # ================ STREAMING ================
 
-func checkSize(sd: StreamDecoder, declared: int) =
-  if (sd.scanPos - sd.start) + declared > sd.maxValueBytes:
+func checkSize(sd: var StreamDecoder, len: int) =
+  if (sd.scanPos - sd.start) + len > sd.maxValueBytes:
     fail "value exceeds the size limit"
 
 func skipPayload(sd: var StreamDecoder, payload: int): bool =
@@ -374,6 +373,6 @@ func next*(sd: var StreamDecoder): Option[Value] =
     sd.compact()
     some value
   else:
-    # an incomplete value may wait forever, but never past the limit
+    # an incomplete value may wait forever but not past the limit
     sd.checkSize(0)
     none Value
