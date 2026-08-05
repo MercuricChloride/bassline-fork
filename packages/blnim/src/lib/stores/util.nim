@@ -6,7 +6,9 @@ import pkg/lib/crypto/digest
 
 export strutils, core, digest, common, print
 
-const DigestBytes* = 32 # blake2b-256 and sha256 alike
+const DigestBytes* = 32
+## currently all of our hashes are 32 byte
+## So this is that size
 
 func hexName*(hash: openArray[byte]): string =
   result = newStringOfCap(hash.len * 2)
@@ -17,8 +19,9 @@ func unhexName*(name: string): seq[byte] =
   parseHexStr(name).toBytes()
 
 func isHexName*(name: string): bool =
-  ## exactly the shape hexName gives a digest: 64 lowercase hex digits.
-  ## Anything else in a store directory is not an entry.
+  ## whether the string matches
+  ## our definition of a hex digest.
+  ## 64 lowercase hex digits
   if name.len != DigestBytes * 2:
     return false
   for c in name:

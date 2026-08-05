@@ -48,6 +48,11 @@ const Framish = {bList, bRecord, bDict, bSet}
 template fail(msg: untyped) =
   raise newException(ValueError, msg)
 
+template refuse*(msg: untyped) =
+  ## I may like this name better, not 100% sure yet.
+  ## So for now this is an alias for `fail`
+  fail(msg)
+
 proc `=copy`(dest: var OpenFrame, src: OpenFrame) {.error.}
 
 # ================ FORWARD DECL ================
