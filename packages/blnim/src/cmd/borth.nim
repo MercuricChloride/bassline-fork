@@ -1,4 +1,4 @@
-import pkg/lib/[borth, read, print]
+import pkg/lib/[borth, reader]
 import ./util
 
 const help = """

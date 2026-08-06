@@ -1,5 +1,5 @@
 import ./util
-import pkg/lib/[common, print]
+import pkg/lib/[common, reader]
 import pkg/lib/stores/filestore
 
 const help = """

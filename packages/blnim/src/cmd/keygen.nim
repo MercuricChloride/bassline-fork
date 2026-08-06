@@ -1,6 +1,6 @@
 import std/[os, sysrand]
 import ../core
-import ../lib/print
+import ../lib/reader
 import ../lib/crypto/clave
 import ./util
 

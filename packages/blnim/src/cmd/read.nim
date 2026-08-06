@@ -1,5 +1,5 @@
 import std/os
-import ../lib/read as textread
+import pkg/lib/reader
 import util
 
 const help = """

@@ -1,6 +1,6 @@
 import std/[unittest, sequtils]
 import pkg/core
-import pkg/lib/print
+import pkg/lib/reader
 
 suite "at is the asking lens":
   let point = record(sym"point", num"3", num"4")

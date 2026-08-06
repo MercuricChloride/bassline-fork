@@ -1,11 +1,16 @@
 include pkg/prelude
-import std/parseopt
+import std/[parseopt, os, posix, strutils]
 import
   cmd/[
     listen, file,  send, hash, cat, keygen, sign, verify, put, get, read,
-    borth,
+    borth, reach,
     #assemble
   ]
+
+const Builtins = [
+  "listen", "file", "send", "hash", "cat", "keygen", "sign", "verify", "put",
+  "get", "read", "borth", "reach", "which", "commands",
+]
 
 proc printHelp() =
   echo """
@@ -26,10 +31,56 @@ Usage:
   bl put [--store:PATH]          hold stdin values, emit their names
   bl get [--store:PATH]          resolve digest names to content
   bl borth [file ...]            run borth documents, or stdin live
+  bl reach PLACE [-- CMD ...]    give stdin/stdout, or a command's, to a place
+  bl which NAME                  say what would run for a command name
+  bl commands                    list builtin and PATH commands
   bl <command> --help            command-specific help
   bl -h | --help
   bl -v | --version
+
+Any other NAME runs bl-NAME from PATH, so commands can be added
+without touching bl.
 """
+
+proc runWhich(args: seq[string]) =
+  if args.len != 1:
+    quit "which takes exactly one command name"
+  let name = args[0]
+  if name in Builtins:
+    echo "builtin " & name
+    return
+  let exe = findExe("bl-" & name)
+  if exe.len > 0:
+    echo exe
+  else:
+    quit "no command " & name, 1
+
+proc runCommands() =
+  for b in Builtins:
+    echo b & "\tbuiltin"
+  for dir in getEnv("PATH").split(PathSep):
+    if dir.len == 0 or not dirExists(dir):
+      continue
+    for kind, path in walkDir(dir):
+      if kind notin {pcFile, pcLinkToFile}:
+        continue
+      let base = path.extractFilename
+      if base.len > 3 and base.startsWith("bl-") and
+          fpUserExec in getFilePermissions(path):
+        echo base[3 .. ^1] & "\t" & path
+
+proc runExternal(name: string, args: seq[string]) =
+  ## PATH is the extension mechanism: bl-NAME runs as bl NAME. The
+  ## exec preserves stdio, exit status, and signal behavior.
+  let exe = findExe("bl-" & name)
+  if exe.len == 0:
+    echo "unknown command: ", name
+    printHelp()
+    quit 1
+  var argv = @[exe] & args
+  let cargs = allocCStringArray(argv)
+  discard execv(exe.cstring, cargs)
+  quit "cannot exec " & exe & ": " & $strerror(errno)
 
 proc main() =
   var p = initOptParser()
@@ -91,10 +142,18 @@ proc main() =
       of "borth":
         borth.run(p.remainingArgs())
         return
+      of "reach":
+        reach.run(p.remainingArgs())
+        return
+      of "which":
+        runWhich(p.remainingArgs())
+        return
+      of "commands":
+        runCommands()
+        return
       else:
-        echo "unknown command: ", p.key
-        printHelp()
-        quit 1
+        runExternal(p.key, p.remainingArgs())
+        return
 
   printHelp()
 

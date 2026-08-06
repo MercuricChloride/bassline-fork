@@ -3,6 +3,7 @@ include pkg/prelude
 import std/os
 import pkg/core
 import pkg/lib/crypto/digest
+import pkg/lib/common
 import ./util
 
 type

@@ -1,6 +1,6 @@
 include pkg/prelude
 import pkg/core
-import pkg/lib/print
+import pkg/lib/reader
 import ./runtime
 import ./words
 

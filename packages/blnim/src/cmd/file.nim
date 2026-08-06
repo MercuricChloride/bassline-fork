@@ -3,7 +3,7 @@ from std/strutils import nil
 import zippy
 import zippy/tarballs
 import ../core
-import ../lib/[common, print]
+import ../lib/[common, reader]
 import ../lib/crypto/digest
 import ./util
 

@@ -9,7 +9,7 @@
 ## Malformed input is fatal to a connection: past one bad byte there
 ## is no sound resync point, so the socket is closed.
 include pkg/prelude
-import std/[asyncnet, asyncdispatch, options]
+import std/[asyncnet, asyncdispatch, options, os, posix, nativesockets]
 import ../core
 export asyncnet, asyncdispatch
 const RecvChunk = 16 * 1024
@@ -26,6 +26,7 @@ type
 
   Landing* = ref object
     socket: AsyncSocket
+    unixPath: string
     onValue: Handler
     onOpen: ConnCallback
     onClose: ConnCallback
@@ -76,7 +77,91 @@ proc connect*(
     socket: socket, address: host, decoder: initStreamDecoder(maxDepth, maxValueBytes)
   )
 
+proc connectUnix*(
+    path: string, maxDepth = 64, maxValueBytes = DefaultMaxValueBytes
+): Future[Conn] {.async.} =
+  ## The client half for a local place: connect to a unix socket path.
+  let socket =
+    newAsyncSocket(nativesockets.AF_UNIX, SOCK_STREAM, IPPROTO_IP, buffered = false)
+  try:
+    await asyncnet.connectUnix(socket, path)
+  except CatchableError:
+    socket.close() # asyncnet has no finalizer; the fd would leak
+    raise
+  result = Conn(
+    socket: socket, address: path, decoder: initStreamDecoder(maxDepth, maxValueBytes)
+  )
+
 # ================ LANDING ================
+
+proc claimUnixPath(path: string) =
+  ## A crashed place leaves its socket file behind. Take the path only
+  ## when it provably is such a leftover: a socket, owned by us, and
+  ## refusing connections. Anything else stays put -- never unlink a
+  ## regular file or follow a symlink just because a name is occupied.
+  var st: Stat
+  if lstat(path.cstring, st) != 0:
+    return # nothing there; bind will make it
+  if not S_ISSOCK(st.st_mode):
+    raise newException(OSError, path & " exists and is not a socket")
+  if st.st_uid != getuid():
+    raise newException(OSError, path & " is somebody else's socket")
+  # probe: a live place accepts, a dead one refuses
+  let fd = posix.socket(posix.AF_UNIX, posix.SOCK_STREAM, 0)
+  if cint(fd) < 0:
+    raiseOSError(osLastError())
+  defer:
+    discard posix.close(cint(fd))
+  var sa: Sockaddr_un
+  sa.sun_family = TSa_Family(posix.AF_UNIX)
+  if path.len >= sa.sun_path.len:
+    raise newException(OSError, "path too long for a unix socket: " & path)
+  copyMem(addr sa.sun_path[0], path.cstring, path.len + 1)
+  if posix.connect(fd, cast[ptr SockAddr](addr sa), SockLen(sizeof(sa))) == 0:
+    raise newException(OSError, "a place is already landed on " & path)
+  if osLastError() != OSErrorCode(ECONNREFUSED):
+    raiseOSError(osLastError())
+  removeFile(path)
+
+proc landingUnix*(
+    path: string,
+    onValue: Handler,
+    onOpen: ConnCallback = nil,
+    onClose: ConnCallback = nil,
+    onError: ErrorCallback = nil,
+    maxDepth = 64,
+    maxValueBytes = DefaultMaxValueBytes,
+): Landing =
+  ## Binds a listening unix socket for values to land on. The socket
+  ## is created user-only; loosening access is a deliberate act with
+  ## chmod, not a default.
+  if path.len >= 104: # sockaddr_un on this platform
+    raise newException(OSError, "path too long for a unix socket: " & path)
+  let parent = path.parentDir
+  if parent.len > 0:
+    createDir(parent)
+  claimUnixPath(path)
+  let socket =
+    newAsyncSocket(nativesockets.AF_UNIX, SOCK_STREAM, IPPROTO_IP, buffered = false)
+  let oldMask = umask(0o177)
+  try:
+    asyncnet.bindUnix(socket, path)
+    socket.listen()
+  except CatchableError:
+    discard umask(oldMask)
+    socket.close() # asyncnet has no finalizer; the fd would leak
+    raise
+  discard umask(oldMask)
+  Landing(
+    socket: socket,
+    unixPath: path,
+    onValue: onValue,
+    onOpen: onOpen,
+    onClose: onClose,
+    onError: onError,
+    maxDepth: maxDepth,
+    maxValueBytes: maxValueBytes,
+  )
 
 proc landing*(
     port: Port,
@@ -117,9 +202,12 @@ proc localPort*(l: Landing): Port =
 
 proc close*(l: Landing) =
   ## Stop accepting. Established connections are left alone; the app
-  ## holds any Conns it cared to keep.
+  ## holds any Conns it cared to keep. A unix landing removes the
+  ## socket it bound.
   if not l.socket.isClosed:
     l.socket.close()
+  if l.unixPath.len > 0:
+    removeFile(l.unixPath)
 
 proc process(l: Landing, conn: Conn) {.async.} =
   # nothing may escape into asyncCheck so a bug in one connection's
@@ -164,7 +252,11 @@ proc serve*(l: Landing) {.async.} =
       continue
     let conn = Conn(
       socket: accepted.client,
-      address: accepted.address,
+      address:
+        if l.unixPath.len > 0:
+          l.unixPath
+        else:
+          accepted.address,
       decoder: initStreamDecoder(l.maxDepth, l.maxValueBytes),
     )
     asyncCheck l.process(conn)

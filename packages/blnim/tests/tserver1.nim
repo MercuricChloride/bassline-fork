@@ -1,8 +1,13 @@
 import std/unittest
-import std/options
+import std/[options, os, tempfiles, nativesockets, posix]
 from std/strutils import repeat
 import pkg/core
 import pkg/lib/[server]
+
+proc pathThere(p: string): bool =
+  # fileExists is regular-files-only; a socket needs lstat
+  var st: Stat
+  lstat(p.cstring, st) == 0
 
 suite "landing surface":
   test "values land in order across awkward splits":
@@ -144,3 +149,63 @@ suite "landing surface":
       check landed == @[sym"fine"]
     finally:
       l.close()
+
+suite "unix landings":
+  test "values land through a unix socket; close removes it":
+    let dir = createTempDir("blsock", "")
+    let path = dir / "place"
+    var landed: seq[Value]
+    proc onV(conn: Conn, v: Value) {.async.} =
+      landed.add v
+
+    let l = landingUnix(path, onV)
+    asyncCheck l.serve()
+    proc run() {.async.} =
+      let c = await connectUnix(path)
+      await c.send(num"7")
+      await c.send(text"eight")
+      while landed.len < 2:
+        await sleepAsync(5)
+      c.close()
+
+    check waitFor withTimeout(run(), 10_000)
+    check landed == @[num"7", text"eight"]
+    check pathThere(path)
+    l.close()
+    check not pathThere(path)
+    removeDir(dir)
+
+  test "a stale socket is claimed; anything else is refused":
+    let dir = createTempDir("blsock", "")
+    proc onV(conn: Conn, v: Value) {.async.} =
+      discard
+
+    # a crash leaves the socket file with nobody behind it
+    let stale = dir / "stale"
+    block:
+      let s = newAsyncSocket(
+        nativesockets.AF_UNIX, nativesockets.SOCK_STREAM, nativesockets.IPPROTO_IP,
+        buffered = false,
+      )
+      bindUnix(s, stale)
+      s.close() # no removeFile: the leftover a crash would leave
+    check pathThere(stale)
+    let l = landingUnix(stale, onV) # claims it
+    l.close()
+    check not pathThere(stale)
+
+    # a live landing refuses a second one on the same path
+    let busy = dir / "busy"
+    let l1 = landingUnix(busy, onV)
+    asyncCheck l1.serve()
+    expect OSError:
+      discard landingUnix(busy, onV)
+    l1.close()
+
+    # a regular file is never unlinked just because the name is wanted
+    let f = dir / "occupied"
+    writeFile(f, "not a socket")
+    expect OSError:
+      discard landingUnix(f, onV)
+    check readFile(f) == "not a socket"
+    removeDir(dir)

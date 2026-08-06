@@ -1,5 +1,5 @@
 import ../core
-import ../lib/print
+import ../lib/reader
 import util
 
 const help = """

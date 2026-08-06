@@ -1,7 +1,7 @@
 include pkg/prelude
 import std/[tables, deques]
 import pkg/core
-import pkg/lib/print
+import pkg/lib/reader
 export tables, deques
 
 type

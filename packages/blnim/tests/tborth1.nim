@@ -1,7 +1,6 @@
 import std/unittest
 import pkg/core
-import pkg/lib/[read, print]
-import pkg/lib/borth
+import pkg/lib/[reader, borth]
 
 proc boot(maxDepth = 100_000): Runtime =
   result = initRuntime(maxDepth)

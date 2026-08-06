@@ -1,6 +1,6 @@
 import std/[deques, strutils, unittest]
 import pkg/core
-import pkg/lib/[runtime, read, print]
+import pkg/lib/[runtime, reader]
 
 proc asInt(v: Value): int =
   parseInt(string(v.num))

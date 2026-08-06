@@ -1,6 +1,6 @@
 import std/unittest
 import pkg/core
-import pkg/lib/[read, print]
+import pkg/lib/reader
 
 proc rejects(text: string): bool =
   try:

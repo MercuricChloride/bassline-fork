@@ -1,7 +1,6 @@
 import std/unittest
 import pkg/core
-import pkg/lib/[read, print]
-import pkg/lib/borth
+import pkg/lib/[reader, borth]
 
 const Prelude = staticRead("../src/lib/borth/prelude.bl")
 

@@ -34,6 +34,54 @@ proc parseDest*(dest: string): (string, Port) =
     quit "dest needs a port, got: " & dest
   (host, parsePort(portStr))
 
+type
+  ReachKind* = enum
+    rkUnix
+    rkTcp
+    rkSsh
+
+  Reach* = object
+    ## A local description of somewhere bytes can land. It belongs to
+    ## the CLI: it is never inserted into values and is not an identity.
+    case kind*: ReachKind
+    of rkUnix:
+      path*: string
+    of rkTcp:
+      host*: string
+      port*: Port
+    of rkSsh:
+      sshDest*: string # host or user@host, ssh's business
+      remote*: string # the reach spelling handed to the remote bl
+
+proc parseReach*(s: string): Reach =
+  ## unix:/path, tcp://host:port, ssh://host/path; an absolute path is
+  ## a unix socket convenience, and bare port / host:port spellings
+  ## stay compatible with the TCP commands.
+  if s.len == 0:
+    quit "empty reach"
+  if s.startsWith("unix:"):
+    Reach(kind: rkUnix, path: s[5 .. ^1])
+  elif s.startsWith("tcp://"):
+    let (host, port) = parseDest(s[6 .. ^1])
+    Reach(kind: rkTcp, host: host, port: port)
+  elif s.startsWith("ssh://"):
+    let rest = s[6 .. ^1]
+    let slash = rest.find('/')
+    if slash <= 0:
+      quit "ssh reach wants ssh://host/path, got: " & s
+    Reach(kind: rkSsh, sshDest: rest[0 ..< slash], remote: rest[slash .. ^1])
+  elif s[0] == '/' or s.startsWith("./"):
+    Reach(kind: rkUnix, path: s)
+  else:
+    let (host, port) = parseDest(s)
+    Reach(kind: rkTcp, host: host, port: port)
+
+proc `$`*(r: Reach): string =
+  case r.kind
+  of rkUnix: "unix:" & r.path
+  of rkTcp: "tcp://" & r.host & ":" & $int(r.port)
+  of rkSsh: "ssh://" & r.sshDest & r.remote
+
 iterator cmdOpts*(
     args: seq[string], shortNoVal: set[char] = {}, longNoVal: seq[string] = @[]
 ): (CmdLineKind, string, string) =
