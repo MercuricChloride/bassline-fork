@@ -2,9 +2,9 @@ import std/[os, sets, algorithm, sequtils]
 from std/strutils import nil
 import zippy
 import zippy/tarballs
-import ../core
-import ../lib/[common, reader]
-import ../lib/crypto/digest
+import pkg/core
+import pkg/lib/[common, reader]
+import pkg/lib/crypto/digest
 import ./util
 
 const help = """

@@ -1,6 +1,6 @@
-import ../core
-import ../lib/common
-import ../lib/crypto/digest
+import pkg/core
+import pkg/lib/common
+import pkg/lib/crypto/digest
 import ./util
 
 const help = """

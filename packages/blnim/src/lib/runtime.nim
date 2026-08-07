@@ -1,6 +1,6 @@
 include pkg/prelude
 import std/[deques, tables, hashes, algorithm, strutils]
-import ../core
+import pkg/core
 import ./reader
 
 type

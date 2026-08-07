@@ -1,7 +1,8 @@
 include pkg/prelude
+
 import nimcrypto/[blake2, sha2]
-import ../../core
-import ../[dialect, common]
+import pkg/core
+import pkg/lib/[dialect, common]
 
 # ================ BLAKE2B ================
 #

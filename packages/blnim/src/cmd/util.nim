@@ -1,5 +1,5 @@
 import std/[strutils, nativesockets, options, parseopt, os, posix, random]
-import ../core
+import pkg/core
 export core, options, parseopt, random
 
 proc blHome*(): string =

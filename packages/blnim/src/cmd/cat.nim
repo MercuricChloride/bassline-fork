@@ -1,5 +1,5 @@
-import ../core
-import ../lib/reader
+import pkg/core
+import pkg/lib/reader
 import util
 
 const help = """

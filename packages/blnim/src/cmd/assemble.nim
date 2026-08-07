@@ -12,9 +12,9 @@
 
 import std/[os, sets, tables, algorithm, strutils]
 from std/strutils import nil
-import ../core
-import ../lib/[common, reader]
-import ../lib/stores/filestore
+import pkg/core
+import pkg/lib/[common, reader]
+import pkg/lib/stores/filestore
 
 const help = """
 bl assemble [--store:PATH] [--into PATH]

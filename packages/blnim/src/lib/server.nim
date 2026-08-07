@@ -10,7 +10,7 @@
 ## is no sound resync point, so the socket is closed.
 include pkg/prelude
 import std/[asyncnet, asyncdispatch, options, os, posix, nativesockets]
-import ../core
+import pkg/core
 export asyncnet, asyncdispatch
 const RecvChunk = 16 * 1024
 

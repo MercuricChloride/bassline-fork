@@ -1,5 +1,5 @@
 include pkg/prelude
-import ../core
+import pkg/core
 import ./dialect
 export dialect
 

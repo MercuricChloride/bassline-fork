@@ -1,6 +1,6 @@
 from std/strutils import parseInt
-import ../core
-import ../lib/server
+import pkg/core
+import pkg/lib/server
 import util
 
 const help = """

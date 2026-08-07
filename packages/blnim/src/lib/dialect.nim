@@ -29,7 +29,7 @@ include pkg/prelude
 ## fromValue never raises on foreign data; it answers none.
 
 import std/[strutils, macros]
-import ../core/values
+import pkg/core/values
 
 type
   Sym* = distinct string ## a field that is a bassline symbol (string fields are text)

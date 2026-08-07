@@ -1,7 +1,7 @@
 import std/[os, sysrand]
-import ../core
-import ../lib/reader
-import ../lib/crypto/clave
+import pkg/core
+import pkg/lib/reader
+import pkg/lib/crypto/clave
 import ./util
 
 const help = """

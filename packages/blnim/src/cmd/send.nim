@@ -1,5 +1,5 @@
 import std/parseopt
-import ../lib/server
+import pkg/lib/server
 import util
 
 const help = """
