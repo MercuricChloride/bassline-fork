@@ -275,21 +275,24 @@ func value(s: string, pos: var int): Value =
     v = mark(v)
   v
 
-func readDocument*(text: string): seq[Value] =
-  ## read many values
+func readDocument*(text: string, values: var seq[Value]) =
+  ## read many values into the seq values
   var pos = 0
   while true:
     skipWs(text, pos)
     if pos >= text.len:
       break
-    result.add value(text, pos)
+    values.add value(text, pos)
+
+func readDocument*(text: string): seq[Value] =
+  readDocument(text, result)
 
 func readValue*(text: string): Value =
   ## read exactly one value
-  let vs = readDocument(text)
-  if vs.len != 1:
-    raise newException(ReadError, "expected exactly one value, got " & $vs.len)
-  vs[0]
+  var values = readDocument(text)
+  if values.len != 1:
+    raise newException(ReadError, "expected exactly one value, got " & $values.len)
+  move values[0]
 
 ## ================ PRINTING ================
 

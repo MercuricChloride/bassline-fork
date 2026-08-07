@@ -1,5 +1,4 @@
 import std/os
-import pkg/lib/common
 import pkg/lib/crypto/clave
 import util
 import keygen

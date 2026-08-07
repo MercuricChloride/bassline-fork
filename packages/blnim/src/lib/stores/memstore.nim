@@ -2,7 +2,7 @@ include pkg/prelude
 
 import std/[tables, sets]
 import pkg/core
-import pkg/lib/common
+import pkg/lib/obmcommon
 import pkg/lib/crypto/digest
 import ./util
 

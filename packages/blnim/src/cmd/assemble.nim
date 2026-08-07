@@ -13,7 +13,7 @@
 import std/[os, sets, tables, algorithm, strutils]
 from std/strutils import nil
 import pkg/core
-import pkg/lib/[common, reader]
+import pkg/lib/[obmcommon, reader]
 import pkg/lib/stores/filestore
 
 const help = """

@@ -1,6 +1,7 @@
-import std/[unittest, sequtils]
+import std/[unittest, sequtils, options]
 import pkg/core
-import lib/dialect
+
+import lib/obm
 
 type
   ZipMode = enum

@@ -1,7 +1,7 @@
-import std/unittest
-import std/sequtils
+import std/[unittest, sequtils, options]
+
 import pkg/core
-import pkg/lib/common
+import pkg/lib/obmcommon
 import pkg/lib/crypto/clave
 
 let

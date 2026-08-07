@@ -1,7 +1,7 @@
 include pkg/prelude
-import std/[algorithm, options, hashes]
+import std/[algorithm, hashes]
 import ./strflavors
-export strflavors, options
+export strflavors
 
 type
   BlKind* = enum

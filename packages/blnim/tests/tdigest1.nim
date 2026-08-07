@@ -2,7 +2,7 @@ import std/unittest
 from std/strutils import repeat
 import nimcrypto/sha2
 import pkg/core
-import pkg/lib/common
+import pkg/lib/obmcommon
 import pkg/lib/crypto/digest
 import pkg/lib/stores/util
 

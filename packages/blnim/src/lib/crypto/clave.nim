@@ -20,8 +20,9 @@ include pkg/prelude
 ## to support other schemes later, but i'm one person! This is also
 ## what the scheme slot is for.
 
-import pkg/pkg/core
-import pkg/dialect
+import std/options
+import pkg/core
+import pkg/lib/obm
 import ./eddsa
 
 const Scheme* = "eddsa-blake2b"

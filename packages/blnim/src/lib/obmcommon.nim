@@ -1,7 +1,11 @@
 include pkg/prelude
+
+import std/options
+
 import pkg/core
-import ./dialect
-export dialect
+import ./obm
+
+export obm, options
 
 type
   BlFileInfo* {.blDict.} = object

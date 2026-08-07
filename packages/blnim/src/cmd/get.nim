@@ -1,5 +1,5 @@
 import ./util
-import pkg/lib/[common, reader]
+import pkg/lib/[obmcommon, reader]
 import pkg/lib/stores/filestore
 
 const help = """

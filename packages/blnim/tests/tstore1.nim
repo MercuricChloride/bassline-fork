@@ -1,6 +1,6 @@
-import std/[unittest, options, os, sets, tempfiles]
+import std/[unittest, options, os, sets, tempfiles, strutils]
 import pkg/core
-import pkg/lib/common
+import pkg/lib/obmcommon
 import pkg/lib/crypto/digest
 import pkg/lib/stores/[memstore, filestore, util]
 

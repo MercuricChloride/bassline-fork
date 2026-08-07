@@ -1,4 +1,6 @@
 include pkg/prelude
+
+import std/options
 import ./values
 
 type

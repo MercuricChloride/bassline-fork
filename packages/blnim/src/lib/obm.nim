@@ -1,5 +1,10 @@
 include pkg/prelude
-## dialect: declare a bassline dialect shape as an ordinary Nim type;
+
+## obm: Object Bassline Mapping
+## 
+## Used to define recognition & conversion from particular bassline structures
+## and nim object types
+## 
 ## toValue / fromValue are derived from the type's structure.
 ##
 ##   type
@@ -28,8 +33,8 @@ include pkg/prelude
 ## and marked values are refused everywhere except Value passthrough.
 ## fromValue never raises on foreign data; it answers none.
 
-import std/[strutils, macros]
-import pkg/core/values
+import std/[strutils, macros, options]
+import pkg/core
 
 type
   Sym* = distinct string ## a field that is a bassline symbol (string fields are text)

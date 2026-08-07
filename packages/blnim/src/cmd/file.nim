@@ -1,9 +1,11 @@
 import std/[os, sets, algorithm, sequtils]
+
 from std/strutils import nil
+
 import zippy
 import zippy/tarballs
 import pkg/core
-import pkg/lib/[common, reader]
+import pkg/lib/[obmcommon, reader]
 import pkg/lib/crypto/digest
 import ./util
 
