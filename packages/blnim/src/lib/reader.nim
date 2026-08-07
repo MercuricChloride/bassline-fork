@@ -1,6 +1,6 @@
 include pkg/prelude
 from std/strutils import toHex, toLowerAscii
-import pkg/core/values
+import pkg/core
 
 type ReadError* = object of CatchableError
 
