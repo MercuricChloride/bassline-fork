@@ -1,9 +1,10 @@
 include pkg/prelude
 
-import std/[deques, options, asyncdispatch]
+from std/sequtils import toSeq
+import std/[deques, options, asyncdispatch, sets]
 
 import pkg/core
-import pkg/lib/[messages, reader]
+import pkg/lib/messages
 
 type
   MaybeMsg* = Option[Msg]
@@ -14,6 +15,7 @@ type
 
 template fail(msg: untyped): untyped =
   raise newException(BufferError, msg)
+
 proc recv*(b: BufferP): Future[MaybeMsg] {.async.} =
   if b.doRecv == nil:
     fail "BufferP not initialized. Use buffer() to initialize!"
@@ -30,7 +32,7 @@ proc buffer*(): BufferP =
     closed = false
     buf = initDeque[Msg]()
     waiters = initDeque[Future[MaybeMsg]]()
-  
+
   proc send(m: Msg) =
     if waiters.len > 0:
       let w = waiters.popLast()
@@ -61,7 +63,53 @@ proc buffer*(): BufferP =
   res.doClose = close
   result = res
 
+proc barf*(source: BufferP, dest: Place) {.async.} =
+  var v: MaybeMsg
+  while true:
+    v = await source.recv()
+    if v.isNone: break
+    dest.send(v.get)
+
+proc slurp*(dest: BufferP, source: BufferP) {.async.} =
+  await source.barf(dest)
+
+# ================ PIPE ================
+
+type
+  Pipe* = ref object of Place
+    incoming: BufferP
+    outgoing: BufferP
+
+proc pipe*(): Pipe =
+  var p = Pipe(incoming: buffer(), outgoing: buffer())
+  p.send = proc(m: Msg) = p.outgoing.send(m)
+  result = p
+
+proc close*(p: Pipe) =
+  p.incoming.close()
+  p.outgoing.close()
+
+proc incoming*(p: Pipe): BufferP = p.incoming
+proc outgoing*(p: Pipe): BufferP = p.outgoing
+proc recv*(p: Pipe): Future[MaybeMsg] {.async.} =
+  await p.incoming.recv()
+
+# ================ Coupler ================
+
+type
+  Coupler* = ref object of Place
+    targets: HashSet[Place]
+
+proc coupler*(): Coupler =
+  var c = Coupler(targets: initHashSet[Place]())
+  c.send = proc(m: Msg) = (for t in c.targets.toSeq(): t.send(m))
+  result = c
+proc couple*(c: Coupler, p: Place) = c.targets.incl p
+proc uncouple*(c: Coupler, p: Place) = c.targets.excl p
+proc clear*(c: Coupler) = c.targets.clear()
+
 when isMainModule:
+  import pkg/lib/reader
 
   const doc = readDocument"""
   hello
@@ -71,24 +119,22 @@ when isMainModule:
   (something else cool)
   """
 
-  var b = buffer()
+  var p = pipe()
 
-  proc doRead() {.async.} =
-    var m: MaybeMsg
-    while true:
-      await sleepAsync(1000)
-      m = await b.recv()
-      if m.isSome:
-        echo "read: ", m.get.value
-      else:
-        break
+  let
+    ingres = p.incoming.barf(Here)
+    egres = p.outgoing.barf(There)
+
+  Here.send = proc(m: Msg) =
+    echo "here got: ", m.value
+    There.send m
+  There.send = proc(m: Msg) =
+    echo "there got: ", m.value
 
   proc doWrite() {.async.} =
     for v in doc:
-      b.send(msg v)
+      p.incoming.send(msg v)
     echo "closing"
-    b.close()  
+    p.close()
 
-  
-
-  waitFor (doRead() and doWrite())
+  waitFor (ingres and egres and doWrite())

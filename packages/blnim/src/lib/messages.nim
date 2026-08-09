@@ -50,13 +50,21 @@ proc send*(p: Place, m: Msg) =
   trySend(p, m):
     if p.doSend != nil:
       p.doSend(m)
-    else: 
+    else:
       defaultSend(m)
 
 proc `send=`*(p: Place, send: Send) =
   p.doSend = send
 proc `sendAsync=`*(p: Place, send: AsyncSend) =
   p.doSend = proc(m: Msg) = asyncCheck sendAsync(p, m, send)
+
+proc newPlace*(s: Send): Place = 
+  result = Place()
+  result.send = s
+proc newPlace*(s: AsyncSend): Place =
+  result = Place()
+  result.sendAsync = s
+
 
 # ================ Seeding ================
 
