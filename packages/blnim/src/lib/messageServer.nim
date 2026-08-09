@@ -86,7 +86,7 @@ proc newSocket*(
     socket: socket, 
     decoder: initStreamDecoder(maxDepth, maxValueBytes)
   )
-  result.send = proc(m: Msg) {.async.} =
+  result.sendAsync = proc(m: Msg) {.async.} =
     if socket.isClosed: return
     await socket.send(encodeToString(m.value))
 

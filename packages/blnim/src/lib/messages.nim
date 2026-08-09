@@ -55,7 +55,7 @@ proc send*(p: Place, m: Msg) =
 
 proc `send=`*(p: Place, send: Send) =
   p.doSend = send
-proc `send=`*(p: Place, send: AsyncSend) =
+proc `sendAsync=`*(p: Place, send: AsyncSend) =
   p.doSend = proc(m: Msg) = asyncCheck sendAsync(p, m, send)
 
 # ================ Seeding ================
