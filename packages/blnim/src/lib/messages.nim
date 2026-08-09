@@ -1,41 +1,62 @@
 include pkg/prelude
+
+import std/[asyncfutures, asyncmacro]
 import pkg/core
 
 type
-  Send* = proc(m: Msg)
+  OnSendError* = proc(p: Place, m: Msg, e: ref Exception)
+  AsyncSend* = proc(m: Msg): Future[void]
+  Send* = proc(m: Msg): void
   
   Msg* = ref object of RootObj
     value: Value
     source: Place
   
   Place* = ref object of RootObj
-    doSend: proc(x: Msg)
+    doSend: Send
 
 # This is an explicit hook so we can change the send
 # behavior if a place has a nil send
-# Same with GlobalPlace, it lets us define
-# a process local notion of here.
+# Same with Here & There, it lets us define
+# a process local notion of here and there.
 var
   Here* = Place()
-  defaultSend* = proc(m: Msg) = discard
-
-# ================ Place Interactions ================
-
-proc send*(p: Place, m: Msg) =
-  if p.doSend != nil:
-    p.doSend(m)
-  else:
-    defaultSend(m)
-
-proc `send=`*(p: Place, send: Send) =
-  p.doSend = send
+  There* = Place()
+  onSendError*: OnSendError = 
+    proc(p: Place, m: Msg, e: ref Exception) =
+      raise e
+  defaultSend*: Send = proc(m: Msg) = discard
 
 # ================ Message Interactions ================
 
 proc msg*(source: Place, value: Value): Msg =
   Msg(source: source, value: value)
+proc msg*(value: Value): Msg =
+  Here.msg(value)
 proc source*(m: Msg): lent Place = m.source
 proc value*(m: Msg): lent Value = m.value
+
+# ================ Place Interactions ================
+
+template trySend(p, m, body: untyped): untyped =
+  try:
+    body
+  except CatchableError as e:
+    onSendError(p, m, e)
+
+proc sendAsync(p: Place, m: Msg, s: AsyncSend) {.async.} =
+  trySend(p, m): await s(m)
+proc send*(p: Place, m: Msg) =
+  trySend(p, m):
+    if p.doSend != nil:
+      p.doSend(m)
+    else: 
+      defaultSend(m)
+
+proc `send=`*(p: Place, send: Send) =
+  p.doSend = send
+proc `send=`*(p: Place, send: AsyncSend) =
+  p.doSend = proc(m: Msg) = asyncCheck sendAsync(p, m, send)
 
 # ================ Seeding ================
 
