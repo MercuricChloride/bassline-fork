@@ -33,14 +33,16 @@ include pkg/prelude
 ## and marked values are refused everywhere except Value passthrough.
 ## fromValue never raises on foreign data; it answers none.
 
-import std/[strutils, macros, options]
+import std/[strutils, macros, options, tables, hashes, sets]
 import pkg/core
+
+export options
 
 type
   Sym* = distinct string ## a field that is a bassline symbol (string fields are text)
-
   Lit*[S: static string] = object ## a slot pinned to the symbol S; carries no data.
 
+func hash*(a: Sym): Hash {.borrow.}
 func `==`*(a, b: Sym): bool {.borrow.}
 func `$`*(s: Sym): string {.borrow.}
 func `==`*(a: Sym, b: string): bool =
@@ -137,6 +139,16 @@ func toValue*[T](x: sink T): Value =
     for it in x:
       els.add toValue(it)
     list(els)
+  elif T is Table:
+    var els = open(bDict)
+    for k, v in x:
+      els.add toValue(k) toValue(v)
+    els.seal()
+  elif T is HashSet:
+    var els = open(bSet)
+    for el in x:
+      els.add toValue(el)
+    els.seal()
   elif T is object:
     toValueObj(x)
   else:
@@ -149,6 +161,8 @@ func toValue*[T](x: sink T): Value =
 # a clean semantic symbol, which hasCustomPragma needs downstream.
 
 func fromValue*[T](v: Value, t: typedesc[T]): Option[T]
+func fromValue*[T](t: typedesc[T], v: Value): Option[T] =
+  fromValue(v, T)
 
 func fromValue*[X](v: Value, t: typedesc[Option[X]]): Option[Option[X]] =
   ## outer Option: did the slot parse; inner: was it nil
@@ -161,6 +175,38 @@ func fromValue*[X](v: Value, t: typedesc[Option[X]]): Option[Option[X]] =
       some(inner)
     else:
       none(Option[X])
+
+func fromValue*[K, V](v: Value, t: typedesc[Table[K, V]]): Option[Table[K, V]] =
+  mixin fromValue
+  if v.kind != bDict and not v.marked:
+    none Table[K, V]
+  else:
+    var 
+      table: Table[K, V]
+      els = v.open()
+    for (k, v) in els.drainPairs:
+      let 
+        key = fromValue(k, K)
+        value = fromValue(v, V)
+      if key.isNone or value.isNone:
+        return none Table[K, V]
+      table[key.get] = value.get
+    return some table
+
+func fromValue*[X](v: Value, t: typedesc[HashSet[X]]): Option[HashSet[X]] =
+  mixin fromValue
+  if v.kind != bSet and not v.marked:
+    return none HashSet[X]
+  else:
+    var
+      h: HashSet[X]
+      els = v.open()
+    for e in els.drainChildren:
+      let val = fromValue(e, X)
+      if val.isNone:
+        return none HashSet[X]
+      h.add val
+    return some h
 
 func fromValue*[X](v: Value, t: typedesc[seq[X]]): Option[seq[X]] =
   mixin fromValue
