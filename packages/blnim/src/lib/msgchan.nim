@@ -4,31 +4,36 @@ from std/sequtils import toSeq
 import std/[deques, options, asyncdispatch, sets]
 
 import pkg/core
-import pkg/lib/messages
+import pkg/lib/msg
 
 type
   MaybeMsg* = Option[Msg]
-  BufferError* = object of CatchableError
-  BufferP* = ref object of Place
-    doClose: proc()
-    doRecv: proc(): Future[MaybeMsg]
+  Recv* = proc(): Future[MaybeMsg]
+  Close* = proc()
+  ChanPError* = object of CatchableError
+  ChanP* = ref object of Place
+    doClose: Close
+    doRecv: Recv
 
 template fail(msg: untyped): untyped =
-  raise newException(BufferError, msg)
+  raise newException(ChanPError, msg)
 
-proc recv*(b: BufferP): Future[MaybeMsg] {.async.} =
+proc recv*(b: ChanP): Future[MaybeMsg] {.async.} =
   if b.doRecv == nil:
-    fail "BufferP not initialized. Use buffer() to initialize!"
+    fail "ChanP not initialized. Use buffer() to initialize!"
   return await b.doRecv()
+proc close*(c: ChanP) = 
+  if c.doClose == nil:
+    fail "ChanP not initialized. Use buffer() to initialize!"
+  c.doClose()
+proc `recv=`*(c: ChanP, doRecv: Recv) =
+  c.doRecv = doRecv
+proc `close=`*(c: ChanP, doClose: Close) =
+  c.doClose = doClose
 
-proc close*(b: BufferP) = 
-  if b.doClose == nil:
-    fail "BufferP not initialized. Use buffer() to initialize!"
-  b.doClose()
-
-proc buffer*(): BufferP =
+proc buffer*(): ChanP =
   var
-    res = BufferP()
+    res = ChanP()
     closed = false
     buf = initDeque[Msg]()
     waiters = initDeque[Future[MaybeMsg]]()
@@ -58,41 +63,42 @@ proc buffer*(): BufferP =
       w.complete(none Msg)
     clear(waiters)
 
+  res.recv = recv
+  res.close = close
   res.send = send
-  res.doRecv = recv
-  res.doClose = close
   result = res
 
-proc barf*(source: BufferP, dest: Place) {.async.} =
+proc barf*(source: ChanP, dest: Place) {.async.} =
   var v: MaybeMsg
   while true:
     v = await source.recv()
     if v.isNone: break
     dest.send(v.get)
 
-proc slurp*(dest: BufferP, source: BufferP) {.async.} =
+proc slurp*(dest: ChanP, source: ChanP) {.async.} =
   await source.barf(dest)
 
 # ================ PIPE ================
 
 type
   Pipe* = ref object of Place
-    incoming: BufferP
-    outgoing: BufferP
+    incoming: ChanP
+    outgoing: ChanP
 
-proc pipe*(): Pipe =
-  var p = Pipe(incoming: buffer(), outgoing: buffer())
+proc pipe*(i, o: ChanP): Pipe =
+  var p = Pipe(incoming: i, outgoing: o)
   p.send = proc(m: Msg) = p.outgoing.send(m)
   result = p
+proc pipe*(): Pipe = pipe(buffer(), buffer())
 
 proc close*(p: Pipe) =
   p.incoming.close()
   p.outgoing.close()
 
-proc incoming*(p: Pipe): BufferP = p.incoming
-proc outgoing*(p: Pipe): BufferP = p.outgoing
+proc incoming*(p: Pipe): ChanP = p.incoming
+proc outgoing*(p: Pipe): ChanP = p.outgoing
 proc recv*(p: Pipe): Future[MaybeMsg] {.async.} =
-  await p.incoming.recv()
+  return await p.incoming.recv()
 
 # ================ Coupler ================
 
