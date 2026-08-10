@@ -1,6 +1,6 @@
 include pkg/prelude
 
-import std/[asyncnet, asyncdispatch, sets, options]
+import std/[asyncnet, asyncdispatch, sets, options, net, os, posix]
 
 import pkg/core
 import pkg/lib/[reader, msg, msgchan]
@@ -10,6 +10,7 @@ const RecvChunk = 16 * 1024
 type
   ServerP* = ref object
     socket*: AsyncSocket
+    unixPath*: string
     maxDepth*: int
     maxValueBytes*: int
     onConnect*: proc(conn: ChanP): Future[void]
@@ -19,14 +20,20 @@ type
 
 # ================ Socket Chan ================
 
-proc newSocket*(
-    socket: AsyncSocket, maxDepth = 64, 
+proc newSocket*(unix = false): AsyncSocket =
+  if unix:
+    newAsyncSocket(net.AF_UNIX, net.SOCK_STREAM, net.IPPROTO_IP, buffered = false)
+  else:
+    newAsyncSocket(buffered = false)
+
+proc socketChan(
+    socket: AsyncSocket, 
+    maxDepth = 64, 
     maxValueBytes = DefaultMaxValueBytes
 ): ChanP =
   var
     decoder = initStreamDecoder(maxDepth, maxValueBytes)
     s = ChanP()
-  
   result = s
 
   proc recv(): Future[MaybeMsg] {.async.} =
@@ -47,10 +54,56 @@ proc newSocket*(
   s.close = proc() = socket.close()
   s.recv = recv
 
+proc claimUnixPath(path: string) =
+  ## Take the path only when it is a leftover stale socket.
+  var st: Stat
+  if lstat(path.cstring, st) != 0:
+    return
+  if not S_ISSOCK(st.st_mode):
+    raise newException(OSError, path & " exists and is not a socket")
+  if st.st_uid != getuid():
+    raise newException(OSError, path & " is somebody else's socket")
+
+  var sa: Sockaddr_un
+  sa.sun_family = TSa_Family(posix.AF_UNIX)
+  if path.len >= sa.sun_path.len:
+    raise newException(OSError, "path too long for a unix socket: " & path)
+  
+  let fd = posix.socket(posix.AF_UNIX, posix.SOCK_STREAM, 0)
+  if cint(fd) < 0:
+    raiseOSError(osLastError())
+  defer:
+    discard posix.close(cint(fd))
+  copyMem(addr sa.sun_path[0], path.cstring, path.len + 1)
+  if posix.connect(fd, cast[ptr SockAddr](addr sa), SockLen(sizeof(sa))) == 0:
+    raise newException(OSError, "a place is already listening on " & path)
+  if osLastError() != OSErrorCode(ECONNREFUSED):
+    raiseOSError(osLastError())
+  removeFile(path)
+
 # ================ Server Interactions ================
 
+
+proc bindUnix*(s: ServerP, path: string) =
+  ## Claims & binds the server to a unix socket at path.
+  claimUnixPath(path)
+  let oldMask = umask(0o177)
+  try:
+    asyncnet.bindUnix(s.socket, path)
+  finally:
+    discard umask(oldMask)
+  s.unixPath = path
+
+proc close*(s: ServerP) =
+  ## Releases a path we took
+  if not s.socket.isClosed:
+    s.socket.close()
+  if s.unixPath.len > 0:
+    removeFile(s.unixPath)
+    s.unixPath = ""
+
 proc accept(s: ServerP): Future[ChanP] {.async.} =
-  newSocket(await s.socket.accept(), s.maxDepth, s.maxValueBytes)
+  socketChan(await s.socket.accept(), s.maxDepth, s.maxValueBytes)
 
 proc handleClient(s: ServerP, client: ChanP) {.async.} =
   try:
@@ -81,11 +134,12 @@ proc serve(s: ServerP) {.async.} =
 # ================ Constructors ================
 
 proc newServer*(
-  maxDepth = 64, 
-  maxValueBytes = DefaultMaxValueBytes
+  socket: AsyncSocket,
+  maxDepth = 64,
+  maxValueBytes = DefaultMaxValueBytes,
 ): ServerP =
   result = ServerP(
-    socket: newAsyncSocket(buffered = false),
+    socket: socket,
     maxDepth: maxDepth,
     maxValueBytes: maxValueBytes
   )
@@ -95,21 +149,10 @@ proc newServer*(
   result.onClose = proc(conn: ChanP) =
     echo "client closed"
 
-# ================ Connections ================
-
-proc connect*(
-    host: string, port: Port, 
-    maxDepth = 64, 
-    maxValueBytes = DefaultMaxValueBytes
-): Future[ChanP] {.async.} =
-  let sock = newAsyncSocket(buffered = false)
-  await sock.connect(host, port)
-  newSocket(sock, maxDepth, maxValueBytes)
-
 when isMainModule:
-  var 
-    myServer = newServer()
-    socket = myServer.socket
+  var
+    socket = newSocket(unix = true)
+    myServer = newServer(socket)
 
   myServer.onConnect =
     proc(conn: ChanP) {.async.} =
@@ -122,9 +165,12 @@ when isMainModule:
         conn.send(msg sym"hello from server")
       echo "connection closed"
 
-  socket.setSockOpt(OptReuseAddr, true)
-  socket.bindAddr(Port(12345))
+  myServer.bindUnix("/tmp/foo.sock")
   socket.listen()
+
+  proc doStop() {.async.} =
+    await sleepAsync(2000)
+    myServer.close()
 
   proc doPoll() {.async.} =
     while not myServer.socket.isClosed:
@@ -132,8 +178,9 @@ when isMainModule:
       await sleepAsync(500)
 
   proc doClient() {.async.} =
-    let (host, port) = myServer.socket.getLocalAddr()
-    let client = await connect(host, port)
+    let sock = newSocket(unix = true)
+    await sock.connectUnix("/tmp/foo.sock")
+    let client = socketChan(sock)
     client.send(msg sym"hello from client")
     var m: MaybeMsg
     m = await client.recv()
@@ -147,5 +194,7 @@ when isMainModule:
 
   for _ in 1 .. 5:
     asyncCheck doClient()
+
+  asyncCheck doStop()
 
   runForever()
