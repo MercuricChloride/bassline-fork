@@ -11,11 +11,11 @@ func blSplice*[T](x: T, marked: static bool): Value =
   ## splice itself is marked
   when marked: mark(toValue(x)) else: toValue(x)
 
-func fromHex(name: string): seq[byte] =
+func readHex(name: string): seq[byte] =
   ## I really should put this somewhere, because I think we
   ## have like 3 of these functions in the codebase.
   ## Too bad!
-  parseHexStr(name).toBytes()
+  parseHexStr(name.replace("_", "")).toBytes()
 
 # ================ THE MACRO ================
 
@@ -61,7 +61,7 @@ proc buildFrame(n: NimNode, first: int, marked: bool, maker: static string): Nim
     if c.kind == nnkPrefix and identOf(c[0]) == "%%":
       let it = genSym(nskForVar, "x")
       body.add nnkForStmt.newTree(
-        it, c[1], newStmtList(newCall(ident"add", acc, newCall(ident"toValue", it)))
+        it, c[1], newStmtList(newCall(ident"add", acc, newCall(bindSym"toValue", it)))
       )
     else:
       body.add newCall(ident"add", acc, build(c, false))
@@ -108,7 +108,7 @@ proc build(n: NimNode, marked: bool): NimNode =
     of "n": newCall(bindSym"num", newLit(lit), newLit(marked))
     of "s": newCall(bindSym"sym", newLit(lit), newLit(marked))
     of "t": newCall(bindSym"text", newLit(lit), newLit(marked))
-    of "x": newCall(bindSym"bytes", newCall(bindSym"fromHex", newLit(lit)), newLit(marked))
+    of "x": newCall(bindSym"bytes", newCall(bindSym"readHex", newLit(lit)), newLit(marked))
     of "b": newCall(bindSym"bytes", newCall(bindSym"toBytes", newLit(lit)), newLit(marked))
     else: bad(n, "unknown literal " & identOf(n[0]) & "\"...\"; n s t x b are the ones")
   of nnkPrefix:
@@ -191,10 +191,8 @@ macro bl*(x: untyped): Value =
   ##   %expr                   splice a Nim expression in as a value
   ##   %%expr                  spread a Nim seq of them into this frame
   ##
-  ## Splices go through `toValue`, which is an ordinary overloadable proc:
-  ## a Value passes through, a string becomes text, an integer becomes
-  ## an integer. Adding a conversion for your own type is one func, and
-  ## it makes that type sayable everywhere `bl` reaches.
+  ## Splices go through `toValue[T](x: sink T): Value` which is
+  ## enriched with lib/obm
   ##
   ## A value with no splices in it is an ordinary constant
   ## expression, so `const S = bl(...)` builds it once, at compile time.

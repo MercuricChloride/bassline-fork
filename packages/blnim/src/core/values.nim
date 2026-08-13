@@ -41,8 +41,8 @@ type
     ## Whereas `seal` will perform full strict validation
     ## and refuse any malformed or invalid data.
     kind: BlKind
-    marked: bool
-    els: seq[Value]
+    marked*: bool
+    els*: seq[Value]
 
 const Framish = {bList, bRecord, bDict, bSet}
 
@@ -391,18 +391,12 @@ func open*(v: sink Value): OpenFrame =
     fail "open: not a frame"
   OpenFrame(kind: v.kind, marked: v.marked, els: move v.els)
 
-func kind*(b: OpenFrame): BlKind =
+func kind*(b: OpenFrame): range[bList .. bSet] =
   b.kind
-
-func marked*(b: OpenFrame): bool =
-  b.marked
-func `marked=`*(b: var OpenFrame, marked: bool) =
-  b.marked = marked
-
-func rekind*(b: var OpenFrame, kind: BlKind) =
+func `kind=`*(b: var OpenFrame, kind: BlKind) =
   ## a draft can change what frame kind it is
   if kind notin Framish:
-    fail "rekind: not a frame kind"
+    fail "not a frame kind"
   b.kind = kind
 
 func len*(b: OpenFrame): int =

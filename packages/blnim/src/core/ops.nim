@@ -1,4 +1,6 @@
 include pkg/prelude
+
+import std/sets
 import ./values
 
 type ValuePred* = proc(v: Value): bool {.noSideEffect.}
@@ -57,17 +59,10 @@ func findInto*(
   ## every value in walk order that pred admits, fed to a draft
   walkInto(v, pred, into, descendMarked)
 
-# ================ SHALLOW REWRITING ================
-# the content lens over a draft: heads stay, keys stay, values move.
-# A dict mapped by value is still canonical (seal); a mapped set may
-# have collided (close); a filtered draft of any kind seals.
-
 func map*(
-    b: sink OpenFrame, f: proc(x: sink Value): Value
+    src: sink OpenFrame, f: proc(x: sink Value): Value
 ): OpenFrame {.effectsOf: f.} =
-  ## rewrite the draft's children in place;
-  ## dicts rewrite the values, never the keys
-  result = b
+  result = src
   if result.kind == bDict:
     for _, v in result.mpairs:
       v = f(move v)
@@ -76,83 +71,94 @@ func map*(
       x = f(move x)
 
 func filter*(
-    b: sink OpenFrame, pred: proc(x: Value): bool
+    src: sink OpenFrame, pred: proc(x: Value): bool
 ): OpenFrame {.effectsOf: pred.} =
-  ## keep the children pred admits; dict entries are kept by their
-  ## value; a record keeps its head. A drain never judges: a record's
-  ## missing head and a dict's odd trailing element survive for the
-  ## door to refuse.
-  var src = b
   result = open(src.kind, src.marked)
+  if src.len == 0: return
   case src.kind
   of bDict:
     for k, v in src.drainPairs:
       if pred(v):
         result.add(k, v)
-    if src.len mod 2 == 1:
-      result.add src.take(src.len - 1)
-  of bRecord:
-    if src.len > 0:
-      result.add src.take(0)
-    for x in src.drainChildren:
-      if pred(x):
-        result.add x
   else:
+    if src.kind == bRecord:
+      result.add src.take(0)
     for x in src.drainChildren:
       if pred(x):
         result.add x
 
 # ================ STRUCTURAL ALGEBRA ================
-# reshapers feed drafts and the doors judge. merge and put never
-# order anything themselves — close sorts, and a dict collision
-# refuses at close exactly like the decoder would. difference, keys
-# and vals consume pairwise, so they judge their input dict-wise
-# first (canonicalize) — a drain must never launder a collision or
-# an odd tail.
 
-func merge*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
+func merge*(a: var OpenFrame, b: sink OpenFrame) =
   ## keyed combination for dicts, union for sets: b feeds into a,
   ## the door judges
-  if (a.kind == bDict and b.kind == bDict) or
-      (a.kind == bSet and b.kind == bSet):
-    result = a
-    var sb = b
-    for x in sb.drainChildren:
-      result.add x
-  else:
-    refuse "mismatched frames"
-
-func difference*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
-  ## set algebra is same-kind over set-like drafts; anything else,
-  ## and any change of reading, casts out loud
-  var sa = a
-  var sb = b
-  case sa.kind
+  if a.kind != b.kind:
+    refuse "merge: frames must match"
+  canonicalize(a)
+  case a.kind
   of bSet:
-    if sb.kind != bSet:
-      refuse "subtracts a set"
-    canonicalize(sa)
-    let held = close sb
-    result = open(bSet, sa.marked)
-    for x in sa.drainChildren:
-      if x notin held:
+    for v in b.drainChildren:
+      a.add v
+  of bDict:
+    for (k, v) in b.drainPairs:
+      a.add k, v
+  else:
+    refuse "merge: can only merge dicts & sets"
+
+func merge*(a: var OpenFrame, b: sink Value) =
+  merge(a, open(b))
+
+func difference*(a, b: sink OpenFrame): OpenFrame =
+  ## returns elements of a not in b
+  ## this does set difference when a & b are sets
+  ## this does key-based difference when a & b are dicts
+  if a.kind != b.kind:
+    refuse "difference: frames must match"
+  var seen: HashSet[Value]
+  case a.kind
+  of bSet:
+    result = open(bSet, a.marked)
+    for x in b.drainChildren:
+      seen.incl x
+    for x in a.drainChildren:
+      if x notin seen:
         result.add x
   of bDict:
-    if sb.kind != bDict:
-      refuse "subtracts a dict; key-space work casts with keys"
-    # the entries of a that b lacks — whole entries, key and value:
-    # a dict is set-like of entries, and nothing lifts it to keys
-    canonicalize(sa)
-    let held = close sb
-    result = open(bDict, sa.marked)
-    for k, v in sa.drainPairs:
-      if held.hasKey(k) and held.at(k) == v:
-        continue
-      result.add(k, v)
+    result = open(bDict, a.marked)
+    for k, _ in b.drainPairs:
+      seen.incl k
+    for k, v in a.drainPairs:
+      if k notin seen:
+        result.add k, v
   else:
-    refuse "not set-like"
+    refuse "difference: must be a set or a dict"
 
-func put*(a: sink OpenFrame, k: sink Value, v: sink Value): OpenFrame =
+func symmetricDifference*(a, b: sink OpenFrame): OpenFrame =
+  var inA, inB: HashSet[Value]
+  case a.kind
+  of bSet:
+    result = open(bSet, a.marked)
+    for x in a.drainChildren: inA.incl x
+    for x in b.drainChildren: inB.incl x
+    for x in inA -+- inB: result.add x
+  of bDict:
+    result = open(bDict, a.marked)
+    for k, _ in a.drainPairs: inA.incl k
+    for k, _ in b.drainPairs: inB.incl k
+    let unique = inA -+- inB
+    for k, v in a.drainPairs:
+      if k in unique:
+        result.add k, v
+    for k, v in b.drainPairs:
+      if k in unique:
+        result.add k, v
+  else:
+    refuse "symmetricDifference: must be a set or a dict"
+
+func `-+-`*(a, b: sink OpenFrame): OpenFrame =
+  a.symmetricDifference(b)
+
+func put*(a: sink OpenFrame, k, v: sink Value): OpenFrame =
   ## last wins for dict drafts; by index for positional drafts, the
   ## head included
   result = a
@@ -177,27 +183,19 @@ func put*(a: sink OpenFrame, k: sink Value, v: sink Value): OpenFrame =
     result[n] = v
   of bSet:
     refuse "sets take union"
-  else:
-    refuse "not a frame"
 
-func keys*(b: sink OpenFrame): OpenFrame =
-  ## a dict draft's key set; judged dict-wise first, so a collision
-  ## or an odd tail refuses instead of laundering into set-ness
-  var src = b
+func keys*(src: sink OpenFrame): OpenFrame =
   if src.kind != bDict:
     refuse "not a dict"
-  canonicalize(src)
   result = open(bSet, src.marked)
   for k, v in src.drainPairs:
     result.add k
 
-func vals*(b: sink OpenFrame): OpenFrame =
+func vals*(src: sink OpenFrame): OpenFrame =
   ## a dict draft's values as a set; same dict-wise judgment, and
   ## value collisions dedupe at the caller's close
-  var src = b
   if src.kind != bDict:
     refuse "not a dict"
-  canonicalize(src)
   result = open(bSet, src.marked)
   for k, v in src.drainPairs:
     result.add v
@@ -287,26 +285,49 @@ func index*(v: Value, path: varargs[Value]): Value =
   for step in path:
     result = result.at(step)
 
-iterator contentsPath*(v: Value, path: seq[Value] = @[]): (lent Value, seq[Value]) {.closure.} =
-  if not v.isFrame(): return
-  if v.isKind(bDict):
-    for (key, val) in v.pairs:
-      let nextPath = path & key
-      yield (val, nextPath)
-      if val.isFrame:
-        for (el, pat) in val.contentsPath(nextPath):
-          yield (el, pat)
+func putAt*(container: sink Value, value: sink Value, path: varargs[Value]): Value =
+  case path.len
+  of 0:
+    refuse "putAt: empty path"
+  of 1:
+    container
+      .open
+      .put(path[0], value)
+      .close
   else:
-    var i = 0
-    for val in v.contents:
-      let nextPath = path & num(i)
-      inc i
-      yield (val, nextPath)
-      if val.isFrame:
-        for (el, pat) in val.contentsPath(nextPath):
-          yield (el, pat)
+    var
+      key = path[0]
+      prev = container.at(key)
+      tail = path[1..^1]
+    container
+      .open
+      .put(key, prev.putAt(value, tail))
+      .close
 
-func similar*(a: Value, b: Value): bool =
+iterator enumerate*(v: Value): (Value, lent Value) {.closure.} =
+  case v.kind
+  of bDict:
+    for (key, val) in v.pairs:
+      yield (key, val)
+  of bSet:
+    for el in v.contents:
+      yield (el, el)
+  of bList, bRecord:
+    var 
+      i = 0
+    for val in v.contents:
+      yield (num(i), val)
+      inc i
+  else: discard
+
+iterator contentPaths*(v: Value, path: seq[Value] = @[]): (seq[Value], lent Value) {.closure.} =
+  for (key, val) in v.enumerate:
+    let nextPath = path & key
+    yield (nextPath, val)
+    for (pat, el) in val.contentPaths:
+      yield (nextPath & pat, el)
+
+func similar*(a, b: Value): bool
   ## Checks to see if a is similar to b
   ## 
   ## The base case is atoms
@@ -314,8 +335,13 @@ func similar*(a: Value, b: Value): bool =
   ## 1. kind(a) == kind(b)
   ## 2. marked(a) == marked(b)
   ## 
-  ## when a is a list / record:
+  ## when a is a list:
   ## 3. len(a) == len(b)
+  ## 4. each pairwise element is similar
+  ## 
+  ## when a is a record:
+  ## 3. len(a) == len(b)
+  ## 5. head(a) == head(b)
   ## 4. each pairwise element is similar
   ## 
   ## when a is a set:
@@ -326,65 +352,174 @@ func similar*(a: Value, b: Value): bool =
   ## - an EQUAL key
   ## - an SIMILAR val
 
-  if a.kind != b.kind:
-    return false
-
-  if a.marked != b.marked:
-    return false
-
-  if a.isKind({bList, bRecord}):
-    let
+func similarList(a, b: Value): bool =
+  result = true
+  let
       ac = a.contents()
       bc = b.contents()
-    if ac.len != bc.len:
+  if ac.len != bc.len:
+    return false
+  for i in 0 ..< ac.len:
+    if not similar(ac[i], bc[i]):
       return false
-    for i in 0 ..< ac.len:
-      if not similar(ac[i], bc[i]):
-        return false
-  elif a.isKind(bSet):
-    for aEl in a.contents:
-      var matched = false
+
+func similarSet(a, b: Value): bool =
+  result = true
+  for aEl in a.contents:
+    block inner:
       for bEl in b.contents:
         if aEl.similar(bEl):
-          matched = true
-          break
-      if not matched:
-        return false
-  elif a.isKind(bDict):
-    for (ak, av) in a.pairs:
-      var matched = false
+          break inner
+      return false
+
+func similarDict(a, b: Value): bool =
+  result = true
+  for (ak, av) in a.pairs:
+    block inner:
       for (bk, bv) in b.pairs:
         if ak == bk and similar(av, bv):
-          matched = true
-          break
-      if not matched:
-        return false
-  true
+          break inner
+      return false
+
+func similar*(a, b: Value): bool =
+  if a.kind != b.kind:
+    return false
+  if a.marked != b.marked:
+    return false
+  case a.kind
+  of bList:
+    similarList(a, b)
+  of bRecord:
+    similarList(a, b) and a.head == b.head
+  of bSet:
+    similarSet(a, b)
+  of bDict:
+    similarDict(a, b)
+  else:
+    true
+
+func classify*(value, shapes: Value): Value =
+  if shapes.kind != bDict:
+    refuse "classify: shapes must be a dict"
+  var output = open(bSet)
+  for name, shape in shapes:
+    if value.similar(shape):
+      output.add name
+  output.close()
+
+const HoleShape* = sym("hole", true)
+
+iterator holes*(value: Value): (seq[Value], lent Value) =
+  for (p, v) in value.contentPaths:
+    if v.similar(HoleShape):
+      yield (p, v)
+
+func extract*(value, holey: Value): Value =
+  var output = open(bDict)
+  for (path, hole) in holey.holes:
+    var
+      val = value.index(path)
+    block inner:
+      for (k, v) in output.mpairs:
+        if hole != k: continue
+        if val == v: break inner
+        refuse "extract: holes dont match"
+      output.add(hole, val)
+  output.close()
+
+func inject*(holey: sink Value, bindings: Value): Value =
+  if bindings.kind != bDict:
+    refuse "inject: bindings must be a dict"
+  var
+    output = holey
+    count: int
+  for (path, hole) in holey.holes:
+    let value = bindings.at(hole)
+    output = output.putAt(value, path)
+    inc count
+  if count == 0:
+    refuse "inject: expected a value with holes"
+  return output
 
 when isMainModule:
   import pkg/lib/blmacro
-
   let
     records = program:
       foo(bar, baz)
       something(other, entirely)
-    sets = program:
+    someSets = program:
       { a, !b, "c" }
       { x, "y", !z }
     dicts = program:
       { foo: 123 }
-      { foo: "hello" }
+      { foo: 456 }
     lists = program:
       [1, two, 3]
       [69, `four-twenty`, 420]
-    something = bl: { foo: {bar: [baz, !zap]} }
-  
+
   echo similar(records[0], records[1])
-  echo similar(sets[0], sets[1])
+  echo similar(someSets[0], someSets[1])
   echo similar(dicts[0], dicts[1])
   echo similar(lists[0], lists[1])
 
-  for (v, p) in something.contentsPath:
-    echo "value: ", v
-    echo "path: ", p
-    echo "indexed: ", something.index(p)
+  let
+    something = bl:
+      { a: { b: 69 },
+        b: 69 }
+    another = bl:
+      {
+        a: {b: !b},
+        b: !b
+      }
+
+  echo "something: ", something
+  let bindings = something.extract(another)
+  echo "bindings: ", bindings
+  let bound = another.inject(bindings)
+  echo "bound: ", bound
+
+  let
+    user = bl:
+      user(!age, !name, !bio)
+    feed = program:
+      post(
+        goose,
+        date(8, 12, 2026),
+        "this is a blog post example thing")
+      log("all systems normal")
+      msg(miso, goose, date(8, 13, 2026), "feed me")
+      msg(miso, goose, date(8, 13, 2026), "meow")
+      post(
+        goose, 
+        date(8, 13, 2026),
+        "this is another post")
+
+  const DateShape = bl: date(1, 2, 3)
+  const Shapes = bl: {
+    date: %DateShape,
+    log: log("string"),
+    post: post(author, %DateShape, "string"),
+    msg: msg(source, target, %DateShape, "string")
+  }
+
+  const DateFields = bl: date(!month, !day, !year)
+  const Fields = bl: {
+    date: %DateFields,
+    log: log(!msg),
+    post: post(!author, %DateFields, !content),
+    msg: msg(!source, !target, %DateFields, !content)
+  }
+
+  proc getFields*(v, shapes, fields: Value): Value =
+    var output = open(bDict)
+    for c in v.classify(shapes).contents:
+      merge output, v.extract(fields.at c)
+    output.close
+
+  for x in feed:
+    let c = x.classify(Shapes)
+    echo "item: ", x
+    echo "classified: ", c
+    let diff = close(Shapes.open.keys -+- c.open)
+    echo "not classified: ", diff
+    echo "fields: ", x.getFields(Shapes, Fields)

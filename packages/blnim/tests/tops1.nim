@@ -216,7 +216,7 @@ suite "open frames: drafts are free, the door judges":
 
   test "rekind: a draft may still choose its framing":
     var b = open(list(sym"a", num"1", sym"b", num"2"))
-    b.rekind(bDict)
+    b.kind = bDict
     let got = close(move b)
     check got == dict(@[(sym"a", num"1"), (sym"b", num"2")])
 
