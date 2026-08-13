@@ -33,12 +33,13 @@ type
     ## input sugar for dict construction; never a stored shape
 
   OpenFrame* = object
-    ## a frame before its END: unjudged, mutable, move-only.
-    ## Closed values are proven and copy freely; open frames are
-    ## free and move only. Invariants are checked once, at the
-    ## door: `close` establishes them, `seal` verifies them.
-    ## Drafts live in locals — a module-level draft can never be
-    ## consumed, because a global is never a last read.
+    ## A mutable move-only container
+    ## that we can finalize & validate the invariants
+    ## of the canonical encoding.
+    ## `close` is a softer program level check that will
+    ## massage slightly wrong data in a reasonable manner.
+    ## Whereas `seal` will perform full strict validation
+    ## and refuse any malformed or invalid data.
     kind: BlKind
     marked: bool
     els: seq[Value]
@@ -587,6 +588,8 @@ func seal*(b: sink OpenFrame): Value =
     fail "seal: not a frame kind"
 
 # ================ CONSTRUCTORS ================
+
+func toValue*(v: sink Value): Value = v
 
 func nilValue*(marked = false): Value =
   Value(kind: bNil, marked: marked)

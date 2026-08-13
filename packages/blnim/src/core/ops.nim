@@ -3,9 +3,6 @@ import ./values
 
 type ValuePred* = proc(v: Value): bool {.noSideEffect.}
 
-template fail(msg: untyped) =
-  raise newException(ValueError, msg)
-
 # Two planes of operation:
 #
 # READERS take closed Values — reading is what closed values are
@@ -21,9 +18,6 @@ template fail(msg: untyped) =
 # when it was built by hand.
 
 # ================ DEEP SEARCH ================
-# search is the spelling: the walk visits contents, heads and keys
-# included, the value itself first
-
 func seek(
     v: Value, pred: ValuePred, descendMarked: bool, res: var Value
 ): bool {.effectsOf: pred.} =
@@ -44,7 +38,7 @@ func find*(
   ## the first value in walk order that pred admits (v itself first),
   ## as an owned copy; nothing admitted refuses
   if not seek(v, pred, descendMarked, result):
-    fail "find: nothing admitted"
+    refuse "find: nothing admitted"
 
 func walkInto(
     v: Value, pred: ValuePred, into: var OpenFrame, descendMarked: bool
@@ -126,7 +120,7 @@ func merge*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
     for x in sb.drainChildren:
       result.add x
   else:
-    fail "mismatched frames"
+    refuse "mismatched frames"
 
 func difference*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
   ## set algebra is same-kind over set-like drafts; anything else,
@@ -136,7 +130,7 @@ func difference*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
   case sa.kind
   of bSet:
     if sb.kind != bSet:
-      fail "subtracts a set"
+      refuse "subtracts a set"
     canonicalize(sa)
     let held = close sb
     result = open(bSet, sa.marked)
@@ -145,7 +139,7 @@ func difference*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
         result.add x
   of bDict:
     if sb.kind != bDict:
-      fail "subtracts a dict; key-space work casts with keys"
+      refuse "subtracts a dict; key-space work casts with keys"
     # the entries of a that b lacks — whole entries, key and value:
     # a dict is set-like of entries, and nothing lifts it to keys
     canonicalize(sa)
@@ -156,7 +150,7 @@ func difference*(a: sink OpenFrame, b: sink OpenFrame): OpenFrame =
         continue
       result.add(k, v)
   else:
-    fail "not set-like; ->set, keys, or vals cast first"
+    refuse "not set-like"
 
 func put*(a: sink OpenFrame, k: sink Value, v: sink Value): OpenFrame =
   ## last wins for dict drafts; by index for positional drafts, the
@@ -172,26 +166,26 @@ func put*(a: sink OpenFrame, k: sink Value, v: sink Value): OpenFrame =
     result.add(k, move vv)
   of bList, bRecord:
     if k.kind != bNum:
-      fail "put: a positional frame takes a numeric key"
+      refuse "put: a positional frame takes a numeric key"
     var n: int
     try:
       n = k.num.parseInt()
     except ValueError:
-      fail "put: not an index"
+      refuse "put: not an index"
     if n < 0 or n >= result.len:
-      fail "nothing under that index"
+      refuse "nothing under that index"
     result[n] = v
   of bSet:
-    fail "sets take union"
+    refuse "sets take union"
   else:
-    fail "not a frame"
+    refuse "not a frame"
 
 func keys*(b: sink OpenFrame): OpenFrame =
   ## a dict draft's key set; judged dict-wise first, so a collision
   ## or an odd tail refuses instead of laundering into set-ness
   var src = b
   if src.kind != bDict:
-    fail "not a dict"
+    refuse "not a dict"
   canonicalize(src)
   result = open(bSet, src.marked)
   for k, v in src.drainPairs:
@@ -202,7 +196,7 @@ func vals*(b: sink OpenFrame): OpenFrame =
   ## value collisions dedupe at the caller's close
   var src = b
   if src.kind != bDict:
-    fail "not a dict"
+    refuse "not a dict"
   canonicalize(src)
   result = open(bSet, src.marked)
   for k, v in src.drainPairs:
@@ -213,9 +207,9 @@ func vals*(b: sink OpenFrame): OpenFrame =
 func holeIndex(t: Value, window: int): int =
   result = t.num.parseInt()
   if result == 0:
-    fail "0! names nothing"
+    refuse "0! names nothing"
   if abs(result) > window:
-    fail "a hole reaches past the window"
+    refuse "a hole reaches past the window"
 
 func fry*(t: Value, window: openArray[Value]): Value
   ## Factor style value templating.
@@ -239,7 +233,7 @@ func entrySide(c: Value, window: openArray[Value]): Value =
   if c.isKind(bNum) and c.marked:
     let k = holeIndex(c, window.len)
     if k < 0:
-      fail "cannot splice into a dict entry"
+      refuse "cannot splice into a dict entry"
     return window[^k]
   fry(c, window)
 
@@ -247,7 +241,7 @@ func fry*(t: Value, window: openArray[Value]): Value =
   if t.isKind(bNum) and t.marked:
     let k = holeIndex(t, window.len)
     if k < 0:
-      fail "nothing to splice into at the top"
+      refuse "nothing to splice into at the top"
     return window[^k]
   if not t.isFrame:
     return t
@@ -269,7 +263,7 @@ func fry*(t: Value, window: openArray[Value]): Value =
         else:
           let spliced = window[^(-k)]
           if not spliced.isFrame:
-            fail "a splice hole names a non-frame"
+            refuse "a splice hole names a non-frame"
           for x in spliced.contents:
             b.add x
       else:
@@ -281,9 +275,116 @@ func fryReach*(t: Value): int =
   if t.isKind(bNum) and t.marked:
     let k = t.num.parseInt()
     if k == 0:
-      fail "0! names nothing"
+      refuse "0! names nothing"
     return abs(k)
   if not t.isFrame:
     return 0
   for c in t.contents:
     result = max(result, fryReach(c))
+
+func index*(v: Value, path: varargs[Value]): Value =
+  result = v
+  for step in path:
+    result = result.at(step)
+
+iterator contentsPath*(v: Value, path: seq[Value] = @[]): (lent Value, seq[Value]) {.closure.} =
+  if not v.isFrame(): return
+  if v.isKind(bDict):
+    for (key, val) in v.pairs:
+      let nextPath = path & key
+      yield (val, nextPath)
+      if val.isFrame:
+        for (el, pat) in val.contentsPath(nextPath):
+          yield (el, pat)
+  else:
+    var i = 0
+    for val in v.contents:
+      let nextPath = path & num(i)
+      inc i
+      yield (val, nextPath)
+      if val.isFrame:
+        for (el, pat) in val.contentsPath(nextPath):
+          yield (el, pat)
+
+func similar*(a: Value, b: Value): bool =
+  ## Checks to see if a is similar to b
+  ## 
+  ## The base case is atoms
+  ## Two values are similar if:
+  ## 1. kind(a) == kind(b)
+  ## 2. marked(a) == marked(b)
+  ## 
+  ## when a is a list / record:
+  ## 3. len(a) == len(b)
+  ## 4. each pairwise element is similar
+  ## 
+  ## when a is a set:
+  ## 3. for each el of a is there a similar element in b
+  ## 
+  ## when a is a dict:
+  ## 3. for each entry in a is there and entry with:
+  ## - an EQUAL key
+  ## - an SIMILAR val
+
+  if a.kind != b.kind:
+    return false
+
+  if a.marked != b.marked:
+    return false
+
+  if a.isKind({bList, bRecord}):
+    let
+      ac = a.contents()
+      bc = b.contents()
+    if ac.len != bc.len:
+      return false
+    for i in 0 ..< ac.len:
+      if not similar(ac[i], bc[i]):
+        return false
+  elif a.isKind(bSet):
+    for aEl in a.contents:
+      var matched = false
+      for bEl in b.contents:
+        if aEl.similar(bEl):
+          matched = true
+          break
+      if not matched:
+        return false
+  elif a.isKind(bDict):
+    for (ak, av) in a.pairs:
+      var matched = false
+      for (bk, bv) in b.pairs:
+        if ak == bk and similar(av, bv):
+          matched = true
+          break
+      if not matched:
+        return false
+  true
+
+when isMainModule:
+  import pkg/lib/blmacro
+
+  let
+    records = program:
+      foo(bar, baz)
+      something(other, entirely)
+    sets = program:
+      { a, !b, "c" }
+      { x, "y", !z }
+    dicts = program:
+      { foo: 123 }
+      { foo: "hello" }
+    lists = program:
+      [1, two, 3]
+      [69, `four-twenty`, 420]
+    something = bl: { foo: {bar: [baz, !zap]} }
+  
+  echo similar(records[0], records[1])
+  echo similar(sets[0], sets[1])
+  echo similar(dicts[0], dicts[1])
+  echo similar(lists[0], lists[1])
+
+  for (v, p) in something.contentsPath:
+    echo "value: ", v
+    echo "path: ", p
+    echo "indexed: ", something.index(p)
