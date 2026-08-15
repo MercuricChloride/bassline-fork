@@ -96,7 +96,7 @@ func hash*(v: Value): Hash =
 
 iterator slide*[T](els: openArray[T], n: int): openArray[T] =
   var i = 0
-  while (i + n) <= high(els):
+  while (i + n) <= els.len:
     yield els[i..<(i + n)]
     i += n
 
