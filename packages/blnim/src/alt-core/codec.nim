@@ -1,5 +1,5 @@
 include pkg/prelude
-import ./types
+import ./[types, macros]
 import std/strutils
 
 const
@@ -91,7 +91,7 @@ proc readSize*(reader: var Reader, header: byte): int =
     if result < 255:
       refuse "size not minimal"
 
-proc readValue*[V](
+proc readValue*[V: Value](
   reader: var Reader,
   header: byte,
   depth: int): V =
@@ -117,10 +117,10 @@ proc readValue*[V](
       els.add readValue[V](reader, h, depth - 1)
     frame[V](els, header.kind, header.marked)
 
-proc readValue*[V: Values](reader: var Reader, depth: int): V =
+proc readValue*[V: Value](reader: var Reader, depth: int): V =
   readValue[V](reader, reader.read1, depth)
 
-iterator readValues*[V: Values](reader: var Reader, maxDepth = 64): V =
+iterator readValues*[V: Value](reader: var Reader, maxDepth = 64): V =
   while true:
     let (h, more) = reader.next()
     if not more:
@@ -171,7 +171,7 @@ func fileFetch*(f: File): Fetch =
   result = proc (buf: var openArray[byte]): int =
     f.readBytes(buf, 0, buf.len)
 
-proc decode*[V: Values](buf: sink seq[byte], maxDepth = 64): V =
+proc decode*[V: Value](buf: sink seq[byte], maxDepth = 64): V =
   var r = stream(chunks(buf))
   result = readValue[V](r, maxDepth)
   if r.next()[1]:
@@ -181,7 +181,7 @@ when isMainModule:
   import std/os
   import ./rawvalues
 
-  var big = newSeq[byte](300)
+  var big = newSeq[byte](300_000)
   for i in 0 ..< big.len: big[i] = byte(i mod 251)
 
   type Tally = object
@@ -191,12 +191,10 @@ when isMainModule:
     atoms: int
     frames: int
 
-  Tally.defnull(_):
-    inc nulls
-  Tally.defatom(_, _, _):
-    inc atoms
-  Tally.defframe(_, _, _):
-    inc frames
+  Tally.defvalue:
+    null(marked): inc nulls
+    atom(payload, kind, marked): inc atoms
+    frame(els, kind, marked): inc frames
 
   let values: seq[RawValue] = @[
     atom[RawValue]("hello from a file"),
@@ -205,19 +203,26 @@ when isMainModule:
   ]
 
   var buf: seq[byte]
-  for v in values:
-    discard buf.encode(v)
+  for _ in 1 .. 10:
+    for v in values:
+      discard buf.encode(v)
   let path = getTempDir() / "stream-demo.blb"
+  removeFile(path)
   writeFile(path, cast[string](buf))
 
   var r = stream(fileFetch(open(path)))
   var n = 0
   for v in readValues[Tally](r):
+    if n == 0:
+      echo "raw == raw: ", values[0] == values[0]
+      try: echo "tally == tally: ", v == v
+      except RefuseError: echo "tally == tally: refuses (write-only witness)"
+      try: echo "tally == raw: ", v == values[0]
+      except RefuseError: echo "tally == raw: refuses (write-only witness)"
     inc n
-  if n != values.len:
+  if n != values.len * 10:
     refuse "stream ran dry early"
   echo "nulls: ", nulls
   echo "atoms: ", atoms
   echo "frames: ", frames
-  removeFile(path)
   echo "streamed ", n, " values back off ", path

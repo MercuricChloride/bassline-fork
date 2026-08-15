@@ -1,5 +1,5 @@
 include pkg/prelude
-import ./types
+import ./[types, macros]
 
 type
   RawValue* = object
@@ -11,38 +11,33 @@ type
     of bList, bRecord, bDict, bSet:
       els: seq[RawValue]
 
-func kind*(v: RawValue): BlKind = v.kind
-func marked*(v: RawValue): bool = v.marked
-func size*(v: RawValue): int =
-  if v.kind in SizedKinds:
-    return v.payload.len
-func els*(v: RawValue): lent seq[RawValue] =
-  v.els
-
-func payload*(v: RawValue): lent seq[byte] =
-  if v.kind notin SizedKinds:
-    refuse "payload: not a sized kind"
-  return v.payload
-
 # Forward decl
 func validatePayload*(b: openArray[byte], kind: BlKind)
 func validateFrame*(els: openArray[Value], kind: BlKind)
 
-# Raw Value Stuff
-RawValue.defatom(payload, kind, marked):
-  if kind notin AtomKinds:
-    refuse "invalid atom kind"
-  validatePayload(payload, kind)
-  RawValue(kind: kind, marked: marked, payload: @payload)
-
-RawValue.defframe(els, kind, marked):
-  if kind notin FrameKinds:
-    refuse "invalid frame kind"
-  validateFrame(els.toOpenArray(0, els.high), kind)
-  RawValue(kind: kind, marked: marked, els: @els)
-
-RawValue.defNull(marked):
-  RawValue(kind: bNil, marked: marked)
+RawValue.defvalue:
+  kind(v): v.kind
+  marked(v): v.marked
+  size(v):
+    if v.kind in SizedKinds: v.payload.len
+    else: 0
+  payload(v):
+    if v.kind notin SizedKinds:
+      refuse "payload: not a sized kind"
+    return v.payload
+  els(v): v.els
+  null(marked):
+    RawValue(kind: bNil, marked: marked)
+  atom(payload, kind, marked):
+    if kind notin AtomKinds:
+      refuse "invalid atom kind"
+    validatePayload(payload, kind)
+    RawValue(kind: kind, marked: marked, payload: @payload)
+  frame(els, kind, marked):
+    if kind notin FrameKinds:
+      refuse "invalid frame kind"
+    validateFrame(els.toOpenArray(0, els.high), kind)
+    RawValue(kind: kind, marked: marked, els: @els)
 
 func validateFrame*(els: openArray[Value], kind: BlKind) =
   case kind

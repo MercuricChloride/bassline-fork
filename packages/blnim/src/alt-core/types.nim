@@ -1,5 +1,7 @@
 include pkg/prelude
 import std/hashes
+import ./macros
+export hashes, macros
 
 type
   RefuseError* = object of CatchableError
@@ -8,28 +10,18 @@ type
     bNum, bText, bSym, bBytes,
     bList, bRecord, bDict, bSet
 
-  Header* = concept
+  Value* = concept
     func marked(s: Self): bool
     func kind(s: Self): BlKind
     func size(s: Self): int
-
-  Atom* = concept v
-    v is Header
-    func payload(): lent seq[byte]
-
-  Frame* = concept v
-    v is Header
-    func els(): lent seq[Value]
-
-  Value* = Atom | Frame
-
-  Atoms* = range[bNum..bBytes]
-  Frames* = range[bList..bSet]
-
-  Values* = concept
+    func payload(s: Self): lent seq[byte]
+    func els(s: Self): lent seq[Self]
     proc null(_: typedesc[Self], marked: bool): Self
     proc atom(_: typedesc[Self], payload: openArray[byte], kind: Atoms, marked: bool): Self
     proc frame(_: typedesc[Self], els: sink seq[Self], kind: Frames, marked: bool): Self
+
+  Atoms* = range[bNum..bBytes]
+  Frames* = range[bList..bSet]
 
 const
   AtomKinds* = bNil..bBytes
@@ -46,18 +38,22 @@ func len*(a: Value): int =
   a.payload.len
 
 # ================ ORDERING ================
+# We have to use constrained generics here, because by default
+# same value comparisons wont work with case objects, since
+# we need to outrank systems cmp[T: tuple|object]
+# this also has the cruft of making us require a
+# cmp(a, b: MyValue): int with the concrete types directly
 
-func cmp*(a, b: Value): int
-
-func `==`*(a, b: Value): bool =
+func cmp*[A, B: Value](a: A, b: B): int
+func `==`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) == 0
-func `>`*(a, b: Value): bool =
+func `>`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) > 0
-func `>=`*(a, b: Value): bool =
+func `>=`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) >= 0
-func `<`*(a, b: Value): bool =
+func `<`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) < 0
-func `<=`*(a, b: Value): bool =
+func `<=`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) <= 0
 
 func cmpAtoms(a, b: openArray[byte]): int =
@@ -67,7 +63,7 @@ func cmpAtoms(a, b: openArray[byte]): int =
     result = cmp(a[i], b[i])
     if result != 0: return
 
-func cmpFrames[T: Value](a, b: openArray[T]): int =
+func cmpFrames[A, B: Value](a: openArray[A], b: openArray[B]): int =
   for i in 0 ..< min(a.len, b.len):
     result = cmp(a[i], b[i])
     if result != 0: return
@@ -76,7 +72,7 @@ func cmpFrames[T: Value](a, b: openArray[T]): int =
   # so a > b if a is a prefix of b
   result = cmp(b.len, a.len)
 
-func cmp*(a, b: Value): int =
+func cmp*[A, B: Value](a: A, b: B): int =
   result = cmp(a.tag, b.tag)
   if result != 0: return
 
@@ -89,10 +85,12 @@ func cmp*(a, b: Value): int =
   else:
     result = cmpFrames(a.els, b.els)
 
-func hash*(v: Value): Hash =
+func hashValue*[A: Value](v: A): Hash =
   ## This is not a cryptographic hash!
   ## This is used for things like tables & hash sets.
-  ## Use lib/digest for cryptographic hashing
+  ## Use lib/digest for cryptographic hashing.
+  ## implementations get a concrete `hash` from defvalue that
+  ## forwards here
   var h: Hash = 0
   h = h !& hash(v.tag) !& hash(v.marked) !& hash(v.size)
   if v.kind == bNil: discard
@@ -115,39 +113,25 @@ iterator entries*(v: Value): (Value, Value) =
   for pair in v.els.slide(2):
     yield (pair[0], pair[1])
 
-template defAtom*(T, payload, kind, marked, body: untyped): untyped =
-  proc atom*(
-    _: typedesc[T], payload: openArray[byte],
-    kind: Atoms = bNum, marked = false): T =
-    body
+# ================ Aliases for verbose generics ================
 
-template defframe*(T, els, kind, marked, body: untyped): untyped =
-  proc frame*(_: typedesc[T], 
-    els: sink seq[T], kind: Frames = bList,
-    marked = false): T =
-    body
-
-template defnull*(T, marked, body: untyped): untyped =
-  proc null*(_: typedesc[T], marked = false): T =
-    body
-
-proc atom*[T: Values](
+proc atom*[T: Value](
   s: openArray[byte], kind: Atoms = bText, marked = false): T =
   mixin atom
   T.atom(s, kind, marked)
 
-proc frame*[T: Values](
+proc frame*[T: Value](
   els: sink seq[T], kind: Frames = bList, marked = false): T =
   mixin frame
   T.frame(els, kind, marked)
 
-proc null*[T: Values](
+proc null*[T: Value](
   marked = false
 ): T =
   mixin null
   T.null(marked)
 
-proc atom*[T: Values](
+proc atom*[T: Value](
   s: string, kind: Atoms = bText, marked = false): T =
   mixin atom
   T.atom(s.toOpenArrayByte(0, s.high), kind, marked)
