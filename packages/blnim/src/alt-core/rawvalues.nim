@@ -13,7 +13,7 @@ type
 
 # Forward decl
 func validatePayload*(b: openArray[byte], kind: BlKind)
-func validateFrame*(els: openArray[Value], kind: BlKind)
+proc validateFrame*(els: openArray[Value], kind: BlKind)
 
 RawValue.defvalue:
   kind(v): v.kind
@@ -39,7 +39,7 @@ RawValue.defvalue:
     validateFrame(els.toOpenArray(0, els.high), kind)
     RawValue(kind: kind, marked: marked, els: @els)
 
-func validateFrame*(els: openArray[Value], kind: BlKind) =
+proc validateFrame*(els: openArray[Value], kind: BlKind) =
   case kind
   of bList: discard
   of bRecord:

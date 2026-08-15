@@ -11,11 +11,13 @@ type
     bList, bRecord, bDict, bSet
 
   Value* = concept
-    func marked(s: Self): bool
     func kind(s: Self): BlKind
+    func marked(s: Self): bool
     func size(s: Self): int
     func payload(s: Self): lent seq[byte]
     func els(s: Self): lent seq[Self]
+
+  Builder* = concept
     proc null(_: typedesc[Self], marked: bool): Self
     proc atom(_: typedesc[Self], payload: openArray[byte], kind: Atoms, marked: bool): Self
     proc frame(_: typedesc[Self], els: sink seq[Self], kind: Frames, marked: bool): Self
@@ -31,10 +33,10 @@ const
 template refuse*(msg: untyped) =
   raise newException(RefuseError, msg)
 
-func tag*(a: Value): int =
+proc tag*(a: Value): int =
   ord(a.kind) + 1
 
-func len*(a: Value): int =
+proc len*(a: Value): int =
   a.payload.len
 
 # ================ ORDERING ================
@@ -44,16 +46,16 @@ func len*(a: Value): int =
 # this also has the cruft of making us require a
 # cmp(a, b: MyValue): int with the concrete types directly
 
-func cmp*[A, B: Value](a: A, b: B): int
-func `==`*[A, B: Value](a: A, b: B): bool =
+proc cmp*[A, B: Value](a: A, b: B): int
+proc `==`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) == 0
-func `>`*[A, B: Value](a: A, b: B): bool =
+proc `>`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) > 0
-func `>=`*[A, B: Value](a: A, b: B): bool =
+proc `>=`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) >= 0
-func `<`*[A, B: Value](a: A, b: B): bool =
+proc `<`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) < 0
-func `<=`*[A, B: Value](a: A, b: B): bool =
+proc `<=`*[A, B: Value](a: A, b: B): bool =
   cmp(a, b) <= 0
 
 func cmpAtoms(a, b: openArray[byte]): int =
@@ -63,7 +65,7 @@ func cmpAtoms(a, b: openArray[byte]): int =
     result = cmp(a[i], b[i])
     if result != 0: return
 
-func cmpFrames[A, B: Value](a: openArray[A], b: openArray[B]): int =
+proc cmpFrames[A, B: Value](a: openArray[A], b: openArray[B]): int =
   for i in 0 ..< min(a.len, b.len):
     result = cmp(a[i], b[i])
     if result != 0: return
@@ -72,7 +74,7 @@ func cmpFrames[A, B: Value](a: openArray[A], b: openArray[B]): int =
   # so a > b if a is a prefix of b
   result = cmp(b.len, a.len)
 
-func cmp*[A, B: Value](a: A, b: B): int =
+proc cmp*[A, B: Value](a: A, b: B): int =
   result = cmp(a.tag, b.tag)
   if result != 0: return
 
@@ -85,7 +87,7 @@ func cmp*[A, B: Value](a: A, b: B): int =
   else:
     result = cmpFrames(a.els, b.els)
 
-func hashValue*[A: Value](v: A): Hash =
+proc hashValue*[A: Value](v: A): Hash =
   ## This is not a cryptographic hash!
   ## This is used for things like tables & hash sets.
   ## Use lib/digest for cryptographic hashing.

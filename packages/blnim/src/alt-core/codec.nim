@@ -1,6 +1,5 @@
 include pkg/prelude
 import ./[types, macros]
-import std/strutils
 
 const
   EndByte* = byte(0xA0)
@@ -24,7 +23,7 @@ proc read1(r: var Reader): byte =
 
 # ================ ENCODING ================
 
-func header*(v: Value): byte =
+proc header*(v: Value): byte =
   byte(v.tag) shl 4 or
   byte(v.marked) shl 3 or
   byte(min(v.size, 7))
@@ -91,7 +90,7 @@ proc readSize*(reader: var Reader, header: byte): int =
     if result < 255:
       refuse "size not minimal"
 
-proc readValue*[V: Value](
+proc readValue*[V: Builder](
   reader: var Reader,
   header: byte,
   depth: int): V =
@@ -178,23 +177,52 @@ proc decode*[V: Value](buf: sink seq[byte], maxDepth = 64): V =
     refuse "trailing bytes"
 
 when isMainModule:
-  import std/os
-  import ./rawvalues
+  import std/[os, tables]
+  import ./rawvalues, digest
 
   var big = newSeq[byte](300_000)
   for i in 0 ..< big.len: big[i] = byte(i mod 251)
 
-  type Tally = object
+  type
+    BlakeHash = array[32, byte]
 
-  var
-    nulls: int
-    atoms: int
-    frames: int
+  type
+    Store = ref object
+      payloads: Table[BlakeHash, seq[byte]]
+      els: Table[BlakeHash, seq[Digested]]
+    Digested = object
+      store: Store
+      key: BlakeHash
+      kind: BlKind
+      marked: bool
 
-  Tally.defvalue:
-    null(marked): inc nulls
-    atom(payload, kind, marked): inc atoms
-    frame(els, kind, marked): inc frames
+  var store = Store()
+
+  Digested.defvalue:
+    atom(payload, kind, marked):
+      let key = blake2b(payload)
+      if key notin store.payloads:
+        store.payloads[key] = @payload
+      Digested(store: store, key: key, kind: kind, marked: marked)
+    frame(els, kind, marked):
+      let key = blake2b(els)
+      if key notin store.els:
+        store.els[key] = els
+      Digested(store: store, key: key, kind: kind, marked: marked)
+    null(marked):
+      Digested(marked: marked)
+    size(self):
+      if self.kind in SizedKinds:
+        self.store.payloads[self.key].len
+      else: 0
+    payload(self):
+      if self.kind notin SizedKinds:
+        refuse "not an atom with a payload"
+      return self.store.payloads[self.key]
+    els(self):
+      if self.kind notin FrameKinds:
+        refuse "not a frame"
+      return self.store.els[self.key]
 
   let values: seq[RawValue] = @[
     atom[RawValue]("hello from a file"),
@@ -203,7 +231,7 @@ when isMainModule:
   ]
 
   var buf: seq[byte]
-  for _ in 1 .. 10:
+  for _ in 1 .. 100:
     for v in values:
       discard buf.encode(v)
   let path = getTempDir() / "stream-demo.blb"
@@ -212,17 +240,14 @@ when isMainModule:
 
   var r = stream(fileFetch(open(path)))
   var n = 0
-  for v in readValues[Tally](r):
+  for v in readValues[Digested](r):
     if n == 0:
       echo "raw == raw: ", values[0] == values[0]
-      try: echo "tally == tally: ", v == v
-      except RefuseError: echo "tally == tally: refuses (write-only witness)"
-      try: echo "tally == raw: ", v == values[0]
-      except RefuseError: echo "tally == raw: refuses (write-only witness)"
+      echo "digested == digested: ", v == v
+      echo "digested == raw: ", v == values[0]
     inc n
-  if n != values.len * 10:
+  if n != values.len * 100:
     refuse "stream ran dry early"
-  echo "nulls: ", nulls
-  echo "atoms: ", atoms
-  echo "frames: ", frames
+  echo "unique payloads stored: ", store.payloads.len
+  echo "unique child-seqs stored: ", store.els.len
   echo "streamed ", n, " values back off ", path

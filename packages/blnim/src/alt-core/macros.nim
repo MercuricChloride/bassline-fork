@@ -8,19 +8,19 @@ proc questionDef(T: NimNode, name: string, v, body: NimNode): NimNode =
   case name
   of "kind":
     quote do:
-      func kind*(`v`: `T`): BlKind = `body`
+      proc kind*(`v`: `T`): BlKind = `body`
   of "marked":
     quote do:
-      func marked*(`v`: `T`): bool = `body`
+      proc marked*(`v`: `T`): bool = `body`
   of "size":
     quote do:
-      func size*(`v`: `T`): int = `body`
+      proc size*(`v`: `T`): int = `body`
   of "payload":
     quote do:
-      func payload*(`v`: `T`): lent seq[byte] = `body`
+      proc payload*(`v`: `T`): lent seq[byte] = `body`
   else:
     quote do:
-      func els*(`v`: `T`): lent seq[`T`] = `body`
+      proc els*(`v`: `T`): lent seq[`T`] = `body`
 
 proc builderDef(T: NimNode, name: string, params: seq[NimNode], body: NimNode): NimNode =
   case name
@@ -92,10 +92,10 @@ macro defvalue*(T: untyped, body: untyped): untyped =
       result.add builderDef(T, name, params, refusalBody(tname, name))
 
   let eq = quote do:
-    func eqValue*(a, b: `T`): bool =
+    proc eqValue*(a, b: `T`): bool =
       cmp(a, b) == 0
   eq[0] = nnkPostfix.newTree(ident"*", nnkAccQuoted.newTree(ident"=="))
   result.add eq
   result.add quote do:
-    func hash*(a: `T`): Hash =
+    proc hash*(a: `T`): Hash =
       hashValue(a)
