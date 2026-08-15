@@ -8,20 +8,28 @@ type
     bNum, bText, bSym, bBytes,
     bList, bRecord, bDict, bSet
 
-  Header* = concept v
-    v.marked is bool
-    v.kind is BlKind
-    v.size is int
+  Header* = concept
+    func marked(s: Self): bool
+    func kind(s: Self): BlKind
+    func size(s: Self): int
 
   Atom* = concept v
     v is Header
-    v.payload is lent seq[byte]
+    func payload(): lent seq[byte]
 
   Frame* = concept v
     v is Header
-    v.els is lent seq[Value]
+    func els(): lent seq[Value]
 
   Value* = Atom | Frame
+
+  Atoms* = range[bNum..bBytes]
+  Frames* = range[bList..bSet]
+
+  Values* = concept
+    proc null(_: typedesc[Self], marked: bool): Self
+    proc atom(_: typedesc[Self], payload: openArray[byte], kind: Atoms, marked: bool): Self
+    proc frame(_: typedesc[Self], els: sink seq[Self], kind: Frames, marked: bool): Self
 
 const
   AtomKinds* = bNil..bBytes
@@ -94,6 +102,7 @@ func hash*(v: Value): Hash =
     h = h !& hash(v.els)
   result = !$h
 
+# iteration
 iterator slide*[T](els: openArray[T], n: int): openArray[T] =
   var i = 0
   while (i + n) <= els.len:
@@ -105,3 +114,40 @@ iterator entries*(v: Value): (Value, Value) =
     refuse "entries: not a dict"
   for pair in v.els.slide(2):
     yield (pair[0], pair[1])
+
+template defAtom*(T, payload, kind, marked, body: untyped): untyped =
+  proc atom*(
+    _: typedesc[T], payload: openArray[byte],
+    kind: Atoms = bNum, marked = false): T =
+    body
+
+template defframe*(T, els, kind, marked, body: untyped): untyped =
+  proc frame*(_: typedesc[T], 
+    els: sink seq[T], kind: Frames = bList,
+    marked = false): T =
+    body
+
+template defnull*(T, marked, body: untyped): untyped =
+  proc null*(_: typedesc[T], marked = false): T =
+    body
+
+proc atom*[T: Values](
+  s: openArray[byte], kind: Atoms = bText, marked = false): T =
+  mixin atom
+  T.atom(s, kind, marked)
+
+proc frame*[T: Values](
+  els: sink seq[T], kind: Frames = bList, marked = false): T =
+  mixin frame
+  T.frame(els, kind, marked)
+
+proc null*[T: Values](
+  marked = false
+): T =
+  mixin null
+  T.null(marked)
+
+proc atom*[T: Values](
+  s: string, kind: Atoms = bText, marked = false): T =
+  mixin atom
+  T.atom(s.toOpenArrayByte(0, s.high), kind, marked)

@@ -1,5 +1,5 @@
 include pkg/prelude
-import ./[types, rawvalues]
+import ./types
 import std/strutils
 
 const
@@ -7,11 +7,11 @@ const
   MaxPayloadSize* = uint32.high
 
 type
-  Writer* = concept w
-    w.write(openArray[byte]) is int
-  Reader* = concept r
-    r.read(int) is openArray[byte]
-    r.next() is (byte, bool)
+  Writer* = concept
+    proc write(s: Self, b: openArray[byte]): int
+  Reader* = concept
+    proc read(s: Self, n: int): openArray[byte]
+    proc next(s: Self): (byte, bool)
 
 # ================ READERS & WRITERS ================
 
@@ -91,10 +91,10 @@ proc readSize*(reader: var Reader, header: byte): int =
     if result < 255:
       refuse "size not minimal"
 
-proc readRaw*(
+proc readValue*[V](
   reader: var Reader,
   header: byte,
-  depth: int): RawValue =
+  depth: int): V =
   if depth <= 0:
     refuse "nesting past the depth limit"
   let size = reader.readSize(header)
@@ -103,31 +103,29 @@ proc readRaw*(
   of bNil:
     if size != 0:
       refuse "nil with nonzero size"
-    rawValue(marked = header.marked)
+    null[V](header.marked)
   of bNum..bBytes:
-    let payload = @(reader.read(size))
-    rawValue(payload, header.kind, header.marked)
+    atom[V](reader.read(size), header.kind, header.marked)
   of bList..bSet:
     if size != 0:
       refuse "frame with nonzero size"
-    var els: seq[RawValue]
+    var els: seq[V]
     while true:
       let h = reader.read1
       if h == EndByte:
         break
-      els.add reader.readRaw(h, depth - 1)
-    rawValue(els, header.kind, header.marked)
+      els.add readValue[V](reader, h, depth - 1)
+    frame[V](els, header.kind, header.marked)
 
-proc readRaw*(reader: var Reader, depth: int): RawValue =
-  reader.readRaw(reader.read1, depth)
+proc readValue*[V: Values](reader: var Reader, depth: int): V =
+  readValue[V](reader, reader.read1, depth)
 
-iterator rawValues*(reader: var Reader, maxDepth = 64): RawValue =
-  mixin next
+iterator readValues*[V: Values](reader: var Reader, maxDepth = 64): V =
   while true:
     let (h, more) = reader.next()
     if not more:
       break
-    yield reader.readRaw(h, maxDepth)
+    yield readValue[V](reader, h, maxDepth)
 
 ## ================ Streaming ================
 type
@@ -173,22 +171,37 @@ func fileFetch*(f: File): Fetch =
   result = proc (buf: var openArray[byte]): int =
     f.readBytes(buf, 0, buf.len)
 
-proc decodeRaw*(buf: sink seq[byte], maxDepth = 64): RawValue =
+proc decode*[V: Values](buf: sink seq[byte], maxDepth = 64): V =
   var r = stream(chunks(buf))
-  result = r.readRaw(maxDepth)
+  result = readValue[V](r, maxDepth)
   if r.next()[1]:
     refuse "trailing bytes"
 
 when isMainModule:
   import std/os
+  import ./rawvalues
 
   var big = newSeq[byte](300)
   for i in 0 ..< big.len: big[i] = byte(i mod 251)
 
-  let values = @[
-    rawValue("hello from a file", bText),
-    rawValue(@[rawValue("abc"), rawValue()], bList, marked = true),
-    rawValue(big, bBytes)
+  type Tally = object
+
+  var
+    nulls: int
+    atoms: int
+    frames: int
+
+  Tally.defnull(_):
+    inc nulls
+  Tally.defatom(_, _, _):
+    inc atoms
+  Tally.defframe(_, _, _):
+    inc frames
+
+  let values: seq[RawValue] = @[
+    atom[RawValue]("hello from a file"),
+    frame(@[atom[RawValue]("abc"), null[RawValue]()], bList, true),
+    atom[RawValue](big, bBytes)
   ]
 
   var buf: seq[byte]
@@ -199,12 +212,12 @@ when isMainModule:
 
   var r = stream(fileFetch(open(path)))
   var n = 0
-  for v in r.rawValues:
-    if v != values[n]:
-      refuse "no match"
+  for v in readValues[Tally](r):
     inc n
   if n != values.len:
     refuse "stream ran dry early"
-
+  echo "nulls: ", nulls
+  echo "atoms: ", atoms
+  echo "frames: ", frames
   removeFile(path)
   echo "streamed ", n, " values back off ", path

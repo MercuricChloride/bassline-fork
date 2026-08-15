@@ -29,24 +29,19 @@ func validatePayload*(b: openArray[byte], kind: BlKind)
 func validateFrame*(els: openArray[Value], kind: BlKind)
 
 # Raw Value Stuff
-func rawValue*(payload: sink seq[byte], 
-  kind: range[bNum..bBytes] = bBytes, marked = false): RawValue =
+RawValue.defatom(payload, kind, marked):
   if kind notin AtomKinds:
     refuse "invalid atom kind"
-  result = RawValue(kind: kind, marked: marked, payload: payload)
-  validatePayload(result.payload, kind)
+  validatePayload(payload, kind)
+  RawValue(kind: kind, marked: marked, payload: @payload)
 
-func rawValue*(s: sink string, 
-  kind: range[bNum..bBytes] = bText, marked = false): RawValue =
-  rawValue(@(s.toOpenArrayByte(0, s.high)), kind, marked)
-
-func rawValue*(els: sink seq[RawValue], kind: range[bList..bSet] = bList, marked = false): RawValue =
+RawValue.defframe(els, kind, marked):
   if kind notin FrameKinds:
     refuse "invalid frame kind"
-  result = RawValue(kind: kind, marked: marked, els: els)
-  validateFrame(result.els, kind)
+  validateFrame(els.toOpenArray(0, els.high), kind)
+  RawValue(kind: kind, marked: marked, els: @els)
 
-func rawValue*(marked = false): RawValue =
+RawValue.defNull(marked):
   RawValue(kind: bNil, marked: marked)
 
 func validateFrame*(els: openArray[Value], kind: BlKind) =
