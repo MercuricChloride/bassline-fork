@@ -274,25 +274,12 @@ func initValue*(
     buf: ptr UncheckedArray[byte], bufLen: int,
     maxDepth = DepthLimit,
     content: static bool = true): ValueView {.inline.} =
-  ## The judging door: validates one complete CE value at buf[0] and
-  ## returns a view of it, bounds stamped. The view carries its own
-  ## extent, so this is also the stream door — advance by v.stride.
-  ## content=false judges structure only — run judgeContent before
-  ## letting views escape.
   stamped(buf, scan(buf, bufLen, maxDepth, content))
 
 func initValue*(buf: openArray[byte], maxDepth = DepthLimit): ValueView {.inline.} =
   reject buf.len < 1:
     "unexpected end of input"
   initValue(tua(addr buf[0]), buf.len, maxDepth)
-
-# ================ WALKING ================
-## Per-level stepping (items/pairs/head) deliberately does NOT live
-## here: deriving a child frame's extent from raw bytes per step is
-## visibly quadratic under recursion. This layer's products are the
-## doors, the linear walk, and O(1) reads on held views — structure
-## beyond the stream is a consumer's to build, above raw views, from
-## one walk.
 
 iterator walk*(v: ValueView): ValueView =
   ## Every value in the tree, itself included, in encoded order —
