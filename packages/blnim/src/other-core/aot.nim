@@ -1,20 +1,12 @@
 include pkg/prelude
-import ./validation
+import ./types
+export types
 
 const
-  EndByte = 0xA0'u8
   DepthLimit* = 64
   MaxPayload* = 16 * 1024 * 1024
 
 type
-  RefuseError* = object of CatchableError
-  Kind* = enum
-    bInvalid,
-    bNil,
-    bNum, bStr, bSym, bBytes
-    bList, bRec, bDict, bSet
-  Bucket* = enum
-    ixRoot, ixAtom, ixFrame, ixNum, ixText, ixRec, ixSet, ixDict
   Id* = int
   Value* = object
     kind*: Kind
@@ -25,58 +17,19 @@ type
     ## payload byte len for atoms
     len*: int
     ## immediate child count for frames
-  Values* = object
-    buf*: ptr UncheckedArray[byte]
-    buflen*: int
+
+  Values*[I] = object
+    buf*: ptr UaBytes
+    len*: int
     height*: int
     values*: seq[Value]
-    lastIndex*: int
-    parents*: seq[Id]
-    kidStart*: seq[int]
-    kidBuf*: seq[Id]
-    buckets*: array[Bucket, seq[Id]]
-    ## This feels so stupid, but according to benchmarks
-    ## this is faster than named fields
+    index*: I
 
-const Route: array[Kind, tuple[group, law: Bucket, hasLaw: bool]] = [
-  ## Again this feels stupid but its faster for varying kinds
-  bInvalid: (ixAtom, ixAtom, false),
-  bNil: (ixAtom, ixAtom, false),
-  bNum: (ixAtom, ixNum, true),
-  bStr: (ixAtom, ixText, true),
-  bSym: (ixAtom, ixText, true),
-  bBytes: (ixAtom, ixAtom, false),
-  bList: (ixFrame, ixFrame, false),
-  bRec: (ixFrame, ixRec, true),
-  bDict: (ixFrame, ixDict, true),
-  bSet: (ixFrame, ixSet, true),
-]
+proc initValues*[I](buf: ptr UaBytes, buflen: int,
+    initialSize: int = 16 * 1024): Values[I] =
+  Values[I](buf: buf, len: buflen, values: newSeq[Value](initialSize))
 
-template tua*(v: pointer): ptr UncheckedArray[byte] =
-  cast[ptr UncheckedArray[byte]](v)
-
-# header lenses
-func tag*(b: byte): byte {.inline.} =
-  (b and 0xF0) shr 4
-func mark*(b: byte): bool {.inline.} =
-  (b and 0x08) != 0
-func lbits*(b: byte): byte {.inline.} =
-  b and 0x07
-func kind*(b: byte): Kind {.inline.} =
-  Kind(b.tag)
-
-func refuse*(msg: string) {.noreturn.} =
-  raise newException(RefuseError, msg)
-
-template reject*(cond, msg: untyped): untyped =
-  if cond:
-    refuse msg
-
-proc initValues*(buf: ptr UncheckedArray[byte], buflen: int,
-    initialSize: int = 16 * 1024): Values =
-  Values(buf: buf, buflen: buflen, values: newSeq[Value](initialSize))
-
-func add*(vals: var Values, v: sink Value): Id =
+func add*[I](vals: var Values[I], v: sink Value): Id =
   result = vals.height
   if result >= vals.values.len:
     vals.values.setLen(max(16, vals.values.len * 2))
@@ -84,15 +37,10 @@ func add*(vals: var Values, v: sink Value): Id =
   vals.values[result] = v
   inc vals.height
 
-func get*(vals: var Values, id: Id): Value =
+func get*[I](vals: var Values[I], id: Id): Value =
   vals.values[id]
 
-# misc
-func be32(p: ptr UncheckedArray[byte], i: int): uint32 {.inline.} =
-  (uint32(p[i]) shl 24) or (uint32(p[i + 1]) shl 16) or
-    (uint32(p[i + 2]) shl 8) or uint32(p[i + 3])
-
-func span(v: Value): (int, int) {.inline.} =
+func span(v: Value): tuple[start: int, size: int] {.inline.} =
   case v.kind
   of bNum..bBytes:
     let h = if v.size <= 6: 1 elif v.size <= 254: 2 else: 6
@@ -100,39 +48,36 @@ func span(v: Value): (int, int) {.inline.} =
   else:
     (v.offset, int(v.size))
 
-template payload*(vals: var Values, id: Id): openArray[byte] =
-  ## an atom's payload bytes: the encoding minus its header
+template payload*[I](vals: var Values[I], id: Id): openArray[byte] =
+  ## an atom's payload bytes
   let v = vals.values[id]
-  reject v.kind notin {bNum..bBytes}:
+  reject v.kind notin ScalarKinds:
     "not a sized atom"
   vals.buf.toOpenArray(v.offset, v.offset + v.size.int - 1)
 
-func cmpVals*(vals: var Values, a, b: Value): int =
-  let
-    (astart, alen) = a.span
-    (bstart, blen) = b.span
-  result = cmpMem(addr(vals.buf[astart]), addr(vals.buf[bstart]),
-    min(alen, blen))
-  if result != 0: return
-  result = cmp(alen, blen)
-
-func cmpVals*(vals: var Values, a, b: Id): int =
-  vals.cmpVals(vals.values[a], vals.values[b])
-
-template bytes*(vals: var Values, id: Id): openArray[byte] =
-  ## the full encoding bytes of any value
-  let (start, len) = span(vals.values[id])
+template bytes*[I](vals: var Values[I], v: Value): openArray[byte] =
+  let (start, len) = span v
   vals.buf.toOpenArray(start, start + len - 1)
 
-func scan*(vals: var Values): int =
+template bytes*[I](vals: var Values[I], id: Id): openArray[byte] =
+  ## the full encoding bytes of a value
+  bytes(vals, vals.values[id])
+
+func cmpVals*[I](vals: var Values[I], a, b: Value): int =
+  cmpBytes(vals.bytes(a), vals.bytes(b))
+
+func cmpVals*[I](vals: var Values[I], a, b: Id): int =
+  vals.cmpVals(vals.values[a], vals.values[b])
+
+proc scan*[I](vals: var Values[I]): int =
   ## scans the buf and seeds the store
   let
     p = vals.buf
-    avail = vals.buflen
+    avail = vals.len
 
   var
     parents: array[DepthLimit, Id]
-    counts: array[DepthLimit, int] # children of each open frame
+    counts: array[DepthLimit, int]
     depth, off: int
 
   while true:
@@ -173,7 +118,7 @@ func scan*(vals: var Values): int =
         else:
           reject avail - off < 6:
             "unexpected end of input inside a length"
-          psize = be32(p, off + 2)
+          psize = be32(p.toOpenArray(off + 2, off + 5))
           reject psize < 255:
             "non minimal large size"
           pstart = 6
@@ -215,138 +160,171 @@ func scan*(vals: var Values): int =
 
 # ================ relations ================
 
-func index*(vals: var Values) =
-  ## Runs the indexing steps from the last watermark
-  if vals.lastIndex >= vals.height:
+proc index*[I](vals: var Values[I]) =
+  mixin prepare, observe
+  let lo = vals.index.lastIndex
+  if lo >= vals.height:
     return
-  if vals.lastIndex == 0:
-    for b in Bucket:
-      vals.buckets[b].setLen(0)
-
-  vals.kidStart.setLen(vals.height + 1)
-  var
-    acc = if vals.lastIndex == 0: 0 else: vals.kidStart[vals.lastIndex]
-    census: array[Kind, int]
-  let accStart = acc
-  for id in vals.lastIndex ..< vals.height:
-    vals.kidStart[id] = acc
-    acc += vals.values[id].len
-    inc census[vals.values[id].kind]
-  vals.kidStart[vals.height] = acc
-  vals.kidBuf.setLen(acc)
-  vals.parents.setLen(vals.height)
-
-  var want: array[Bucket, int]
-  want[ixRoot] = (vals.height - vals.lastIndex) - (acc - accStart)
-  want[ixAtom] = census[bNil] + census[bNum] + census[bStr] +
-    census[bSym] + census[bBytes]
-  want[ixFrame] = census[bList] + census[bRec] + census[bDict] +
-    census[bSet]
-  want[ixNum] = census[bNum]
-  want[ixText] = census[bStr] + census[bSym]
-  want[ixRec] = census[bRec]
-  want[ixSet] = census[bSet]
-  want[ixDict] = census[bDict]
-
-  var cur: array[Bucket, int]
-  for b in Bucket:
-    cur[b] = vals.buckets[b].len
-    vals.buckets[b].setLen(cur[b] + want[b])
-
-  template put(b: Bucket, id: Id) =
-    vals.buckets[b][cur[b]] = id
-    inc cur[b]
+  prepare(vals, lo)
 
   var
-    stack: array[DepthLimit, tuple[id: Id, endB, cur: int]]
+    stack: array[DepthLimit, tuple[id: Id, endB: int]]
     sp = 0
-  for id in vals.lastIndex ..< vals.height:
-    let
-      v = vals.values[id]
+  for id in lo ..< vals.height:
+    let v = vals.values[id]
     while sp > 0 and v.offset >= stack[sp - 1].endB:
       dec sp
-    if sp > 0:
-      vals.parents[id] = stack[sp - 1].id
-      vals.kidBuf[stack[sp - 1].cur] = id
-      inc stack[sp - 1].cur
+    observe(vals, id, v, stack[sp - 1].id, sp)
+    if v.kind in FrameKinds:
+      stack[sp] = (id: id, endB: v.offset + int(v.size))
+      inc sp
+  vals.index.lastIndex = vals.height
+
+type
+  Bucket* = enum
+    ixRoot, ixAtom, ixFrame, ixNum, ixText, ixRec, ixSet, ixDict
+
+  FullIndex* = object
+    lastIndex*: int
+    parents*: seq[Id]
+    kidStart*: seq[int]
+    kidBuf*: seq[Id]
+    buckets*: array[Bucket, seq[Id]]
+    ## This feels so stupid, but according to benchmarks
+    ## this is faster than named fields
+
+const Route: array[Kind, tuple[group, law: Bucket, hasLaw: bool]] = [
+  ## Again this feels stupid but its faster for varying kinds
+  bInvalid: (ixAtom, ixAtom, false),
+  bNil: (ixAtom, ixAtom, false),
+  bNum: (ixAtom, ixNum, true),
+  bStr: (ixAtom, ixText, true),
+  bSym: (ixAtom, ixText, true),
+  bBytes: (ixAtom, ixAtom, false),
+  bList: (ixFrame, ixFrame, false),
+  bRec: (ixFrame, ixRec, true),
+  bDict: (ixFrame, ixDict, true),
+  bSet: (ixFrame, ixSet, true),
+]
+
+template prepare*(vals: var Values[FullIndex], lo: int) =
+  var bucketCur {.inject.}: array[Bucket, int]
+  var kidCur {.inject.}: array[DepthLimit, int]
+  block:
+    template ix: untyped = vals.index
+    if lo == 0:
+      for b in Bucket:
+        ix.buckets[b].setLen(0)
+
+    ix.kidStart.setLen(vals.height + 1)
+    var
+      acc = if lo == 0: 0 else: ix.kidStart[lo]
+      census: array[Kind, int]
+    let accStart = acc
+    for id in lo ..< vals.height:
+      ix.kidStart[id] = acc
+      acc += vals.values[id].len
+      inc census[vals.values[id].kind]
+    ix.kidStart[vals.height] = acc
+    ix.kidBuf.setLen(acc)
+    ix.parents.setLen(vals.height)
+
+    var want: array[Bucket, int]
+    want[ixRoot] = (vals.height - lo) - (acc - accStart)
+    want[ixAtom] = census[bNil] + census[bNum] + census[bStr] +
+      census[bSym] + census[bBytes]
+    want[ixFrame] = census[bList] + census[bRec] + census[bDict] +
+      census[bSet]
+    want[ixNum] = census[bNum]
+    want[ixText] = census[bStr] + census[bSym]
+    want[ixRec] = census[bRec]
+    want[ixSet] = census[bSet]
+    want[ixDict] = census[bDict]
+
+    for b in Bucket:
+      bucketCur[b] = ix.buckets[b].len
+      ix.buckets[b].setLen(bucketCur[b] + want[b])
+
+template observe*(vals: var Values[FullIndex], id: Id, v: Value,
+    parent: Id, depth: int) =
+  block:
+    template ix: untyped = vals.index
+    template put(b: Bucket) =
+      ix.buckets[b][bucketCur[b]] = id
+      inc bucketCur[b]
+
+    if depth > 0:
+      ix.parents[id] = parent
+      ix.kidBuf[kidCur[depth - 1]] = id
+      inc kidCur[depth - 1]
     else:
-      vals.parents[id] = -1
-      put(ixRoot, id)
+      ix.parents[id] = -1
+      put ixRoot
     let r = Route[v.kind]
     if r.hasLaw:
-      put(r.law, id)
-    put(r.group, id)
+      put r.law
+    put r.group
     if r.group == ixFrame:
-      stack[sp] = (id: id, endB: v.offset + int(v.size),
-        cur: vals.kidStart[id])
-      inc sp
-  vals.lastIndex = vals.height
+      kidCur[depth] = ix.kidStart[id]
 
-template bucket*(vals: Values, b: Bucket): openArray[Id] =
+template bucket*(vals: Values[FullIndex], b: Bucket): openArray[Id] =
   ## a bucket's ids as a view; index() first
-  vals.buckets[b].toOpenArray(0, vals.buckets[b].len - 1)
+  vals.index.buckets[b].toOpenArray(0, vals.index.buckets[b].len - 1)
 
-template roots*(vals: Values): openArray[Id] =
+template roots*(vals: Values[FullIndex]): openArray[Id] =
   vals.bucket(ixRoot)
 
-template kids*(vals: Values, id: Id): openArray[Id] =
-  vals.kidBuf.toOpenArray(vals.kidStart[id], vals.kidStart[id + 1] - 1)
+template kids*(vals: Values[FullIndex], id: Id): openArray[Id] =
+  vals.index.kidBuf.toOpenArray(vals.index.kidStart[id],
+    vals.index.kidStart[id + 1] - 1)
 
-func parentOf*(vals: var Values, id: Id): Id =
-  vals.parents[id]
+func parentOf*(vals: var Values[FullIndex], id: Id): Id =
+  vals.index.parents[id]
 
-# ================ validation ================
+type
+  RootIndex* = object
+    lastIndex*: int
+    rootIds*: seq[Id]
 
-func validateText*(bytes: openArray[byte]) {.inline.} =
-  if not validateUtf8(bytes.toOpenArrayChar(0, bytes.high)):
-    refuse "validateText: utf8 not well formed"
+template prepare*(vals: var Values[RootIndex], lo: int) =
+  if lo == 0:
+    vals.index.rootIds.setLen(0)
 
-func validateInt*(bytes: openArray[byte]) {.inline.} =
-  if bytes.len == 0:
-    refuse "validateInt: effective length cannot be 0"
+template observe*(vals: var Values[RootIndex], id: Id, v: Value,
+    parent: Id, depth: int) =
+  if depth == 0:
+    vals.index.rootIds.add id
 
-  let
-    isNegative = (bytes[0] == '-'.byte)
-    start = if isNegative: 1 else: 0
+template roots*(vals: Values[RootIndex]): openArray[Id] =
+  vals.index.rootIds.toOpenArray(0, vals.index.rootIds.len - 1)
 
-  if bytes.len == start:
-    refuse("validateInt: effective length cannot be 0")
-
-  if bytes[start] == '0'.byte:
-    if bytes.len - start > 1:
-      refuse("validateInt: leading zeros are not allowed")
-    if isNegative:
-      refuse("validateInt: [-0] not a valid int")
-
-  for i in start ..< bytes.len:
-    if char(bytes[i]) notin {'0'..'9'}:
-      refuse("validateInt: invalid char outside of [0-9]")
-
-func validate*(vals: var Values) =
-  if vals.lastIndex < vals.height:
+proc validate*(vals: var Values[FullIndex]) =
+  if vals.index.lastIndex < vals.height:
     vals.index()
-  for id in vals.buckets[ixNum]:
+  for id in vals.index.buckets[ixNum]:
     validateInt(vals.payload(id))
-  for id in vals.buckets[ixText]:
+  for id in vals.index.buckets[ixText]:
     validateText(vals.payload(id))
-  for id in vals.buckets[ixRec]:
+  for id in vals.index.buckets[ixRec]:
     reject vals.values[id].len == 0:
       "record with no head"
-  for id in vals.buckets[ixDict]:
+  for id in vals.index.buckets[ixDict]:
     let
       count = vals.values[id].len
-      ks = vals.kidStart[id]
+      ks = vals.index.kidStart[id]
     reject count mod 2 != 0:
       "dict with a key missing its value"
     var i = 2
     while i < count:
-      reject vals.cmpVals(vals.kidBuf[ks + i - 2], vals.kidBuf[ks + i]) >= 0:
+      reject vals.cmpVals(vals.index.kidBuf[ks + i - 2],
+        vals.index.kidBuf[ks + i]) >= 0:
         "dict keys out of order or duplicated"
       i += 2
-  for id in vals.buckets[ixSet]:
+  for id in vals.index.buckets[ixSet]:
     let
       count = vals.values[id].len
-      ks = vals.kidStart[id]
+      ks = vals.index.kidStart[id]
     for i in 1 ..< count:
-      reject vals.cmpVals(vals.kidBuf[ks + i - 1], vals.kidBuf[ks + i]) >= 0:
+      reject vals.cmpVals(vals.index.kidBuf[ks + i - 1],
+        vals.index.kidBuf[ks + i]) >= 0:
         "set members out of order or duplicated"
