@@ -25,6 +25,9 @@ type
     values*: seq[Value]
     index*: I
 
+# I'm doing this because i'm a bit paranoid
+proc `=copy`[I](dest: var Values[I]; source: Values[I]) {.error.}
+
 proc initValues*[I](buf: ptr UaBytes, buflen: int,
     initialSize: int = 16 * 1024): Values[I] =
   Values[I](buf: buf, len: buflen, values: newSeq[Value](initialSize))
@@ -37,7 +40,7 @@ func add*[I](vals: var Values[I], v: sink Value): Id =
   vals.values[result] = v
   inc vals.height
 
-func get*[I](vals: var Values[I], id: Id): Value =
+func get*[I](vals: Values[I], id: Id): Value =
   vals.values[id]
 
 func span(v: Value): tuple[start: int, size: int] {.inline.} =
@@ -48,28 +51,28 @@ func span(v: Value): tuple[start: int, size: int] {.inline.} =
   else:
     (v.offset, int(v.size))
 
-template payload*[I](vals: var Values[I], id: Id): openArray[byte] =
+template payload*[I](vals: Values[I], id: Id): openArray[byte] =
   ## an atom's payload bytes
   let v = vals.values[id]
   reject v.kind notin ScalarKinds:
     "not a sized atom"
   vals.buf.toOpenArray(v.offset, v.offset + v.size.int - 1)
 
-template bytes*[I](vals: var Values[I], v: Value): openArray[byte] =
+template bytes*[I](vals: Values[I], v: Value): openArray[byte] =
   let (start, len) = span v
   vals.buf.toOpenArray(start, start + len - 1)
 
-template bytes*[I](vals: var Values[I], id: Id): openArray[byte] =
+template bytes*[I](vals: Values[I], id: Id): openArray[byte] =
   ## the full encoding bytes of a value
   bytes(vals, vals.values[id])
 
-func cmpVals*[I](vals: var Values[I], a, b: Value): int =
+func cmpVals*[I](vals: Values[I], a, b: Value): int =
   cmpBytes(vals.bytes(a), vals.bytes(b))
 
-func cmpVals*[I](vals: var Values[I], a, b: Id): int =
+func cmpVals*[I](vals: Values[I], a, b: Id): int =
   vals.cmpVals(vals.values[a], vals.values[b])
 
-proc scan*[I](vals: var Values[I]): int =
+proc scan*[I](vals: Values[I]): int =
   ## scans the buf and seeds the store
   let
     p = vals.buf

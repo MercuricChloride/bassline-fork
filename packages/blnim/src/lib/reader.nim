@@ -1,8 +1,8 @@
 include pkg/prelude
-from std/strutils import toHex, toLowerAscii
-import pkg/core
+import std/[options, strutils]
 
-type ReadError* = object of CatchableError
+type
+  ReadError* = object of CatchableError
 
 const
   Ws = {' ', '\t', '\n', '\r'}
@@ -10,17 +10,21 @@ const
   Digits = {'0' .. '9'}
   HexDigits = Digits + {'a' .. 'f', 'A' .. 'F'}
 
-func isBareSpelling*(s: string): bool =
+func isBareSpelling*(s: string): Option[string] =
   ## whether a symbol may be spelled without quotes
-  if s.len == 0 or s == "nil":
-    return false
-  for c in s:
-    if c in Delims:
-      return false
-  if s[0] in Digits:
-    return false
-  if s.len > 1 and s[0] == '-' and s[1] in Digits:
-    return false
+  result = some s
+
+  case s.len
+  of 0: return
+  of 1:
+    case s[0]
+    of Digits: return
+    of '-' and s.len >= 2:
+      
+    elif s.len >= 2:
+    s[0] == '-' and
+    s[1] in Digits: return
+  if s == "nil": return
   true
 
 func fail(s: string, pos: int, msg: string) {.noreturn.} =
@@ -120,7 +124,7 @@ func datum(s: string, pos: var int): Value =
     close b
   of '{':
     # the open frame starts as a set and the first ':'
-    # rekinds it to a dictionary.
+    # and changes it's kind to a dictionary.
     inc pos
     var b = open(bSet)
     skipWs(s, pos)
@@ -130,7 +134,7 @@ func datum(s: string, pos: var int): Value =
       inc pos
     elif s[pos] == ':':
       inc pos
-      b.rekind(bDict)
+      b.kind = bDict
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed {")
@@ -143,7 +147,7 @@ func datum(s: string, pos: var int): Value =
       if pos >= s.len:
         fail(s, pos, "unclosed {")
       if s[pos] == ':':
-        b.rekind(bDict)
+        b.kind = bDict
         inc pos
         b.add(first, value(s, pos))
         while true:

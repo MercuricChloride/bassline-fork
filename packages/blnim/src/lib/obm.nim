@@ -33,7 +33,8 @@ include pkg/prelude
 ## and marked values are refused everywhere except Value passthrough.
 ## fromValue never raises on foreign data; it answers none.
 
-import std/[strutils, macros, options, tables, hashes, sets]
+import std/[strutils, macros, options, hashes, sets]
+import std/tables except values
 import pkg/core
 
 export options
@@ -50,8 +51,8 @@ func `==`*(a: Sym, b: string): bool =
 func `==`*(a: string, b: Sym): bool =
   a == string(b)
 
-template blRecord*(head: string) {.pragma.}
-  ## type pragma: this object is a record dialect with the given head
+template blRecord*(head: Value) {.pragma.}
+  ## type pragma: this object is a record with the given head
 
 template blDict*() {.pragma.}
   ## type pragma: this object is a dict dialect; keys are the field
@@ -74,7 +75,8 @@ func toValueObj[T: object](x: sink T): Value =
   mixin toValue
   var y = x
   when T.hasCustomPragma(blRecord):
-    var fields = @[sym(T.getCustomPragmaVal(blRecord))]
+    let matchHead = T.getCustomPragmaVal(blRecord)
+    var fields = @[matchHead]
     for name, f in y.fieldPairs:
       when hasCustomPragma(f, blSet):
         when typeof(f) is seq[Value]:
@@ -137,12 +139,12 @@ func toValue*[T](x: sink T): Value =
   elif T is seq:
     var els = newSeqOfCap[Value](x.len)
     for it in x:
-      els.add toValue(it)
+      els.add(toValue(it))
     list(els)
   elif T is Table:
     var els = open(bDict)
     for k, v in x:
-      els.add toValue(k) toValue(v)
+      els.add(toValue(k),toValue(v))
     els.seal()
   elif T is HashSet:
     var els = open(bSet)
@@ -234,7 +236,7 @@ func fromValueObj[T](v: Value, t: typedesc[T]): Option[T] =
   when T.hasCustomPragma(blRecord):
     if v.kind != bRecord or v.marked:
       return none(T)
-    if v.contents[0] != sym(T.getCustomPragmaVal(blRecord)):
+    if v.contents[0] != T.getCustomPragmaVal(blRecord):
       return none(T)
     var res: T
     var i = 1

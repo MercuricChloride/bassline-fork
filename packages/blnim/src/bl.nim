@@ -3,13 +3,13 @@ import std/[parseopt, os, posix, strutils]
 import
   cmd/[
     listen, file,  send, hash, cat, keygen, sign, verify, put, get, read,
-    borth, reach,
+    reach,
     #assemble
   ]
 
 const Builtins = [
   "listen", "file", "send", "hash", "cat", "keygen", "sign", "verify", "put",
-  "get", "read", "borth", "reach", "which", "commands",
+  "get", "read", "reach", "which", "commands",
 ]
 
 proc printHelp() =
@@ -30,7 +30,6 @@ Usage:
   bl verify                      check signed values, emit the inner
   bl put [--store:PATH]          hold stdin values, emit their names
   bl get [--store:PATH]          resolve digest names to content
-  bl borth [file ...]            run borth documents, or stdin live
   bl reach PLACE [-- CMD ...]    give stdin/stdout, or a command's, to a place
   bl which NAME                  say what would run for a command name
   bl commands                    list builtin and PATH commands
@@ -138,9 +137,6 @@ proc main() =
         return
       of "get":
         get.run(p.remainingArgs())
-        return
-      of "borth":
-        borth.run(p.remainingArgs())
         return
       of "reach":
         reach.run(p.remainingArgs())

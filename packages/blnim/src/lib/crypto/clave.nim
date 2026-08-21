@@ -36,17 +36,17 @@ type
     secret: SecretKey
     public*: Key
 
-  KeypairShape {.blRecord: "keypair".} = object
+  KeypairShape {.blRecord: sym"keypair".} = object
     scheme: Lit[Scheme]
     seed: Seed
     public: Key
 
-  Signature* {.blRecord: "signature".} = object
+  Signature* {.blRecord: sym"signature".} = object
     scheme*: Lit[Scheme]
     sig*: Sig
     public*: Key
 
-  Signed* {.blRecord: "signed".} = object
+  Signed* {.blRecord: sym"signed".} = object
     value*: Value
     signature*: Signature
 
