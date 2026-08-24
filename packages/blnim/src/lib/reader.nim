@@ -1,4 +1,17 @@
-import std/[options, strutils]
+## A bassline textual syntax reader
+##
+## Values are built with the builders, never as raw bytes: text is a
+## small, lightweight format, and building through the same
+## constructors the bl macro targets keeps one construction surface.
+## The two payload laws the text needs (canonical integer spellings,
+## UTF-8) are codec's, used here so a bad spelling is refused with a
+## line and column instead of later at finalize. Sets and dicts land
+## in their trees as they are read, so canonical order is by
+## construction; duplicates are refused, not repaired.
+
+import std/strutils
+import core/[builders, codec]
+export builders
 
 type
   ReadError* = object of CatchableError
@@ -8,22 +21,17 @@ const
   Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '\'', '"', ';', '!'}
   Digits = {'0' .. '9'}
   HexDigits = Digits + {'a' .. 'f', 'A' .. 'F'}
+  FrameKinds = {bList, bRec, bDict, bSet}
 
-func isBareSpelling*(s: string): Option[string] =
-  ## whether a symbol may be spelled without quotes
-  result = some s
-
-  case s.len
-  of 0: return
-  of 1:
-    case s[0]
-    of Digits: return
-    of '-' and s.len >= 2:
-      
-    elif s.len >= 2:
-    s[0] == '-' and
-    s[1] in Digits: return
-  if s == "nil": return
+func isBareSpelling*(s: string): bool =
+  ## whether a symbol may be spelled without quotes: it has to read
+  ## back as itself — not empty, not nil, not a number, and free of
+  ## delimiters and control characters
+  if s.len == 0 or s == "nil": return false
+  if s[0] in Digits: return false
+  if s.len > 1 and s[0] == '-' and s[1] in Digits: return false
+  for c in s:
+    if c in Delims or ord(c) < 0x20: return false
   true
 
 func fail(s: string, pos: int, msg: string) {.noreturn.} =
@@ -91,13 +99,17 @@ func quotedScan(s: string, pos: var int, q: char): string =
       result.add c
       inc pos
 
-func value(s: string, pos: var int): Value
+func checkUtf8(s: string, pos: int, raw: string, what: string) =
+  if not isValidUtf8(raw.toOpenArrayByte(0, raw.high)):
+    fail(s, pos, "malformed UTF-8 in " & what)
 
-func datum(s: string, pos: var int): Value =
+proc value(s: string, pos: var int): Value
+
+proc datum(s: string, pos: var int): Value =
   case s[pos]
   of '[':
     inc pos
-    var b = open(bList)
+    result = initList()
     while true:
       skipWs(s, pos)
       if pos >= s.len:
@@ -105,98 +117,91 @@ func datum(s: string, pos: var int): Value =
       if s[pos] == ']':
         inc pos
         break
-      b.add value(s, pos)
-    close b
+      result.items.add value(s, pos)
   of '(':
     inc pos
-    var b = open(bRecord)
+    skipWs(s, pos)
+    if pos >= s.len:
+      fail(s, pos, "unclosed (")
+    if s[pos] == ')':
+      fail(s, pos, "record with no head")
+    result = initRec(value(s, pos))
     while true:
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed (")
       if s[pos] == ')':
-        if b.len == 0:
-          fail(s, pos, "record with no head")
         inc pos
         break
-      b.add value(s, pos)
-    close b
+      result.items.add value(s, pos)
   of '{':
-    # the open frame starts as a set and the first ':'
-    # and changes it's kind to a dictionary.
+    # {} is the empty set, {:} the empty dict; otherwise the first
+    # member decides: a ':' after it makes the frame a dictionary
     inc pos
-    var b = open(bSet)
     skipWs(s, pos)
     if pos >= s.len:
       fail(s, pos, "unclosed {")
     if s[pos] == '}':
       inc pos
-    elif s[pos] == ':':
+      return initSet()
+    if s[pos] == ':':
       inc pos
-      b.kind = bDict
       skipWs(s, pos)
       if pos >= s.len:
         fail(s, pos, "unclosed {")
       if s[pos] != '}':
         fail(s, pos, "'{:' is the empty dictionary; expected '}'")
       inc pos
-    else:
-      let first = value(s, pos)
-      skipWs(s, pos)
-      if pos >= s.len:
-        fail(s, pos, "unclosed {")
-      if s[pos] == ':':
-        b.kind = bDict
-        inc pos
-        b.add(first, value(s, pos))
-        while true:
-          skipWs(s, pos)
-          if pos >= s.len:
-            fail(s, pos, "unclosed {")
-          if s[pos] == '}':
-            inc pos
-            break
-          let k = value(s, pos)
-          skipWs(s, pos)
-          if pos >= s.len or s[pos] != ':':
-            fail(s, pos, "dict entry needs ':' after its key")
+      return initDict()
+    let first = value(s, pos)
+    skipWs(s, pos)
+    if pos >= s.len:
+      fail(s, pos, "unclosed {")
+    if s[pos] == ':':
+      inc pos
+      result = initDict()
+      var k = first
+      while true:
+        if k in result.dict:
+          fail(s, pos, "duplicate dict key")
+        result.dict[k] = value(s, pos)
+        skipWs(s, pos)
+        if pos >= s.len:
+          fail(s, pos, "unclosed {")
+        if s[pos] == '}':
           inc pos
-          b.add(k, value(s, pos))
-      else:
-        b.add first
-        while true:
-          skipWs(s, pos)
-          if pos >= s.len:
-            fail(s, pos, "unclosed {")
-          if s[pos] == '}':
-            inc pos
-            break
-          if s[pos] == ':':
-            fail(s, pos, "':' in a set; a dictionary is {key: value}")
-          b.add value(s, pos)
-    if b.kind == bDict:
-      try:
-        close b
-      except ValueError:
-        fail(s, pos, "duplicate dict key")
+          break
+        k = value(s, pos)
+        skipWs(s, pos)
+        if pos >= s.len or s[pos] != ':':
+          fail(s, pos, "dict entry needs ':' after its key")
+        inc pos
     else:
-      let n = b.len
-      let v = close b
-      if v.contents.len != n:
-        fail(s, pos, "duplicate set member")
-      v
+      result = initSet()
+      var m = first
+      while true:
+        if m in result.elements:
+          fail(s, pos, "duplicate set member")
+        result.elements[m] = true
+        skipWs(s, pos)
+        if pos >= s.len:
+          fail(s, pos, "unclosed {")
+        if s[pos] == '}':
+          inc pos
+          break
+        if s[pos] == ':':
+          fail(s, pos, "':' in a set; a dictionary is {key: value}")
+        m = value(s, pos)
   of '"':
+    let start = pos
     let raw = quotedScan(s, pos, '"')
-    try:
-      text(raw)
-    except InvalidUtf8Str:
-      fail(s, pos, "malformed UTF-8 in string")
+    checkUtf8(s, start, raw, "string")
+    result = text(raw)
   of '\'':
+    let start = pos
     let raw = quotedScan(s, pos, '\'')
-    try:
-      sym(raw)
-    except InvalidUtf8Str:
-      fail(s, pos, "malformed UTF-8 in symbol")
+    checkUtf8(s, start, raw, "symbol")
+    result = sym(raw)
   of ')', ']', '}', ':', '!':
     fail(s, pos, "unexpected " & s[pos])
   else:
@@ -223,7 +228,7 @@ func datum(s: string, pos: var int): Value =
       var bs = newSeq[byte](hex.len div 2)
       for i in 0 ..< bs.len:
         bs[i] = nibble(s, start, hex[2 * i]) shl 4 or nibble(s, start, hex[2 * i + 1])
-      bytes(bs)
+      result = bytes(bs)
     elif tok[0] in Digits or
         (tok.len > 1 and tok[0] == '-' and tok[1] in Digits):
       var digits: string
@@ -235,18 +240,19 @@ func datum(s: string, pos: var int): Value =
             fail(s, start + i, "'_' sits between digits")
         else:
           digits.add c
-      if not isDecimal(digits):
+      if not isValidInt(digits.toOpenArrayByte(0, digits.high)):
         fail(s, start, "not a canonical number: " & tok)
-      num(digits)
-    elif tok == "nil":
-      nilValue()
-    else:
       try:
-        sym(tok)
-      except InvalidUtf8Str:
-        fail(s, start, "malformed UTF-8 in symbol")
+        result = num(parseBiggestInt(digits).int)
+      except ValueError:
+        fail(s, start, "number outside the range this reading holds: " & tok)
+    elif tok == "nil":
+      result = null()
+    else:
+      checkUtf8(s, start, tok, "symbol")
+      result = sym(tok)
 
-func value(s: string, pos: var int): Value =
+proc value(s: string, pos: var int): Value =
   skipWs(s, pos)
   if pos >= s.len:
     fail(s, pos, "expected a value")
@@ -273,12 +279,12 @@ func value(s: string, pos: var int): Value =
     inc pos
     if pos < s.len and s[pos] notin Delims:
       fail(s, pos, "a marked atom ends at a delimiter")
-    v = mark(v)
+    v.marked = true
   elif prefixMarked:
-    v = mark(v)
+    v.marked = true
   v
 
-func readDocument*(text: string, values: var seq[Value]) =
+proc readDocument*(text: string, values: var seq[Value]) =
   ## read many values into the seq values
   var pos = 0
   while true:
@@ -287,10 +293,10 @@ func readDocument*(text: string, values: var seq[Value]) =
       break
     values.add value(text, pos)
 
-func readDocument*(text: string): seq[Value] =
+proc readDocument*(text: string): seq[Value] =
   readDocument(text, result)
 
-func readValue*(text: string): Value =
+proc readValue*(text: string): Value =
   ## read exactly one value
   var values = readDocument(text)
   if values.len != 1:
@@ -306,6 +312,9 @@ func escaped(s: string, q: char): string =
     result.add c
 
 func `$`*(v: Value): string =
+  ## rec (…), list […], set {…} ({} empty), dict {k: v …} ({:} empty).
+  ## The mark is a prefix on frames and a suffix on atoms. Symbols are
+  ## bare when they read back as themselves, single-quoted otherwise.
   let core =
     case v.kind
     of bNil:
@@ -313,21 +322,20 @@ func `$`*(v: Value): string =
     of bNum:
       $v.num
     of bSym:
-      let name = $v.text
-      if isBareSpelling(name):
-        name
+      if isBareSpelling(v.text):
+        v.text
       else:
-        "'" & escaped(name, '\'') & "'"
+        "'" & escaped(v.text, '\'') & "'"
     of bText:
-      "\"" & escaped($v.text, '"') & "\""
+      "\"" & escaped(v.text, '"') & "\""
     of bBytes:
       var hex = "0x"
       for b in v.bytes:
         hex.add b.toHex.toLowerAscii
       hex
-    of bList, bRecord:
+    of bList, bRec:
       var parts = ""
-      for c in v.contents:
+      for c in v.items:
         if parts.len > 0:
           parts.add ' '
         parts.add $c
@@ -337,26 +345,24 @@ func `$`*(v: Value): string =
         "(" & parts & ")"
     of bSet:
       var parts = ""
-      for c in v.contents:
+      for k, _ in v.elements:
         if parts.len > 0:
           parts.add ' '
-        parts.add $c
+        parts.add $k
       "{" & parts & "}"
     of bDict:
-      if v.contents.len == 0:
+      if v.dict.len == 0:
         "{:}"
       else:
         var parts = ""
-        for k, val in v.pairs:
+        for k, val in v.dict:
           if parts.len > 0:
             parts.add ' '
-          parts.add $k
-          parts.add ": "
-          parts.add $val
+          parts.add $k & ": " & $val
         "{" & parts & "}"
   if not v.marked:
     core
-  elif v.isFrame:
+  elif v.kind in FrameKinds:
     "!" & core
   else:
     core & "!"

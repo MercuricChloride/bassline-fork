@@ -3,4 +3,6 @@ when withDir(thisDir(), system.fileExists("nimble.paths")):
   include "nimble.paths"
 # end Nimble config
 
---define:nimPreviewHashRef
+--experimental:strictFuncs
+--experimental:views
+--d:release

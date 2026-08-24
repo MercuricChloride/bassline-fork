@@ -9,7 +9,7 @@ type
 
   Value* = object
     marked*: bool
-    case kind: Kind
+    case kind*: Kind
     of bNil: discard
     of bNum:
       num*: int
@@ -123,3 +123,39 @@ func `<=`*(a, b: Value): bool =
   cmp(a, b) <= 0
 func `>=`*(a, b: Value): bool =
   cmp(a, b) >= 0
+
+# ================ Frame constructors ================
+
+func toBytes*(s: string): seq[byte] =
+  result = newSeq[byte](s.len)
+  for i, c in s:
+    result[i] = byte(c)
+
+func initList*(items: sink seq[Value], marked = false): Value =
+  Value(kind: bList, items: items, marked: marked)
+
+func initRec*(items: sink seq[Value], marked = false): Value =
+  doAssert items.len > 0, "a record needs a head"
+  Value(kind: bRec, items: items, marked: marked)
+
+proc initSet*(items: sink seq[Value], marked = false): Value =
+  result = initSet(marked)
+  for x in items:
+    result.elements[x] = true
+
+proc initDict*(entries: sink seq[(Value, Value)], marked = false): Value =
+  result = initDict(marked)
+  for (k, v) in entries:
+    result.dict[k] = v
+
+func toValue*(v: Value): Value = v
+func toValue*(i: int): Value = num(i)
+func toValue*(i: int64): Value = num(int(i))
+func toValue*(s: string): Value = text(s)
+func toValue*(b: seq[byte]): Value = bytes(b)
+
+func toValue*[T](xs: seq[T]): Value =
+  mixin toValue
+  result = initList()
+  for x in xs:
+    result.items.add toValue(x)
