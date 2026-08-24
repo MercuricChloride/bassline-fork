@@ -1,5 +1,3 @@
-include pkg/prelude
-
 ## clave is a minimal attestation value dialect.
 ## It offers keypairs, signatures, and signed values.
 ##

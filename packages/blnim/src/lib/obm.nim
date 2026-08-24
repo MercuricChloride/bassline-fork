@@ -1,5 +1,3 @@
-include pkg/prelude
-
 ## obm: Object Bassline Mapping
 ## 
 ## Used to define recognition & conversion from particular bassline structures

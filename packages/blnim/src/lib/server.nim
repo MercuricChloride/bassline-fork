@@ -8,7 +8,6 @@
 ##
 ## Malformed input is fatal to a connection: past one bad byte there
 ## is no sound resync point, so the socket is closed.
-include pkg/prelude
 import std/[asyncnet, asyncdispatch, options, os, posix, nativesockets]
 import pkg/core
 export asyncnet, asyncdispatch

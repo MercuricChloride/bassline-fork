@@ -1,5 +1,3 @@
-include pkg/prelude
-
 import std/options
 
 import pkg/core

@@ -1,5 +1,3 @@
-include pkg/prelude
-
 import nimcrypto/[blake2, sha2]
 import pkg/core
 import pkg/lib/obmcommon

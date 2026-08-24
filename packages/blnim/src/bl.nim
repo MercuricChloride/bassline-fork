@@ -1,4 +1,3 @@
-include pkg/prelude
 import std/[parseopt, os, posix, strutils]
 import
   cmd/[

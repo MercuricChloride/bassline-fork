@@ -12,8 +12,12 @@ binDir = "bin"
 # Dependencies
 
 requires "nim >= 2.2.10"
-requires "zippy >= 0.10.19"
 requires "nimcrypto >= 0.6.2"
+requires "checksums >= 0.2.2"
+requires "https://github.com/Araq/malebolgia"
+
+requires "benchy >= 0.1.0"
+# ^^ This probably wont stick around
 
 task build_release, "Build for production":
   switch("mm", "orc")

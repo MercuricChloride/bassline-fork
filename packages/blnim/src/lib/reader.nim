@@ -1,4 +1,3 @@
-include pkg/prelude
 import std/[options, strutils]
 
 type

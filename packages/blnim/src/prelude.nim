@@ -1,2 +1,0 @@
-{.experimental: "strictFuncs".}
-{.experimental: "views".}

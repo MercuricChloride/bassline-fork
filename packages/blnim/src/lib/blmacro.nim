@@ -1,5 +1,3 @@
-include pkg/prelude
-
 import std/[macros, strutils]
 import pkg/core
 import pkg/lib/reader
