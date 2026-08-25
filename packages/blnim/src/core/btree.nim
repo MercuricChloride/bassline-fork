@@ -1,28 +1,23 @@
-##[
-  A simple b+ tree
-
-  The surface area here is likely going to change, but conceptually
-  this is used as a lighter "nim-native" version of what's going
-  on in the store.
-]##
 import std/algorithm
 
 const
   M {.intdefine.} = 64
-  ## max children per internal node. 
-  ## 64 seems to be a good sweet spot
+  ## max children per internal node
   maxKeys = M - 1
 
 type
+  Entry*[K, V] = tuple[key: K, val: V]
   NodeKind = enum
     nkLeaf, nkInternal
   Node[K, V] {.acyclic.} = ref object
-    keys: seq[K]
     case kind: NodeKind
     of nkLeaf:
-      vals: seq[V]
+      entries: seq[Entry[K, V]]
+      # we use a single seq so iteration can lend entries
       next: Node[K, V]
     of nkInternal:
+      keys: seq[K]
+      # separators: kids[i] < keys[i] <= kids[i+1]
       kids: seq[Node[K, V]]
 
   BTree*[K, V] = object
@@ -35,6 +30,16 @@ func initBTree*[K, V](): BTree[K, V] =
 func len*[K, V](t: BTree[K, V]): int =
   t.entries
 
+func lowerIdx[K, V](entries: openArray[Entry[K, V]], key: K): int =
+  ## first index whose key is >= key
+  var lo = 0
+  var hi = entries.len
+  while lo < hi:
+    let mid = (lo + hi) shr 1
+    if cmp(entries[mid].key, key) < 0: lo = mid + 1
+    else: hi = mid
+  lo
+
 func leafFor[K, V](t: BTree[K, V], key: K): Node[K, V] =
   ## The leaf whose key range covers `key`
   result = t.root
@@ -44,15 +49,15 @@ func leafFor[K, V](t: BTree[K, V], key: K): Node[K, V] =
 func contains*[K, V](t: BTree[K, V], key: K): bool =
   let leaf = t.leafFor(key)
   if leaf == nil: return false
-  let i = lowerBound(leaf.keys, key)
-  i < leaf.keys.len and leaf.keys[i] == key
+  let i = lowerIdx(leaf.entries, key)
+  i < leaf.entries.len and cmp(leaf.entries[i].key, key) == 0
 
 func `[]`*[K, V](t: BTree[K, V], key: K): V =
   let leaf = t.leafFor(key)
   if leaf != nil:
-    let i = lowerBound(leaf.keys, key)
-    if i < leaf.keys.len and leaf.keys[i] == key:
-      return leaf.vals[i]
+    let i = lowerIdx(leaf.entries, key)
+    if i < leaf.entries.len and cmp(leaf.entries[i].key, key) == 0:
+      return leaf.entries[i].val
   raise newException(KeyError, "key not found")
 
 proc put[K, V](node: Node[K, V], key: K, val: V, grew: var bool):
@@ -62,21 +67,19 @@ proc put[K, V](node: Node[K, V], key: K, val: V, grew: var bool):
   ## the parent. `right` is nil when no split happened
   case node.kind
   of nkLeaf:
-    let i = lowerBound(node.keys, key)
-    if i < node.keys.len and node.keys[i] == key:
-      node.vals[i] = val
+    let i = lowerIdx(node.entries, key)
+    if i < node.entries.len and cmp(node.entries[i].key, key) == 0:
+      node.entries[i].val = val
       return
     grew = true
-    node.keys.insert(key, i)
-    node.vals.insert(val, i)
-    if node.keys.len > maxKeys:
-      let h = node.keys.len div 2
+    node.entries.insert((key, val), i)
+    if node.entries.len > maxKeys:
+      let h = node.entries.len div 2
       let right = Node[K, V](kind: nkLeaf,
-        keys: node.keys[h .. ^1], vals: node.vals[h .. ^1], next: node.next)
-      node.keys.setLen(h)
-      node.vals.setLen(h)
+        entries: node.entries[h .. ^1], next: node.next)
+      node.entries.setLen(h)
       node.next = right
-      result = (right.keys[0], right)
+      result = (right.entries[0].key, right)
   of nkInternal:
     let at = upperBound(node.keys, key)
     let (sep, right) = put(node.kids[at], key, val, grew)
@@ -101,41 +104,70 @@ proc `[]=`*[K, V](t: var BTree[K, V], key: K, val: V) =
   if grew:
     inc t.entries
 
-iterator pairs*[K, V](t: BTree[K, V]): (K, V) =
-  ## All entries in key order, walking the leaf chain.
-  var leaf = t.root
-  if leaf != nil:
-    while leaf.kind == nkInternal:
-      leaf = leaf.kids[0]
-    while leaf != nil:
-      for i in 0 ..< leaf.keys.len:
-        yield (leaf.keys[i], leaf.vals[i])
-      leaf = leaf.next
+func firstLeaf[K, V](t: BTree[K, V]): Node[K, V] =
+  ## the leftmost leaf, or nil when the tree is empty
+  result = t.root
+  if result != nil:
+    while result.kind == nkInternal:
+      result = result.kids[0]
+    if result.entries.len == 0:       # only a root leaf can be empty
+      result = nil
 
-iterator pairsFrom*[K, V](t: BTree[K, V], lo: K): (K, V) =
-  ## Entries with key >= lo, in key order.
+iterator pairs*[K, V](t: BTree[K, V]): lent Entry[K, V] =
+  var leaf = t.firstLeaf
+  while leaf != nil:
+    for i in 0 ..< leaf.entries.len:
+      yield leaf.entries[i]
+    leaf = leaf.next
+
+iterator pairsFrom*[K, V](t: BTree[K, V], lo: K): lent Entry[K, V] =
+  ## Entries with key >= lo
   var leaf = t.leafFor(lo)
   if leaf != nil:
-    var i = lowerBound(leaf.keys, lo)
+    var i = lowerIdx(leaf.entries, lo)
     while leaf != nil:
-      while i < leaf.keys.len:
-        yield (leaf.keys[i], leaf.vals[i])
+      while i < leaf.entries.len:
+        yield leaf.entries[i]
         inc i
       leaf = leaf.next
       i = 0
 
-iterator items*[K, V](t: Btree[K, V]): V =
-  for _, v in t.pairs:
-    yield v
+iterator keys*[K, V](t: BTree[K, V]): lent K =
+  var leaf = t.firstLeaf
+  while leaf != nil:
+    for i in 0 ..< leaf.entries.len:
+      yield leaf.entries[i].key
+    leaf = leaf.next
 
-iterator itemsFrom*[K, V](t: BTree[K, V], lo: K): V =
-  for _, v in t.pairsFrom(lo):
-    yield v
+iterator items*[K, V](t: BTree[K, V]): lent V =
+  var leaf = t.firstLeaf
+  while leaf != nil:
+    for i in 0 ..< leaf.entries.len:
+      yield leaf.entries[i].val
+    leaf = leaf.next
 
-func entries*[K, V](t: BTree[K, V]): iterator: (K, V) {.closure.} =
-  for k, v in t:
-    yield (k, v)
+iterator itemsFrom*[K, V](t: BTree[K, V], lo: K): lent V =
+  for e in t.pairsFrom(lo):
+    yield e.val
 
-func merge*[K, V](t: var BTree[K, V], other: BTree[K, V]) =
+iterator lockstep*[K, V](a, b: BTree[K, V]):
+    (lent Entry[K, V], lent Entry[K, V]) =
+  ## Both trees in key order, entry by entry, for as long as both have entries
+  var la = a.firstLeaf
+  var lb = b.firstLeaf
+  var ia = 0
+  var ib = 0
+  while la != nil and lb != nil:
+    yield (la.entries[ia], lb.entries[ib])
+    inc ia
+    if ia >= la.entries.len:
+      la = la.next
+      ia = 0
+    inc ib
+    if ib >= lb.entries.len:
+      lb = lb.next
+      ib = 0
+
+proc merge*[K, V](t: var BTree[K, V], other: BTree[K, V]) =
   for k, v in other:
     t[k] = v

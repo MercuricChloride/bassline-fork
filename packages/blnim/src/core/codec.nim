@@ -22,6 +22,8 @@
 ## buffer and span capacities, so steady-state encoding and decoding
 ## allocate nothing.
 
+import std/bitops
+
 const
   MaxDepth {.intdefine.} = 64
   MaxPayload = uint32.high
@@ -191,12 +193,29 @@ const
   ]
 
 func isValidUtf8*(bytes: openArray[byte]): bool =
+  ## ASCII runs are skipped a word at a time, jumping straight to the
+  ## first high byte; the DFA only ever touches non-ASCII sequences.
   var state = UTF8_ACCEPT
-  for b in bytes:
-    let byteClass = utf8d[b]
+  var i = 0
+  let n = bytes.len
+  while i < n:
+    if state == UTF8_ACCEPT:
+      while i + 8 <= n:
+        var w: uint64
+        copyMem(addr w, addr bytes[i], 8)
+        let hi = w and 0x8080808080808080'u64
+        if hi != 0:
+          i += countTrailingZeroBits(hi) shr 3
+          break
+        i += 8
+      while i < n and bytes[i] < 0x80:
+        inc i
+      if i >= n: break
+    let byteClass = utf8d[bytes[i]]
     state = int(utf8d[256 + state + int(byteClass)])
     if state == UTF8_REJECT:
       return false
+    inc i
   state == UTF8_ACCEPT
 
 func validate*(buf: openArray[byte], spans: openArray[Span]) =
@@ -211,6 +230,8 @@ func validate*(buf: openArray[byte], spans: openArray[Span]) =
     of vText, vSym:
       guard isValidUtf8(buf.toOpenArray(s.payLo, s.hi - 1)),
         "ill-formed UTF-8 in text"
+    of vRec:
+      guard s.count > 0, "record with no head"
     of vSet:
       var prev = -1
       var j = i + 1

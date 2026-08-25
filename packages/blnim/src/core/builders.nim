@@ -1,5 +1,6 @@
-import ./btree
-export btree
+import std/strutils
+import ./[btree, codec]
+export btree, codec
 
 type
   Kind* = enum
@@ -55,26 +56,41 @@ template diff(a, b) =
   result = cmp(a, b)
   if result != 0: return
 
+func magnitude(x: int): uint64 =
+  if x < 0: 0'u64 - cast[uint64](x) else: uint64(x)
+
+func spellingLen(x: int): int =
+  ## the length of the canonical decimal spelling of x
+  var m = magnitude(x)
+  result = if x < 0: 2 else: 1
+  while m >= 10:
+    m = m div 10
+    inc result
+
 func cmp*(a, b: Value): int =
   diff a.kind, b.kind
   diff a.marked, b.marked
   case a.kind
   of bNil: discard
   of bNum:
-    let
-      sa = $(a.num)
-      sb = $(b.num)
-    diff sa.len, sb.len
-    for i in 0..<min(sa.len, sb.len):
-      diff sa[i], sb[i]
+    # shortlex over the decimal spellings, without spelling them:
+    # length first (the sign counts), then '-' before any digit, then
+    # the digits -- which for equal length and sign is magnitude order
+    let x = a.num
+    let y = b.num
+    diff spellingLen(x), spellingLen(y)
+    let nx = x < 0
+    let ny = y < 0
+    if nx != ny:
+      return if nx: -1 else: 1
+    diff magnitude(x), magnitude(y)
   of bText, bSym:
     diff a.text.len, b.text.len
-    for i in 0..<min(a.text.len, b.text.len):
-      diff a.text[i], b.text[i]
+    result = cmpBytes(a.text.toOpenArrayByte(0, a.text.high),
+                      b.text.toOpenArrayByte(0, b.text.high))
   of bBytes:
     diff a.bytes.len, b.bytes.len
-    for i in 0..<min(a.bytes.len, b.bytes.len):
-      diff a.bytes[i], b.bytes[i]
+    result = cmpBytes(a.bytes, b.bytes)
   of bList, bRec:
     for i in 0 ..< min(a.items.len, b.items.len):
       diff a.items[i], b.items[i]
@@ -82,36 +98,15 @@ func cmp*(a, b: Value): int =
     # which causes shorter frames to be > longer frames
     diff b.items.len, a.items.len
   of bDict:
-    var
-      wa = iterator (): (Value, Value) =
-        for k, v in a.dict: yield (k, v)
-      wb = iterator (): (Value, Value) =
-        for k, v in b.dict: yield (k, v)
-    while true:
-      let
-        (ka, va) = wa()
-        (kb, vb) = wb()
-      if finished(wa) or finished(wb):
-        # looks backwards, but matches that frames are terminated with 0xA0
-        # which causes shorter frames to be > longer frames
-        diff not finished(wb), not finished(wa)
-        break
-      diff ka, kb
-      diff va, vb
+    for ea, eb in lockstep(a.dict, b.dict):
+      diff ea.key, eb.key
+      diff ea.val, eb.val
+    # a shorter frame sorts after the longer: END (0xA0) > any header
+    diff b.dict.len, a.dict.len
   of bSet:
-    var wa = iterator (): Value =
-      for k, _ in a.elements: yield k
-    var wb = iterator (): Value =
-      for k, _ in b.elements: yield k
-    while true:
-      let ka = wa()
-      let kb = wb()
-      if finished(wa) or finished(wb):
-        # looks backwards, but matches that frames are terminated with 0xA0
-        # which causes shorter frames to be > longer frames
-        diff not finished(wb), not finished(wa)
-        break
-      diff ka, kb
+    for ea, eb in lockstep(a.elements, b.elements):
+      diff ea.key, eb.key
+    diff b.elements.len, a.elements.len
 
 func `==`*(a, b: Value): bool =
   cmp(a, b) == 0
@@ -159,3 +154,104 @@ func toValue*[T](xs: seq[T]): Value =
   result = initList()
   for x in xs:
     result.items.add toValue(x)
+
+# ================ Spelling ================
+# Value → canonical bytes. The trees already hold dicts and sets in
+# CE order, so spelling is a straight walk with no sorting; finalize
+# is the one validation point (bad text handed to a constructor
+# surfaces here).
+
+func tag*(k: Kind): ValueTag =
+  ValueTag(ord(k) + 1)
+
+func spell*(e: var Encoder, v: Value) =
+  case v.kind
+  of bNil: e.putNil(v.marked)
+  of bNum: e.putNum(v.num, v.marked)
+  of bText: e.putText(v.text, v.marked)
+  of bSym: e.putSym(v.text, v.marked)
+  of bBytes: e.putBytes(v.bytes, v.marked)
+  of bList, bRec:
+    e.putOpen(tag(v.kind), v.marked)
+    for c in v.items:
+      e.spell(c)
+    e.putClose()
+  of bSet:
+    e.putOpen(vSet, v.marked)
+    for k, _ in v.elements:
+      e.spell(k)
+    e.putClose()
+  of bDict:
+    e.putOpen(vDict, v.marked)
+    for k, val in v.dict:
+      e.spell(k)
+      e.spell(val)
+    e.putClose()
+
+func spell*(v: Value): seq[byte] =
+  ## The vouched spelling of `v`: one Encoder walk, then finalize.
+  var e = initEncoder()
+  e.spell(v)
+  e.finalize()
+
+# ================ Drafting a judged value ================
+
+func directChildren(spans: openArray[Span], i: int): int =
+  ## how many direct children the frame at `i` has: index arithmetic
+  ## only, so a frame's seq is allocated once at the right size
+  var j = i + 1
+  while j <= i + spans[i].count:
+    inc result
+    j += spans[j].count + 1
+
+proc draft*(data: openArray[byte], spans: openArray[Span], i = 0): Value =
+  ## Bring the judged value at `i` into the Nim-owned domain: a copying
+  ## walk over the span list — every payload is copied, nothing points
+  ## back into `data`. No checks: judge already proved shape, content,
+  ## and order, and spans carry the payload offsets.
+  let s = spans[i]
+  template payloadStr(): string =
+    var r = newString(s.hi - s.payLo)
+    if r.len > 0:
+      copyMem(addr r[0], addr data[s.payLo], r.len)
+    r
+  case s.kind
+  of vNil:
+    result = null(s.marked)
+  of vNum:
+    let spelling = payloadStr()
+    try:
+      result = num(int(parseBiggestInt(spelling)), s.marked)
+    except ValueError:
+      raise newException(ValueError, "numeral outside int64: " & spelling)
+  of vText:
+    result = text(payloadStr(), s.marked)
+  of vSym:
+    result = sym(payloadStr(), s.marked)
+  of vBytes:
+    var b = newSeq[byte](s.hi - s.payLo)
+    if b.len > 0:
+      copyMem(addr b[0], addr data[s.payLo], b.len)
+    result = bytes(b, s.marked)
+  of vList, vRec:
+    var kids = newSeqOfCap[Value](directChildren(spans, i))
+    var j = i + 1
+    while j <= i + s.count:
+      kids.add draft(data, spans, j)
+      j += spans[j].count + 1
+    result = if s.kind == vList: initList(kids, s.marked)
+             else: initRec(kids, s.marked)
+  of vSet:
+    result = initSet(s.marked)
+    var j = i + 1
+    while j <= i + s.count:
+      result.elements[draft(data, spans, j)] = true
+      j += spans[j].count + 1
+  of vDict:
+    result = initDict(s.marked)
+    var j = i + 1
+    while j <= i + s.count:
+      let k = draft(data, spans, j)
+      j += spans[j].count + 1
+      result.dict[k] = draft(data, spans, j)
+      j += spans[j].count + 1

@@ -7,7 +7,7 @@
 ## overload it for their own types).
 
 import std/[macros, strutils]
-import pkg/lib/reader
+import pkg/core/reader
 export reader
 
 const HexDigits = {'0' .. '9', 'a' .. 'f', 'A' .. 'F'}

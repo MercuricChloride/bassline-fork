@@ -7,10 +7,10 @@
 ## UTF-8) are codec's, used here so a bad spelling is refused with a
 ## line and column instead of later at finalize. Sets and dicts land
 ## in their trees as they are read, so canonical order is by
-## construction; duplicates are refused, not repaired.
+## construction
 
 import std/strutils
-import core/[builders, codec]
+import ./[builders, codec]
 export builders
 
 type
