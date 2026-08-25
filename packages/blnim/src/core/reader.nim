@@ -180,9 +180,9 @@ proc datum(s: string, pos: var int): Value =
       result = initSet()
       var m = first
       while true:
-        if m in result.elements:
+        if m in result.els:
           fail(s, pos, "duplicate set member")
-        result.elements[m] = true
+        result.els[m] = true
         skipWs(s, pos)
         if pos >= s.len:
           fail(s, pos, "unclosed {")
@@ -345,7 +345,7 @@ func `$`*(v: Value): string =
         "(" & parts & ")"
     of bSet:
       var parts = ""
-      for k, _ in v.elements:
+      for k, _ in v.els:
         if parts.len > 0:
           parts.add ' '
         parts.add $k

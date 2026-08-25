@@ -23,7 +23,7 @@ type
     of bDict:
       dict*: BTree[Value, Value]
     of bSet:
-      elements*: BTree[Value, bool]
+      els*: BTree[Value, bool]
 
 func null*(marked = false): Value =
   Value(kind: bNil, marked: marked)
@@ -50,7 +50,7 @@ func initDict*(marked = false): Value =
   Value(kind: bDict, dict: initBTree[Value, Value](), marked: marked)
 
 func initSet*(marked = false): Value =
-  Value(kind: bSet, elements: initBTree[Value, bool](), marked: marked)
+  Value(kind: bSet, els: initBTree[Value, bool](), marked: marked)
 
 template diff(a, b) =
   result = cmp(a, b)
@@ -104,9 +104,9 @@ func cmp*(a, b: Value): int =
     # a shorter frame sorts after the longer: END (0xA0) > any header
     diff b.dict.len, a.dict.len
   of bSet:
-    for ea, eb in lockstep(a.elements, b.elements):
+    for ea, eb in lockstep(a.els, b.els):
       diff ea.key, eb.key
-    diff b.elements.len, a.elements.len
+    diff b.els.len, a.els.len
 
 func `==`*(a, b: Value): bool =
   cmp(a, b) == 0
@@ -136,7 +136,7 @@ func initRec*(items: sink seq[Value], marked = false): Value =
 proc initSet*(items: sink seq[Value], marked = false): Value =
   result = initSet(marked)
   for x in items:
-    result.elements[x] = true
+    result.els[x] = true
 
 proc initDict*(entries: sink seq[(Value, Value)], marked = false): Value =
   result = initDict(marked)
@@ -178,7 +178,7 @@ func spell*(e: var Encoder, v: Value) =
     e.putClose()
   of bSet:
     e.putOpen(vSet, v.marked)
-    for k, _ in v.elements:
+    for k, _ in v.els:
       e.spell(k)
     e.putClose()
   of bDict:
@@ -245,7 +245,7 @@ proc draft*(data: openArray[byte], spans: openArray[Span], i = 0): Value =
     result = initSet(s.marked)
     var j = i + 1
     while j <= i + s.count:
-      result.elements[draft(data, spans, j)] = true
+      result.els[draft(data, spans, j)] = true
       j += spans[j].count + 1
   of vDict:
     result = initDict(s.marked)
