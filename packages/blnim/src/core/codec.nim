@@ -1,28 +1,46 @@
-## codec.nim — the wire layer: canonical CE bytes in and out.
-##
-## The laws live in exactly two places, and nothing else may re-derive
-## header math (that invariant is what keeps validation single-sourced):
-##
-##   * SHAPE laws (tags, mark bits, minimal length tiers, END balance,
-##     truncation) — unviolable by construction on the way out (the
-##     emitter owns the header math); checked by `scan` on the way in,
-##     which also builds the span list.
-##   * CONTENT laws (int spellings, UTF-8, set order/dedup, dict
-##     parity/key order) — ONE function, `validate(buf, spans)`,
-##     invoked by finalize (encode) and judge (decode) alike.
-##
-## The Encoder accumulates spans as a byproduct of writing (a frame's
-## span is pushed as a placeholder at open and patched at close), so
-## finalize never re-parses its own output. `scan` produces the same
+## This module deals with ce bytes alongside their encoding & decoding.
+## 
+## Validation of ce bytes is split into two passes:
+## 
+## 1. Shape validation
+## 
+## This step validates that tags & marks are valid, atoms have
+## minimal length tiers, END bytes are balanced etc.
+## This is all checked by `scan` on the way in
+## 
+## 2. Content validation
+## 
+## This step validates that ints have valid spellings, utf8
+## representation is correct, sets & dicts are ascending.
+## This is invoked by `finalize` when encoding, and `judge` when decoding.
+## 
+## We expose 2 objects for working with this: `Encoder` and `Decoder`.
+## 
+## The `Encoder` owns it's byte buffer, but `Decoder` does not.
+## It's very important that you don't mutate the decoders buffer randomly
+## because all of the offsets are specific to that buffer.
+## 
+## An `Encoder`:
+## Accumulates spans as we write to it so
+## finalize never has to re parse. `scan` produces the same
 ## preorder span list from wire bytes. Spans carry payload offsets, so
 ## downstream consumers (materializers, extractors, payload-law
 ## buckets) never touch a header byte.
 ##
-## Both Encoder and Decoder are reusable scratch: reset/judge keep the
-## buffer and span capacities, so steady-state encoding and decoding
-## allocate nothing.
+## Two doors on the way in. The bare `scan`/`judge(data, ...)` gate a
+## whole buffer: one value, nothing before or after.
+##
+## A `Decoder` reads
+## values one at a time out of a stream that is still arriving: it
+## holds the spans of the value in progress, its open frames, and the
+## read head, and its `scan`/`judge` answer false -- not a refusal --
+## while the bytes so far are only a prefix. Refusals are prefix-closed:
+## nothing scan refuses could be repaired by more bytes.
+##
+## Encoder and Decoder are reusable: reset keeps the buffer and span
+## capacities, so steady-state encoding and decoding don't re-allocate
 
-import std/bitops
+from std/bitops import countTrailingZeroBits
 
 const
   MaxDepth {.intdefine.} = 64
@@ -37,17 +55,29 @@ type
     vList, vRec, vDict, vSet
 
   Span* = object
-    lo*, hi*, payLo*, count*: int   # [lo, hi) whole spelling; payload at payLo
+    lo*, hi*, payLo*, count*: int
+    # lo, hi is the whole value span
+    # payload starts at payLo
+    # and count represents how many children a frame has
     kind*: ValueTag
     marked*: bool
+    # kind and mark are brought along so we don't have to deref the header byte
 
   Encoder* = object
     buf*: seq[byte]
     spans*: seq[Span]
-    stack: seq[int]         # spans indices of open frames
+    stack: seq[int]
+    ## spans indices of open frames
 
   Decoder* = object
+    ## a reading in progress over a growing stream of bytes: the spans
+    ## of the value being read, its open frames, and the read head
     spans*: seq[Span]
+    stack: seq[int]
+    ## spans indices of open frames
+    pos*: int
+    ## where the next unit starts; after a whole
+    ## value, where it ends
 
   CodecError* = object of CatchableError
 
@@ -267,26 +297,32 @@ func finalize*(e: sink Encoder): seq[byte] =
 
 # ================ Decoding ================
 
-func scan*(data: openArray[byte], spans: var seq[Span]) =
-  ## Enforces shape constraints and builds a span list 
-  ## from untrusted bytes.
-  ## This checks minimal length forms, balanced frames,
-  ## bounded depth.
-  ## This does !NOT! enforce content validation, `validate`
-  ## does that. You can use `judge` which composes the two.
-  spans.setLen 0
-  var stack = newSeqOfCap[int](MaxDepth)
-  var pos = 0
+func reset*(d: var Decoder) =
+  d.spans.setLen 0
+  d.stack.setLen 0
+  d.pos = 0
+
+func scanFrom(data: openArray[byte], spans: var seq[Span],
+              stack: var seq[int], pos: var int): bool =
+  ## The shape pass, resumable: minimal length forms, balanced frames,
+  ## bounded depth, and the span list as a byproduct. With no frame
+  ## open it begins a value at `pos`, otherwise it continues the one in
+  ## progress. True when a whole value has been read (it ends at
+  ## `pos`); false when `data` ran out first -- a prefix is not yet a
+  ## judgment: call again once `data` has grown (the same bytes,
+  ## extended). Malformation refuses, and no extension of a refused
+  ## prefix could have been well-formed. Content laws are `validate`'s.
+  guard pos <= data.len, "the stream shrank"
+  if stack.len == 0: spans.setLen 0
   while true:
-    guard pos < data.len, "truncated: expected a value"
+    if pos >= data.len: return false
     let h = data[pos]
+    var next = pos + 1      # a unit commits to pos only once it is whole
     if h == EndByte:
       guard stack.len > 0, "stray END with no open frame"
-      inc pos
       let i = stack.pop()
-      spans[i].hi = pos
+      spans[i].hi = next
       spans[i].count = spans.len - i - 1
-      if stack.len == 0: break
     else:
       let tag = int(h shr 4)
       guard tag in 1 .. 9, "invalid tag " & $tag
@@ -294,41 +330,49 @@ func scan*(data: openArray[byte], spans: var seq[Span]) =
         kind = ValueTag(tag)
         marked = (h and MarkBit) != 0
         lbits = int(h and 7)
-        lo = pos
-      inc pos
       if kind == vNil:
         guard lbits == 0, "nil with length bits"
-        spans.add Span(lo: lo, payLo: pos, hi: pos, kind: kind, marked: marked)
+        spans.add Span(lo: pos, payLo: next, hi: next, kind: kind, marked: marked)
       elif kind in FrameTags:
         guard lbits == 0, "frame with length bits"
         guard stack.len < MaxDepth, "nesting deeper than MaxDepth"
         stack.add spans.len
-        spans.add Span(lo: lo, payLo: pos, kind: kind, marked: marked)
+        spans.add Span(lo: pos, payLo: next, kind: kind, marked: marked)
+        pos = next
         # frame still open
         continue
       else:
         var n = lbits
         if n == 7:
-          guard pos < data.len, "truncated u8 length"
-          n = int(data[pos])
-          inc pos
+          if next >= data.len: return false
+          n = int(data[next])
+          inc next
           if n == 255:
-            guard pos + 4 <= data.len, "truncated u32 length"
+            if next + 4 > data.len: return false
             n = 0
             for _ in 0 ..< 4:
-              n = (n shl 8) or int(data[pos])
-              inc pos
+              n = (n shl 8) or int(data[next])
+              inc next
             guard n >= 255, "non-minimal u32 length tier"
           else:
             guard n >= 7, "non-minimal u8 length tier"
-        guard data.len - pos >= n, "truncated payload"
-        spans.add Span(lo: lo, payLo: pos, hi: pos + n,
+        if data.len - next < n: return false
+        spans.add Span(lo: pos, payLo: next, hi: next + n,
                        kind: kind, marked: marked)
-        pos += n
-      if stack.len == 0: 
-        # completed a top-level value
-        break
+        next += n
+    pos = next
+    if stack.len == 0: return true
+
+func scan*(data: openArray[byte], spans: var seq[Span]) =
+  ## one whole value and nothing else: the shape gate for a buffer
+  var stack = newSeqOfCap[int](MaxDepth)
+  var pos = 0
+  guard scanFrom(data, spans, stack, pos), "truncated value"
   guard pos == data.len, "trailing bytes after value"
+
+func scan*(d: var Decoder, data: openArray[byte]): bool =
+  ## the next whole value out of a stream, or not yet
+  scanFrom(data, d.spans, d.stack, d.pos)
 
 func judge*(data: openArray[byte], spans: var seq[Span]) =
   ## This simply composes scan + validate to enforce structural
@@ -336,8 +380,10 @@ func judge*(data: openArray[byte], spans: var seq[Span]) =
   scan(data, spans)
   validate(data, spans)
 
-func judge*(d: var Decoder, data: openArray[byte]) =
-  judge(data, d.spans)
+func judge*(d: var Decoder, data: openArray[byte]): bool =
+  ## the next whole, valid value out of a stream, or not yet
+  result = d.scan(data)
+  if result: validate(data, d.spans)
 
 func judge*(data: openArray[byte]) =
   var spans: seq[Span]
