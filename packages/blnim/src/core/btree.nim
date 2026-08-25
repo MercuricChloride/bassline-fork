@@ -52,13 +52,20 @@ func contains*[K, V](t: BTree[K, V], key: K): bool =
   let i = lowerIdx(leaf.entries, key)
   i < leaf.entries.len and cmp(leaf.entries[i].key, key) == 0
 
-func `[]`*[K, V](t: BTree[K, V], key: K): V =
-  let leaf = t.leafFor(key)
-  if leaf != nil:
-    let i = lowerIdx(leaf.entries, key)
-    if i < leaf.entries.len and cmp(leaf.entries[i].key, key) == 0:
-      return leaf.entries[i].val
-  raise newException(KeyError, "key not found")
+func find[K, V](node: Node[K, V], key: K): lent V =
+  case node.kind
+  of nkLeaf:
+    let i = lowerIdx(node.entries, key)
+    if i < node.entries.len and cmp(node.entries[i].key, key) == 0:
+      return node.entries[i].val
+    raise newException(KeyError, "key not found")
+  of nkInternal:
+    return find(node.kids[upperBound(node.keys, key)], key)
+
+func `[]`*[K, V](t: BTree[K, V], key: K): lent V =
+  if t.root == nil:
+    raise newException(KeyError, "key not found")
+  return find(t.root, key)
 
 proc put[K, V](node: Node[K, V], key: K, val: V, grew: var bool):
     tuple[sep: K, right: Node[K, V]] =

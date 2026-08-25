@@ -15,6 +15,9 @@ export builders
 
 type
   ReadError* = object of CatchableError
+  Incomplete* = object of ReadError
+    ## thrown when a value is a partial prefix of a valid value one
+    ## but not totally completed
 
 const
   Ws = {' ', '\t', '\n', '\r'}
@@ -34,7 +37,7 @@ func isBareSpelling*(s: string): bool =
     if c in Delims or ord(c) < 0x20: return false
   true
 
-func fail(s: string, pos: int, msg: string) {.noreturn.} =
+func where(s: string, pos: int): string =
   var
     line = 1
     bol = 0
@@ -42,8 +45,13 @@ func fail(s: string, pos: int, msg: string) {.noreturn.} =
     if s[i] == '\n':
       inc line
       bol = i + 1
-  raise
-    newException(ReadError, "line " & $line & ", col " & $(pos - bol + 1) & ": " & msg)
+  "line " & $line & ", col " & $(pos - bol + 1) & ": "
+
+func fail(s: string, pos: int, msg: string) {.noreturn.} =
+  raise newException(ReadError, where(s, pos) & msg)
+
+func incomplete(s: string, pos: int, msg: string) {.noreturn.} =
+  raise newException(Incomplete, where(s, pos) & msg)
 
 func skipWs(s: string, pos: var int) =
   while pos < s.len:
@@ -73,14 +81,14 @@ func quotedScan(s: string, pos: var int, q: char): string =
   inc pos
   while true:
     if pos >= s.len:
-      fail(s, pos, "unterminated " & what)
+      incomplete(s, pos, "unterminated " & what)
     let c = s[pos]
     if c == q:
       inc pos
       break
     elif c == '\\':
       if pos + 1 >= s.len:
-        fail(s, pos, "unterminated " & what)
+        incomplete(s, pos, "unterminated " & what)
       let e = s[pos + 1]
       if e == q:
         result.add q
@@ -113,7 +121,7 @@ proc datum(s: string, pos: var int): Value =
     while true:
       skipWs(s, pos)
       if pos >= s.len:
-        fail(s, pos, "unclosed [")
+        incomplete(s, pos, "unclosed [")
       if s[pos] == ']':
         inc pos
         break
@@ -122,14 +130,14 @@ proc datum(s: string, pos: var int): Value =
     inc pos
     skipWs(s, pos)
     if pos >= s.len:
-      fail(s, pos, "unclosed (")
+      incomplete(s, pos, "unclosed (")
     if s[pos] == ')':
       fail(s, pos, "record with no head")
     result = initRec(value(s, pos))
     while true:
       skipWs(s, pos)
       if pos >= s.len:
-        fail(s, pos, "unclosed (")
+        incomplete(s, pos, "unclosed (")
       if s[pos] == ')':
         inc pos
         break
@@ -140,7 +148,7 @@ proc datum(s: string, pos: var int): Value =
     inc pos
     skipWs(s, pos)
     if pos >= s.len:
-      fail(s, pos, "unclosed {")
+      incomplete(s, pos, "unclosed {")
     if s[pos] == '}':
       inc pos
       return initSet()
@@ -148,7 +156,7 @@ proc datum(s: string, pos: var int): Value =
       inc pos
       skipWs(s, pos)
       if pos >= s.len:
-        fail(s, pos, "unclosed {")
+        incomplete(s, pos, "unclosed {")
       if s[pos] != '}':
         fail(s, pos, "'{:' is the empty dictionary; expected '}'")
       inc pos
@@ -156,7 +164,7 @@ proc datum(s: string, pos: var int): Value =
     let first = value(s, pos)
     skipWs(s, pos)
     if pos >= s.len:
-      fail(s, pos, "unclosed {")
+      incomplete(s, pos, "unclosed {")
     if s[pos] == ':':
       inc pos
       result = initDict()
@@ -167,13 +175,15 @@ proc datum(s: string, pos: var int): Value =
         result.dict[k] = value(s, pos)
         skipWs(s, pos)
         if pos >= s.len:
-          fail(s, pos, "unclosed {")
+          incomplete(s, pos, "unclosed {")
         if s[pos] == '}':
           inc pos
           break
         k = value(s, pos)
         skipWs(s, pos)
-        if pos >= s.len or s[pos] != ':':
+        if pos >= s.len:
+          incomplete(s, pos, "dict entry needs ':' after its key")
+        if s[pos] != ':':
           fail(s, pos, "dict entry needs ':' after its key")
         inc pos
     else:
@@ -185,7 +195,7 @@ proc datum(s: string, pos: var int): Value =
         result.els[m] = true
         skipWs(s, pos)
         if pos >= s.len:
-          fail(s, pos, "unclosed {")
+          incomplete(s, pos, "unclosed {")
         if s[pos] == '}':
           inc pos
           break
@@ -255,13 +265,13 @@ proc datum(s: string, pos: var int): Value =
 proc value(s: string, pos: var int): Value =
   skipWs(s, pos)
   if pos >= s.len:
-    fail(s, pos, "expected a value")
+    incomplete(s, pos, "expected a value")
   var prefixMarked = false
   if s[pos] == '!':
     # a mark in front belongs to a frame; it must touch the bracket
     inc pos
     if pos >= s.len:
-      fail(s, pos, "mark with no value")
+      incomplete(s, pos, "mark with no value")
     if s[pos] == '!':
       fail(s, pos, "repeated mark")
     if s[pos] in Ws or s[pos] == ';':
@@ -305,64 +315,210 @@ proc readValue*(text: string): Value =
 
 ## ================ PRINTING ================
 
+# ================ Printing ================
+# One printer. `pretty` lays a value out within a width: a frame that
+# fits stays on one line; one that does not opens with its members
+# aligned under the first (a record's after its head), a dict one
+# entry per line, a run of atoms filled as many per line as fit, and
+# the closer hugging the last member. `$` is the same printer with no
+# width at all. Whatever the layout, the reader reads it back.
+
 func escaped(s: string, q: char): string =
+  ## the reader's escapes -- \q \\ \n \t \r -- so an atom is one line
   for c in s:
-    if c == q or c == '\\':
-      result.add '\\'
-    result.add c
+    case c
+    of '\\': result.add "\\\\"
+    of '\n': result.add "\\n"
+    of '\t': result.add "\\t"
+    of '\r': result.add "\\r"
+    else:
+      if c == q: result.add '\\'
+      result.add c
+
+func escapedLen(s: string, q: char): int =
+  for c in s:
+    inc result
+    if c == q or c in {'\\', '\n', '\t', '\r'}: inc result
+
+func atom(v: Value): string =
+  ## the spelling of an atom, mark included
+  case v.kind
+  of bNil: result = "nil"
+  of bNum: result = $v.num
+  of bSym:
+    result = if isBareSpelling(v.text): v.text
+             else: "'" & escaped(v.text, '\'') & "'"
+  of bText: result = "\"" & escaped(v.text, '"') & "\""
+  of bBytes:
+    result = "0x"
+    for b in v.bytes: result.add b.toHex.toLowerAscii
+  else: discard
+  if v.marked: result.add '!'
+
+func atomLen(v: Value): int =
+  ## atom(v).len without spelling it
+  case v.kind
+  of bNil: result = 3
+  of bNum: result = spellingLen(v.num)
+  of bSym:
+    result = if isBareSpelling(v.text): v.text.len
+             else: 2 + escapedLen(v.text, '\'')
+  of bText: result = 2 + escapedLen(v.text, '"')
+  of bBytes: result = 2 + 2 * v.bytes.len
+  else: discard
+  if v.marked: inc result
+
+func opener(v: Value): string =
+  if v.marked: result.add '!'
+  case v.kind
+  of bList: result.add '['
+  of bRec: result.add '('
+  else: result.add '{'
+
+func closer(v: Value): char =
+  case v.kind
+  of bList: ']'
+  of bRec: ')'
+  else: '}'
+
+func members(v: Value): int =
+  case v.kind
+  of bList, bRec: v.items.len
+  of bSet: v.els.len
+  of bDict: v.dict.len
+  else: 0
+
+template eachMember(v: Value, m, body: untyped) =
+  ## the members of a list, record or set, lent
+  case v.kind
+  of bList, bRec:
+    for m in v.items: body
+  of bSet:
+    for m in v.els.keys: body
+  else: discard
+
+func flatLen(v: Value, room: int): int =
+  ## the width of the one-line spelling -- or any number past `room`,
+  ## answered as soon as the value is known not to fit
+  if v.kind notin FrameKinds:
+    return atomLen(v)
+  if v.kind == bDict and v.dict.len == 0:
+    return opener(v).len + 2                # {:}
+  result = opener(v).len + 1                # opener and closer
+  var first = true
+  if v.kind == bDict:
+    for k, val in v.dict:
+      if not first: inc result
+      first = false
+      result += flatLen(k, room - result) + 2   # ": "
+      result += flatLen(val, room - result)
+      if result > room: return
+  else:
+    eachMember(v, m):
+      if not first: inc result
+      first = false
+      result += flatLen(m, room - result)
+      if result > room: return
+
+func column(o: string): int =
+  ## where the next character lands on the current line
+  var i = o.len
+  while i > 0 and o[i - 1] != '\n': dec i
+  o.len - i
+
+func newline(o: var string, align: int) =
+  o.add '\n'
+  for _ in 0 ..< align: o.add ' '
+
+func putFlat(o: var string, v: Value) =
+  if v.kind notin FrameKinds:
+    o.add atom(v)
+    return
+  o.add opener(v)
+  if v.kind == bDict and v.dict.len == 0:
+    o.add ':'
+  var first = true
+  if v.kind == bDict:
+    for k, val in v.dict:
+      if not first: o.add ' '
+      first = false
+      o.putFlat k
+      o.add ": "
+      o.putFlat val
+  else:
+    eachMember(v, m):
+      if not first: o.add ' '
+      first = false
+      o.putFlat m
+  o.add closer(v)
+
+func put(o: var string, v: Value, width, trail: int)
+
+func putMembers(o: var string, v: Value, skip, align, width, trail: int) =
+  ## the members of a list, set or record (past its head): the first
+  ## at the current column, the rest aligned with it -- filled as many
+  ## per line as fit when all are atoms, else one per line
+  let n = members(v)
+  var fill = true
+  var i = 0
+  eachMember(v, m):
+    if i >= skip and m.kind in FrameKinds: fill = false
+    inc i
+  i = 0
+  eachMember(v, m):
+    if i >= skip:
+      let after = if i == n - 1: 1 + trail else: 0   # the closers to come
+      if i > skip:
+        if fill and o.column + 1 + atomLen(m) + after <= width:
+          o.add ' '
+        else:
+          o.newline(align)
+      o.put(m, width, after)
+    inc i
+
+func put(o: var string, v: Value, width, trail: int) =
+  ## `v` at the current column: flat when it fits with `trail`
+  ## characters still to come on its last line, else opened
+  if v.kind notin FrameKinds or width == high(int) or members(v) == 0:
+    o.putFlat v
+    return
+  let col = o.column
+  if col + flatLen(v, width - col - trail) + trail <= width:
+    o.putFlat v
+    return
+  o.add opener(v)
+  case v.kind
+  of bDict:
+    let align = o.column
+    var i = 0
+    for k, val in v.dict:
+      if i > 0: o.newline(align)
+      o.put(k, width, 2)
+      o.add ": "
+      o.put(val, width, if i == v.dict.len - 1: 1 + trail else: 0)
+      inc i
+  of bRec:
+    let only = v.items.len == 1
+    o.put(v.items[0], width, if only: 1 + trail else: 0)
+    if not only:
+      var align = o.column + 1
+      if align > width div 2:
+        # too wide a head to align after: the members go under it
+        align = col + opener(v).len
+        o.newline(align)
+      else:
+        o.add ' '
+      o.putMembers(v, 1, align, width, trail)
+  else:
+    o.putMembers(v, 0, o.column, width, trail)
+  o.add closer(v)
+
+func pretty*(v: Value, width = 80): string =
+  ## `v` laid out within `width` columns
+  result.put(v, width, 0)
 
 func `$`*(v: Value): string =
   ## rec (…), list […], set {…} ({} empty), dict {k: v …} ({:} empty).
   ## The mark is a prefix on frames and a suffix on atoms. Symbols are
   ## bare when they read back as themselves, single-quoted otherwise.
-  let core =
-    case v.kind
-    of bNil:
-      "nil"
-    of bNum:
-      $v.num
-    of bSym:
-      if isBareSpelling(v.text):
-        v.text
-      else:
-        "'" & escaped(v.text, '\'') & "'"
-    of bText:
-      "\"" & escaped(v.text, '"') & "\""
-    of bBytes:
-      var hex = "0x"
-      for b in v.bytes:
-        hex.add b.toHex.toLowerAscii
-      hex
-    of bList, bRec:
-      var parts = ""
-      for c in v.items:
-        if parts.len > 0:
-          parts.add ' '
-        parts.add $c
-      if v.kind == bList:
-        "[" & parts & "]"
-      else:
-        "(" & parts & ")"
-    of bSet:
-      var parts = ""
-      for k, _ in v.els:
-        if parts.len > 0:
-          parts.add ' '
-        parts.add $k
-      "{" & parts & "}"
-    of bDict:
-      if v.dict.len == 0:
-        "{:}"
-      else:
-        var parts = ""
-        for k, val in v.dict:
-          if parts.len > 0:
-            parts.add ' '
-          parts.add $k & ": " & $val
-        "{" & parts & "}"
-  if not v.marked:
-    core
-  elif v.kind in FrameKinds:
-    "!" & core
-  else:
-    core & "!"
+  pretty(v, high(int))

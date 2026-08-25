@@ -41,6 +41,7 @@
 ## capacities, so steady-state encoding and decoding don't re-allocate
 
 from std/bitops import countTrailingZeroBits
+from std/endians import littleEndian64
 
 const
   MaxDepth {.intdefine.} = 64
@@ -225,6 +226,9 @@ const
 func isValidUtf8*(bytes: openArray[byte]): bool =
   ## ASCII runs are skipped a word at a time, jumping straight to the
   ## first high byte; the DFA only ever touches non-ASCII sequences.
+  ## The word is loaded little-endian on every host, so the first byte
+  ## in memory is the low lane and the lowest set bit of the mask is
+  ## the first high byte.
   var state = UTF8_ACCEPT
   var i = 0
   let n = bytes.len
@@ -232,7 +236,7 @@ func isValidUtf8*(bytes: openArray[byte]): bool =
     if state == UTF8_ACCEPT:
       while i + 8 <= n:
         var w: uint64
-        copyMem(addr w, addr bytes[i], 8)
+        littleEndian64(addr w, addr bytes[i])
         let hi = w and 0x8080808080808080'u64
         if hi != 0:
           i += countTrailingZeroBits(hi) shr 3

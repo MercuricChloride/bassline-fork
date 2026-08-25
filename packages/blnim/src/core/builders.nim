@@ -59,7 +59,7 @@ template diff(a, b) =
 func magnitude(x: int): uint64 =
   if x < 0: 0'u64 - cast[uint64](x) else: uint64(x)
 
-func spellingLen(x: int): int =
+func spellingLen*(x: int): int =
   ## the length of the canonical decimal spelling of x
   var m = magnitude(x)
   result = if x < 0: 2 else: 1
@@ -110,6 +110,8 @@ func cmp*(a, b: Value): int =
 
 func `==`*(a, b: Value): bool =
   cmp(a, b) == 0
+func `!=`*(a, b: Value): bool =
+  cmp(a, b) != 0
 func `<`*(a, b: Value): bool =
   cmp(a, b) < 0
 func `>`*(a, b: Value): bool =
