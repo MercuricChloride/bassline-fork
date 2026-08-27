@@ -37,9 +37,6 @@ var
 
 func newMsg*(
   value: Value; onReply: Send = nil; gas = defaultGas): Msg =
-  doAssert(
-    gas != 0,
-    "gas cannot be 0 initially. Use -1 for unbounded messages")
   Msg(value: value, onReply: onReply, gas: gas)
 
 func gasLeft*(msg: Msg): int =
@@ -55,6 +52,9 @@ func bounded*(msg: Msg): bool =
 func exhausted*(msg: Msg): bool =
   msg.gas == 0
 
+proc starve*(msg: Msg) =
+  msg.gas = 0
+
 proc reply*(msg, res: Msg): bool {.discardable.} =
   if msg.exhausted: return
   if msg.gas > 0:
@@ -65,11 +65,30 @@ proc reply*(msg, res: Msg): bool {.discardable.} =
   else:
     defaultMsgSend(res)
 
+proc fork*(msg: Msg, gas = msg.gas): Msg =
+  proc onReply(res: Msg): bool =
+    msg.reply(res)
+  newMsg(msg.value, onReply, gas)
+
 proc reply*(msg: Msg, value: Value, onReply: Send = nil): bool {.discardable.} =
   msg.reply(newMsg(value, onReply))
 
+proc send*(s: Send, m: Msg): bool {.discardable.} =
+  s(m)
+
 proc send*(s: Send; value: Value; onReply: Send = nil): bool {.discardable.} =
   s(newMsg(value, onReply))
+
+proc alt*(msg: Msg, sends: openArray[Send]): bool =
+  for s in sends:
+    result = s(msg)
+    if result: return
+
+proc fanout*(msg: Msg, sends: openArray[Send]): bool =
+  result = true
+  for s in sends:
+    let accepted = s(msg)
+    result = result and accepted
 
 template logger*(s): Send =
   proc(msg: Msg): bool =

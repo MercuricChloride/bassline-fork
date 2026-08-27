@@ -2,16 +2,6 @@ import pkg/core
 import pkg/lib/[msg, ops]
 export msg, ops
 
-template router*(name, body: untyped) =
-  ##[
-  Defines a named send with a fallthrough
-  to `defaultRoute`.
-  Used in tandem with `route`
-  ]##
-  proc name(msg {.inject.}: Msg): bool {.discardable.} =
-    body
-    result = defaultRoute(msg)
-
 template router*(body: untyped): Send =
   ##[
   Defines an anonymous send with a fallthrough
@@ -22,6 +12,14 @@ template router*(body: untyped): Send =
   proc(msg {.inject.}: Msg): bool =
     body
     result = defaultRoute(msg)
+
+template router*(name, body: untyped) =
+  ##[
+  Defines a named send with a fallthrough
+  to `defaultRoute`.
+  Used in tandem with `route`
+  ]##
+  let name {.inject.} : Send  = router(body)
 
 template route*(body: untyped) {.dirty.} =
   ##[
@@ -83,18 +81,20 @@ when isMainModule:
     accept msg.value == pong:
       msg.reply what
 
+  proc handler(msg: Msg): bool =
+    echo msg.value
+
   proc doPing() =
     var count: int
-    while count < 100_000:
+    while count < 5:
       inc count
       if count mod 100 == 0:
         echo count
-      pingPong.send ping
+      let m = newMsg(ping, handler, 1)
+      pingPong.send m.fork
+      pingPong.send m
       pingPong.send pong
-  
-  proc handler(msg: Msg): bool =
-    echo msg.value
-  
+
   router runner:
     accept msg.value == help:
       msg.reply text"this is a command runner"
