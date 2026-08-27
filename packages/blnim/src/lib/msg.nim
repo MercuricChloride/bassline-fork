@@ -2,11 +2,26 @@ import pkg/core
 
 type
   Send* = proc(m: Msg): bool
-  ## A send is a procedure that accepts a message
-  ## Returning whether the message was understood
-  ## enough to be processed
+  ##[
+  A send is a procedure that accepts a message.
+  
+  The return value of a send is whether the
+  message was understood enough to be processed.
+
+  It does NOT mean that it was totally understood
+  or correct etc.
+  ]##
+
   Msg* = ref object
-    ## A message is a dynamic location
+    ##[
+    A message is a dynamic location and
+    can be replied to using msg.reply(aMsg)
+
+    Messages with gas support a limited number
+    of replies. This can be checked with
+    msg.gasLeft, and messages with gas < 0
+    support unbounded replies.
+    ]##
     value*: Value
     onReply: Send
     gas: int
@@ -21,17 +36,29 @@ var
 # ================ Messages ================
 
 func newMsg*(
-  value: Value; 
-  onReply: Send = nil; 
-  gas = defaultGas): Msg =
+  value: Value; onReply: Send = nil; gas = defaultGas): Msg =
+  doAssert(
+    gas != 0,
+    "gas cannot be 0 initially. Use -1 for unbounded messages")
   Msg(value: value, onReply: onReply, gas: gas)
 
 func gasLeft*(msg: Msg): int =
   msg.gas
 
+func bounded*(msg: Msg): bool =
+  ##[
+  Whether or not msg has a bound on how
+  many replies it can support
+  ]##
+  msg.gas >= 0
+
+func exhausted*(msg: Msg): bool =
+  msg.gas == 0
+
 proc reply*(msg, res: Msg): bool {.discardable.} =
-  if msg.gas == 0: return
-  elif msg.gas > 0: dec msg.gas
+  if msg.exhausted: return
+  if msg.gas > 0:
+    dec msg.gas
 
   if msg.onReply != nil:
     msg.onReply(res)

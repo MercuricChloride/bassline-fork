@@ -111,6 +111,9 @@ proc `[]=`*[K, V](t: var BTree[K, V], key: K, val: V) =
   if grew:
     inc t.entries
 
+proc incl*[T](t: var BTree[T, bool], val: T) =
+  t[val] = true
+
 func firstLeaf[K, V](t: BTree[K, V]): Node[K, V] =
   ## the leftmost leaf, or nil when the tree is empty
   result = t.root
