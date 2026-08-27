@@ -6,6 +6,25 @@
 import pkg/core
 import pkg/lib/blmacro
 
+func contains*(v, key: Value): bool =
+  case v.kind
+  of bSet:
+    key in v.els
+  of bDict:
+    key in v.dict
+  else:
+    raise newException(ValueError, "contains requires a set / dict")
+
+func `[]`*(v, key: Value): lent Value =
+  case v.kind
+  of bList, bRec:
+    doAssert key.kind == bNum, "[] for a list requires an index"
+    return v.items[key.num]
+  of bDict:
+    return v.dict[key]
+  else:
+    raise newException(ValueError, "[] requires a list, record, or dict")
+
 func similar*(v, examplar: Value): bool =
   if examplar.kind != v.kind: return
   if examplar.marked != v.marked: return

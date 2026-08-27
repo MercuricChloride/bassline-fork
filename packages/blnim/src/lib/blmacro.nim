@@ -183,9 +183,8 @@ proc build(n: NimNode, marked: bool): NimNode =
     # name is written parenthesised -- (%h)(a b) -- and reads as one
     var head: NimNode
     case n[0].kind
-    of nnkIdent, nnkSym, nnkAccQuoted:
-      head = build(n[0], false)
-    of nnkPar, nnkPrefix:
+    of nnkIdent, nnkSym, nnkAccQuoted,
+      nnkPar, nnkPrefix:
       head = build(n[0], false)
     else:
       bad(n[0], "a record's head is a name or a parenthesised value")
