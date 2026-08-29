@@ -1,5 +1,5 @@
-import pkg/core
-import pkg/lib/[msg, ops]
+import ../core
+import msg, ops
 export msg, ops
 
 template router*(body: untyped): Send =

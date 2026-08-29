@@ -1,4 +1,4 @@
-import pkg/core
+import ../core
 
 type
   Send* = proc(m: Msg): bool

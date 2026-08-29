@@ -1,4 +1,4 @@
-import pkg/core/[btree, builders, codec, reader]
+import core/[btree, builders, codec, reader]
 
 template rv*(s: string): Value =
   readValue(s)

@@ -3,8 +3,8 @@
 
   I'll add more prose here later.
 ]##
-import pkg/core
-import pkg/lib/blmacro
+import ../core
+import blmacro
 
 func contains*(v, key: Value): bool =
   case v.kind
