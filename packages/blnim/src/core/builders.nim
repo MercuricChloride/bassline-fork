@@ -1,5 +1,5 @@
 import std/strutils
-import ./[btree, codec]
+import btree, codec
 export btree, codec
 
 type

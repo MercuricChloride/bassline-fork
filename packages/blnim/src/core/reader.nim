@@ -10,7 +10,7 @@
 ## construction
 
 import std/strutils
-import ./[builders, codec]
+import builders, codec
 export builders
 
 type
