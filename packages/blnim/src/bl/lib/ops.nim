@@ -6,6 +6,32 @@
 import ../core
 import blmacro
 
+# ================ Walking & accessing ================
+
+iterator items*(v: Value): Value =
+  case v.kind
+  of bList, bRec:
+    for val in v.items:
+      yield val
+  of bSet:
+    for val,_ in v.els:
+      yield val
+  of bDict:
+    for key, val in v.dict:
+      yield key
+      yield val
+  else: discard
+
+iterator walk*(v: Value): Value {.closure.} =
+  case v.kind
+  of bList, bRec, bSet, bDict:
+    yield v
+    for val in v:
+      for deep in walk(val):
+        yield deep
+  else:
+    yield v
+
 func contains*(v, key: Value): bool =
   case v.kind
   of bSet:
@@ -24,6 +50,8 @@ func `[]`*(v, key: Value): lent Value =
     return v.dict[key]
   else:
     raise newException(ValueError, "[] requires a list, record, or dict")
+
+# ================ Similarity ================
 
 func similar*(v, examplar: Value): bool =
   if examplar.kind != v.kind: return

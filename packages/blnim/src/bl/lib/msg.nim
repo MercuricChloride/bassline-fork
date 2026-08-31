@@ -65,7 +65,7 @@ proc reply*(msg, res: Msg): bool {.discardable.} =
   else:
     defaultMsgSend(res)
 
-proc fork*(msg: Msg, gas = msg.gas): Msg =
+func fork*(msg: Msg, gas = msg.gas): Msg =
   proc onReply(res: Msg): bool =
     msg.reply(res)
   newMsg(msg.value, onReply, gas)

@@ -57,7 +57,7 @@ template diff(a, b) =
   if result != 0: return
 
 func magnitude(x: int): uint64 =
-  if x < 0: 0'u64 - cast[uint64](x) else: uint64(x)
+  uint64 abs x
 
 func spellingLen*(x: int): int =
   ## the length of the canonical decimal spelling of x

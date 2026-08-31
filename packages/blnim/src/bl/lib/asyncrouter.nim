@@ -1,6 +1,6 @@
 import std/async
-import pkg/core
-import pkg/lib/router
+import ../core
+import router
 
 type
   RejectedSend* = object of CatchableError
