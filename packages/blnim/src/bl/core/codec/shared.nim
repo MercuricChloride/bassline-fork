@@ -140,8 +140,10 @@ func partialKind*(b: byte): PartialValueKind =
   of bNum..bBytes: 
     pvAtom
   of bNil:
+    guard h.inlineLen == 0, "nil lenBits must be 0"
     pvNil
   of bList..bSet:
+    guard h.inlineLen == 0, "frame lenBits must be 0"
     pvOpenFrame
 
 type
@@ -156,13 +158,15 @@ func newBuffer*(): Buffer =
 func newBuffer*(data: sink seq[byte]): Buffer =
   Buffer(data: data)
 
-func len*(self: Buffer): Natural =
-  self.data.len
+func atEnd*(self: Buffer): bool =
+  self.pos == self.data.len
 
-proc `[]`*(self: Buffer, i: Natural): byte =
-  self.data[i]
+iterator partialValues*(self: Buffer): PartialValue =
 
-iterator partialValues*(self: var Buffer): PartialValue =
+  template needs(n: Natural, msg: string) =
+    if (self.pos + n) > self.data.len:
+      raise newException(BufferStarvedError, msg)
+
   while self.data.len > self.pos:
     let
       b = self.data[self.pos]
@@ -172,19 +176,22 @@ iterator partialValues*(self: var Buffer): PartialValue =
       yield PartialValue(kind: pk, offset: self.pos)
       self.pos += 1
     of pvAtom:
-      var
-        len = b.headerData.inlineLen
+      var len = b.headerData.inlineLen
       if len == 7:
-        if not self.data.len > (self.pos + 1):
-          raise newException(BufferStarvedError, "expected a length byte")
+        needs 2, "expected a length byte"
         len = int self.data[self.pos + 1]
-        guard len >= 7: "non minimal u8 length"
+        guard len >= 7, "non minimal u8 length"
         if len == 255:
-          if not self.data.len > (self.pos + 5):
-            raise newException(BufferStarvedError, "expected 4 length bytes")
+          needs 6, "expected 4 length bytes"
+          len = 0
           for i in 2 .. 5:
             len = (len shl 8) or int self.data[self.pos + i]
           guard len >= 255, "non minimal u32 length"
+      let
+        skip = uint32(len).skipLen
+        total = skip + len
+      needs total, "expected atom payload"
+
       let pv = PartialValue(kind: pvAtom, offset: self.pos, payloadLen: uint32(len))
-      self.pos += pv.payloadLen.skipLen + len
+      self.pos += total
       yield pv

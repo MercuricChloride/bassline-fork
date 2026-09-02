@@ -3,70 +3,73 @@ import ./shared
 # ================ Decoded Values ================
 
 type
-  DecodedValue* = ref object
-    buf*: Buffer
+  ValueView* = ref object
+    buf: Buffer
     offset*, len*: int
-    parent*: DecodedValue
+    parent* {.cursor.}: ValueView
     validated: bool
     case kind*: Kind
     of bNil: discard
     of bNum..bBytes:
       payloadLen: uint32
     of bList, bRec, bSet:
-      children: seq[DecodedValue]
+      children: seq[ValueView]
     of bDict:
       entries: seq[Entry]
 
-  Entry = tuple[key, val: DecodedValue]
+  Entry = tuple[key, val: ValueView]
 
+  Callback = proc(val: ValueView)
 
-  Callback = proc(val: DecodedValue)
-
-func children*(self: DecodedValue): lent seq[DecodedValue] =
+func children*(self: ValueView): lent seq[ValueView] =
   return self.children
 
-func entries*(self: DecodedValue): lent seq[Entry] =
+func entries*(self: ValueView): lent seq[Entry] =
   return self.entries
 
-func payloadLen*(self: DecodedValue): uint32 =
+func payloadLen*(self: ValueView): uint32 =
   self.payloadLen
 
-func headerData*(self: DecodedValue): HeaderData =
+func headerData*(self: ValueView): HeaderData =
   headerData self.buf.data[self.offset]
 
-func mark*(self: DecodedValue): bool =
+func mark*(self: ValueView): bool =
   self.headerData.mark
 
-func span*(self: DecodedValue): tuple[lo, hi: int] =
+func span*(self: ValueView): tuple[lo, hi: int] =
   (lo: self.offset, hi: self.offset + self.len - 1)
 
-func validated*(self: DecodedValue): bool =
+func validated*(self: ValueView): bool =
   self.validated
 
-template toOpenArray*(self: DecodedValue): openArray[byte] =
+template toOpenArray*(self: ValueView): openArray[byte] =
   let (lo, hi) = self.span
   self.buf.data.toOpenArray(lo, hi)
 
-template payloadBytes*(self: DecodedValue): openArray[byte] =
+template payloadBytes*(self: ValueView): openArray[byte] =
   let (lo, hi) = self.span
   self.buf.data.toOpenArray(lo + self.payloadLen.skipLen, hi)
 
-func cmp*(a, b: DecodedValue): int =
+func cmp*(a, b: ValueView): int =
   cmpBytes(a.toOpenArray, b.toOpenArray)
 
-func `==`*(a, b: DecodedValue): bool =
+func `==`*(a, b: ValueView): bool =
+  if a.isNil and b.isNil: 
+    return true
+  if a.isNil or b.isNil: 
+    return false
   cmp(a, b) == 0
 
-func `<`*(a, b: DecodedValue): bool =
+func `<`*(a, b: ValueView): bool =
   cmp(a, b) < 0
 
-func root*(self: DecodedValue): DecodedValue =
+func root*(self: ValueView): ValueView =
   var r {.cursor.} = self
   while r.parent != nil:
     r = r.parent
   return r
 
-proc childrenDo(self: DecodedValue, cb: Callback, deep = false) =
+proc childrenDo*(self: ValueView, cb: Callback, deep = false) =
   template recur(val) =
     cb(val)
     if deep:
@@ -81,7 +84,17 @@ proc childrenDo(self: DecodedValue, cb: Callback, deep = false) =
       recur child
   else: discard
 
-proc validate*(self: DecodedValue) =
+proc validate*(self: ValueView)
+
+proc validate(self: Entry) =
+  validate self.key
+  validate self.val
+
+proc validate(vals: openArray[ValueView]) =
+  for val in vals:
+    validate val
+
+proc validate*(self: ValueView) =
   template ok() =
     self.validated = true
     return
@@ -89,51 +102,68 @@ proc validate*(self: DecodedValue) =
   if self.validated: return
 
   case self.kind
+  of bNil, bBytes: discard
   of bNum:
     guard isValidInt self.payloadBytes, "malformed number"
   of bText, bSym:
     guard isValidUtf8 self.payloadBytes, "invalid utf8 bytes"
   of bDict:
-    for (key, val) in self.entries:
-      validate key
-      validate val
-  of bList, bRec, bSet:
-    for child in self.children:
+    var prev {.cursor.}: Entry
+    for i, e in self.entries:
+      guard e.val != nil, "dict cannot have stranded keys"
+      validate e
+      if i > 0:
+        guard prev.key < e.key, "dict keys must be strictly ascending"
+      prev = e
+  of bSet:
+    var prev {.cursor.}: ValueView
+    for i, child in self.children:
       validate child
-  else: discard
+      if i > 0:
+        guard prev < child, "set elements must be strictly ascending"
+      prev = child
+  of bRec:
+    guard self.children.len > 0, "records cannot be empty"
+    validate self.children
+  of bList:
+    validate self.children
   ok
 
 # ================ Decoder ================
 
-type 
-  Decoder* = ref object
+type Decoder* = ref object
     buf: Buffer
-    frames: seq[DecodedValue]
+    frames: seq[ValueView]
+    pending: bool
 
 proc newDecoder*(buf: Buffer = newBuffer()): Decoder =
-  Decoder(buf: buf, frames: @[])
+  Decoder(buf: buf, frames: newSeqOfCap[ValueView](MaxDepth))
 
-iterator items*(self: Decoder, shouldValidate = true): DecodedValue =
+func pending*(self: Decoder): bool =
+  self.pending
 
-  template toValue(pv: PartialValue): DecodedValue =
+proc toValue(pv: PartialValue, buf: Buffer): ValueView =
     let 
-      h = headerData self.buf.data[pv.offset]
+      h = headerData buf.data[pv.offset]
       k = h.kind
     case k
     of bNil:
-      DecodedValue(kind: k, len: 1, buf: self.buf, offset: pv.offset)
+      ValueView(kind: k, len: 1, buf: buf, offset: pv.offset)
     of bNum..bBytes:
       let len = pv.payloadLen.skipLen + int(pv.payloadLen)
-      DecodedValue(kind: k, len: len, buf: self.buf, offset: pv.offset, payloadLen: pv.payloadLen)
+      ValueView(kind: k, len: len, buf: buf, offset: pv.offset, payloadLen: pv.payloadLen)
     of bList, bRec, bSet:
-      DecodedValue(kind: k, buf: self.buf, offset: pv.offset, children: @[])
+      ValueView(kind: k, buf: buf, offset: pv.offset, children: @[])
     of bDict:
-      DecodedValue(kind: k, buf: self.buf, offset: pv.offset, entries: @[])
+      ValueView(kind: k, buf: buf, offset: pv.offset, entries: @[])
 
-  template maybeYield(v: DecodedValue) =
+iterator items*(self: Decoder, shouldValidate = true): ValueView =
+
+  template maybeYield(v: ValueView) =
     if self.frames.len == 0:
       if shouldValidate:
         validate v
+      self.pending = false
       yield v
     else:
       let frame = self.frames[^1]
@@ -141,54 +171,57 @@ iterator items*(self: Decoder, shouldValidate = true): DecodedValue =
       if frame.kind != bDict:
         frame.children.add v
       else:
-        if frame.entries.len == 0 or
-          frame.entries[^1].val != nil:
-          frame.entries.add (key: v, val: nil)
+        if frame.entries.len > 0 and
+          frame.entries[^1].val.isNil:
+            frame.entries[^1].val = v
         else:
-          frame.entries[^1].val = v
-  
+          frame.entries.add (key: v, val: nil)
+
   try:
     for part in self.buf.partialValues:
       case part.kind
       of pvNil:
-        maybeYield part.toValue
+        let v = part.toValue(self.buf)
+        maybeYield v
       of pvAtom:
-        maybeYield part.toValue
+        let v = part.toValue(self.buf)
+        maybeYield v
       of pvOpenFrame:
-        self.frames.add part.toValue
+        guard self.frames.len < MaxDepth, "max frame depth exceeded"
+        self.frames.add part.toValue(self.buf)
+        self.pending = true
       of pvCloseFrame:
+        guard self.frames.len > 0, "unexpected END with no frames on stack"
+        
         let f = self.frames.pop
-        f.len = part.offset - f.offset
-        block validation:
-          case f.kind
-          of bRec:
-            guard f.children.len > 0, "records cannot be empty"
-          of bSet:
-            if f.children.len == 0:
-              break validation
-            for i in 1..f.children.high:
-              let
-                a = f.children[i - 1]
-                b = f.children[i]
-              guard a < b, "set elements must be strictly ascending"
-          of bDict:
-            if f.entries.len == 0:
-              break validation
-            guard f.entries[^1].val != nil, "dicts cannot have stranded keys"
-            for i in 1..f.entries.high:
-              let
-                a = f.entries[i - 1]
-                b = f.entries[i]
-              guard a.key < b.key, "dict keys must be strictly ascending"
-          else: discard
+        f.len = part.offset + 1 - f.offset
         maybeYield f
-  except BufferStarvedError:
-    discard
 
-iterator checked*(self: Decoder): DecodedValue =
+  except BufferStarvedError:
+    self.pending = true
+
+iterator checked*(self: Decoder): ValueView =
   for val in self.items(true): 
     yield val
 
-iterator unchecked*(self: Decoder): DecodedValue =
+iterator unchecked*(self: Decoder): ValueView =
   for val in self.items(false): 
     yield val
+
+when isMainModule:
+  import benchy
+  let
+    path = "./tests/bench-data/mixed-100mb.blb"
+    file = open(path)
+    size = getFileSize(file)
+    buf = newBuffer(newSeq[byte](size))
+    decoder = newDecoder(buf)
+
+  discard file.readBuffer(addr(buf.data[0]), size)
+
+  timeIt "decode":
+    buf.pos = 0
+    var count = 0
+    for value in decoder.unchecked:
+      inc count
+    echo count
