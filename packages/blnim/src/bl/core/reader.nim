@@ -5,7 +5,7 @@
 ## constructors the bl macro targets keeps one construction surface.
 ## The two payload laws the text needs (canonical integer spellings,
 ## UTF-8) are codec's, used here so a bad spelling is refused with a
-## line and column instead of later at finalize. Sets and dicts land
+## line and column instead of later at seal. Sets and dicts land
 ## in their trees as they are read, so canonical order is by
 ## construction
 
@@ -16,9 +16,6 @@ export builders
 type
   ReadError* = object of CatchableError
   Incomplete* = object of ReadError
-    ## thrown when a value is a partial prefix of a valid value one
-    ## but not totally completed
-
 const
   Ws = {' ', '\t', '\n', '\r'}
   Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '\'', '"', ';', '!'}
@@ -108,7 +105,7 @@ func quotedScan(s: string, pos: var int, q: char): string =
       inc pos
 
 func checkUtf8(s: string, pos: int, raw: string, what: string) =
-  if not isValidUtf8(raw.toOpenArrayByte(0, raw.high)):
+  if not isValidUtf8(raw.toBytes):
     fail(s, pos, "malformed UTF-8 in " & what)
 
 proc value(s: string, pos: var int): Value
@@ -289,9 +286,9 @@ proc value(s: string, pos: var int): Value =
     inc pos
     if pos < s.len and s[pos] notin Delims:
       fail(s, pos, "a marked atom ends at a delimiter")
-    v.marked = true
+    v.mark = true
   elif prefixMarked:
-    v.marked = true
+    v.mark = true
   v
 
 proc readDocument*(text: string, values: var seq[Value]) =
@@ -315,14 +312,6 @@ proc readValue*(text: string): Value =
 
 ## ================ PRINTING ================
 
-# ================ Printing ================
-# One printer. `pretty` lays a value out within a width: a frame that
-# fits stays on one line; one that does not opens with its members
-# aligned under the first (a record's after its head), a dict one
-# entry per line, a run of atoms filled as many per line as fit, and
-# the closer hugging the last member. `$` is the same printer with no
-# width at all. Whatever the layout, the reader reads it back.
-
 func escaped(s: string, q: char): string =
   ## the reader's escapes -- \q \\ \n \t \r -- so an atom is one line
   for c in s:
@@ -340,23 +329,28 @@ func escapedLen(s: string, q: char): int =
     inc result
     if c == q or c in {'\\', '\n', '\t', '\r'}: inc result
 
-func atom(v: Value): string =
-  ## the spelling of an atom, mark included
+func printAtom(v: Value): string =
   case v.kind
-  of bNil: result = "nil"
-  of bNum: result = $v.num
+  of bNil: 
+    result = "nil"
+  of bNum: 
+    result = $v.num
   of bSym:
-    result = if isBareSpelling(v.text): v.text
-             else: "'" & escaped(v.text, '\'') & "'"
-  of bText: result = "\"" & escaped(v.text, '"') & "\""
+    if isBareSpelling(v.text):
+      result = v.text
+    else:
+      result = "'" & escaped(v.text, '\'') & "'"
+  of bText: 
+    result = "\"" & escaped(v.text, '"') & "\""
   of bBytes:
     result = "0x"
     for b in v.bytes: result.add b.toHex.toLowerAscii
   else: discard
-  if v.marked: result.add '!'
+  if v.mark: result.add '!'
 
 func atomLen(v: Value): int =
-  ## atom(v).len without spelling it
+  ## length of the string spelling of an atom
+  ## without materializing the string
   case v.kind
   of bNil: result = 3
   of bNum: result = spellingLen(v.num)
@@ -366,10 +360,10 @@ func atomLen(v: Value): int =
   of bText: result = 2 + escapedLen(v.text, '"')
   of bBytes: result = 2 + 2 * v.bytes.len
   else: discard
-  if v.marked: inc result
+  if v.mark: inc result
 
 func opener(v: Value): string =
-  if v.marked: result.add '!'
+  if v.mark: result.add '!'
   case v.kind
   of bList: result.add '['
   of bRec: result.add '('
@@ -389,7 +383,6 @@ func members(v: Value): int =
   else: 0
 
 template eachMember(v: Value, m, body: untyped) =
-  ## the members of a list, record or set, lent
   case v.kind
   of bList, bRec:
     for m in v.items: body
@@ -398,13 +391,13 @@ template eachMember(v: Value, m, body: untyped) =
   else: discard
 
 func flatLen(v: Value, room: int): int =
-  ## the width of the one-line spelling -- or any number past `room`,
-  ## answered as soon as the value is known not to fit
+  ## the width of the one-line spelling, returning
+  ## early if it would overflow the remaining room
   if v.kind notin FrameKinds:
     return atomLen(v)
   if v.kind == bDict and v.dict.len == 0:
-    return opener(v).len + 2                # {:}
-  result = opener(v).len + 1                # opener and closer
+    return opener(v).len + 2 # {:}
+  result = opener(v).len + 1 # opener and closer
   var first = true
   if v.kind == bDict:
     for k, val in v.dict:
@@ -432,7 +425,7 @@ func newline(o: var string, align: int) =
 
 func putFlat(o: var string, v: Value) =
   if v.kind notin FrameKinds:
-    o.add atom(v)
+    o.add printAtom(v)
     return
   o.add opener(v)
   if v.kind == bDict and v.dict.len == 0:
@@ -456,8 +449,8 @@ func put(o: var string, v: Value, width, trail: int)
 
 func putMembers(o: var string, v: Value, skip, align, width, trail: int) =
   ## the members of a list, set or record (past its head): the first
-  ## at the current column, the rest aligned with it -- filled as many
-  ## per line as fit when all are atoms, else one per line
+  ## at the current column, the rest aligned with it filling as many
+  ## per line as we can fit when all are atoms, otherwise one per line
   let n = members(v)
   var fill = true
   var i = 0
@@ -467,7 +460,7 @@ func putMembers(o: var string, v: Value, skip, align, width, trail: int) =
   i = 0
   eachMember(v, m):
     if i >= skip:
-      let after = if i == n - 1: 1 + trail else: 0   # the closers to come
+      let after = if i == n - 1: 1 + trail else: 0 # the closers to come
       if i > skip:
         if fill and o.column + 1 + atomLen(m) + after <= width:
           o.add ' '
@@ -503,7 +496,7 @@ func put(o: var string, v: Value, width, trail: int) =
     if not only:
       var align = o.column + 1
       if align > width div 2:
-        # too wide a head to align after: the members go under it
+        # head too wide to align after, so members go under it
         align = col + opener(v).len
         o.newline(align)
       else:
@@ -518,7 +511,4 @@ func pretty*(v: Value, width = 80): string =
   result.put(v, width, 0)
 
 func `$`*(v: Value): string =
-  ## rec (…), list […], set {…} ({} empty), dict {k: v …} ({:} empty).
-  ## The mark is a prefix on frames and a suffix on atoms. Symbols are
-  ## bare when they read back as themselves, single-quoted otherwise.
   pretty(v, high(int))

@@ -1,15 +1,11 @@
 import std/strutils
+from std/math import sgn
 import btree, codec
 export btree, codec
 
 type
-  Kind* = enum
-    bNil,
-    bNum, bText, bSym, bBytes,
-    bList, bRec, bDict, bSet
-
   Value* = object
-    marked*: bool
+    mark*: bool
     case kind*: Kind
     of bNil: discard
     of bNum:
@@ -25,71 +21,75 @@ type
     of bSet:
       els*: BTree[Value, bool]
 
-func null*(marked = false): Value =
-  Value(kind: bNil, marked: marked)
+func null*(mark = false): Value =
+  Value(kind: bNil, mark: mark)
 
-func num*(n: int, marked = false):  Value =
-  Value(kind: bNum, marked: marked, num: n)
+func num*(n: int, mark = false):  Value =
+  Value(kind: bNum, mark: mark, num: n)
 
-func text*(t: string, marked = false): Value =
-  Value(kind: bText, text: t, marked: marked)
+func text*(t: string, mark = false): Value =
+  Value(kind: bText, text: t, mark: mark)
 
-func sym*(t: string, marked = false): Value =
-  Value(kind: bSym, text: t, marked: marked)
+func sym*(t: string, mark = false): Value =
+  Value(kind: bSym, text: t, mark: mark)
 
-func bytes*(b: sink seq[byte], marked = false): Value =
-  Value(kind: bBytes, bytes: b, marked: marked)
+func bytes*(b: sink seq[byte], mark = false): Value =
+  Value(kind: bBytes, bytes: b, mark: mark)
 
-func initList*(marked = false): Value =
-  Value(kind: bList, items: @[], marked: marked)
+func initList*(mark = false): Value =
+  Value(kind: bList, items: @[], mark: mark)
 
-func initRec*(head: Value, marked = false): Value =
-  Value(kind: bRec, items: @[head], marked: marked)
+func initRec*(head: Value, mark = false): Value =
+  Value(kind: bRec, items: @[head], mark: mark)
 
-func initDict*(marked = false): Value =
-  Value(kind: bDict, dict: initBTree[Value, Value](), marked: marked)
+func initDict*(mark = false): Value =
+  Value(kind: bDict, dict: initBTree[Value, Value](), mark: mark)
 
-func initSet*(marked = false): Value =
-  Value(kind: bSet, els: initBTree[Value, bool](), marked: marked)
+func initSet*(mark = false): Value =
+  Value(kind: bSet, els: initBTree[Value, bool](), mark: mark)
 
 template diff(a, b) =
   result = cmp(a, b)
   if result != 0: return
 
 func magnitude(x: int): uint64 =
-  uint64 abs x
+  ## |x| without the abs(int.low) overflow
+  if x < 0: uint64(-(x + 1)) + 1
+  else: uint64(x)
 
 func spellingLen*(x: int): int =
   ## the length of the canonical decimal spelling of x
+  result = 1
+  if x < 0:
+    inc result
   var m = magnitude(x)
-  result = if x < 0: 2 else: 1
   while m >= 10:
     m = m div 10
     inc result
 
+func cmpNums*(x, y: int): int =
+  ## ascii shortlex over the decimal strings
+  ## without making them strings
+  diff spellingLen(x), spellingLen(y)
+  let nx = x < 0
+  let ny = y < 0
+  if nx != ny:
+    return if nx: -1 else: 1
+  diff magnitude(x), magnitude(y)
+
+func cmpStrings*(x, y: string): int =
+  cmpBytes(x.toBytes, y.toBytes)
+
 func cmp*(a, b: Value): int =
   diff a.kind, b.kind
-  diff a.marked, b.marked
+  diff a.mark, b.mark
   case a.kind
   of bNil: discard
   of bNum:
-    # shortlex over the decimal spellings, without spelling them:
-    # length first (the sign counts), then '-' before any digit, then
-    # the digits -- which for equal length and sign is magnitude order
-    let x = a.num
-    let y = b.num
-    diff spellingLen(x), spellingLen(y)
-    let nx = x < 0
-    let ny = y < 0
-    if nx != ny:
-      return if nx: -1 else: 1
-    diff magnitude(x), magnitude(y)
+    result = cmpNums(a.num, b.num)
   of bText, bSym:
-    diff a.text.len, b.text.len
-    result = cmpBytes(a.text.toOpenArrayByte(0, a.text.high),
-                      b.text.toOpenArrayByte(0, b.text.high))
+    result = cmpBytes(a.text.toBytes, b.text.toBytes)
   of bBytes:
-    diff a.bytes.len, b.bytes.len
     result = cmpBytes(a.bytes, b.bytes)
   of bList, bRec:
     for i in 0 ..< min(a.items.len, b.items.len):
@@ -110,38 +110,25 @@ func cmp*(a, b: Value): int =
 
 func `==`*(a, b: Value): bool =
   cmp(a, b) == 0
-func `!=`*(a, b: Value): bool =
-  cmp(a, b) != 0
 func `<`*(a, b: Value): bool =
   cmp(a, b) < 0
-func `>`*(a, b: Value): bool =
-  cmp(a, b) > 0
-func `<=`*(a, b: Value): bool =
-  cmp(a, b) <= 0
-func `>=`*(a, b: Value): bool =
-  cmp(a, b) >= 0
 
 # ================ Frame constructors ================
 
-func toBytes*(s: string): seq[byte] =
-  result = newSeq[byte](s.len)
-  for i, c in s:
-    result[i] = byte(c)
+func initList*(items: sink seq[Value], mark = false): Value =
+  Value(kind: bList, items: items, mark: mark)
 
-func initList*(items: sink seq[Value], marked = false): Value =
-  Value(kind: bList, items: items, marked: marked)
-
-func initRec*(items: sink seq[Value], marked = false): Value =
+func initRec*(items: sink seq[Value], mark = false): Value =
   doAssert items.len > 0, "a record needs a head"
-  Value(kind: bRec, items: items, marked: marked)
+  Value(kind: bRec, items: items, mark: mark)
 
-proc initSet*(items: sink seq[Value], marked = false): Value =
-  result = initSet(marked)
+proc initSet*(items: sink seq[Value], mark = false): Value =
+  result = initSet(mark)
   for x in items:
     result.els[x] = true
 
-proc initDict*(entries: sink seq[(Value, Value)], marked = false): Value =
-  result = initDict(marked)
+proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
+  result = initDict(mark)
   for (k, v) in entries:
     result.dict[k] = v
 
@@ -151,109 +138,74 @@ func toValue*(i: int64): Value = num(int(i))
 func toValue*(s: string): Value = text(s)
 func toValue*(b: seq[byte]): Value = bytes(b)
 
-func toValue*[T](xs: seq[T]): Value =
+func toValue*[T](xs: openArray[T]): Value =
   mixin toValue
   result = initList()
   for x in xs:
     result.items.add toValue(x)
 
-# ================ Spelling ================
-# Value → canonical bytes. The trees already hold dicts and sets in
-# CE order, so spelling is a straight walk with no sorting; finalize
-# is the one validation point (bad text handed to a constructor
-# surfaces here).
+# ================ Encoding ================
 
-func tag*(k: Kind): ValueTag =
-  ValueTag(ord(k) + 1)
+proc write*(e: Encoder, v: Value) =
+  template scalar(b: openArray[byte]) =
+    e.putScalar(v.kind, v.mark, b)
 
-func spell*(e: var Encoder, v: Value) =
+  template frame(body) =
+    e.frame(v.kind, v.mark):
+      body
+  
   case v.kind
-  of bNil: e.putNil(v.marked)
-  of bNum: e.putNum(v.num, v.marked)
-  of bText: e.putText(v.text, v.marked)
-  of bSym: e.putSym(v.text, v.marked)
-  of bBytes: e.putBytes(v.bytes, v.marked)
+  of bNil: 
+    scalar []
+  of bNum:
+    scalar toBytes $v.num
+  of bText, bSym:
+    scalar toBytes v.text
+  of bBytes:
+    scalar v.bytes
   of bList, bRec:
-    e.putOpen(tag(v.kind), v.marked)
-    for c in v.items:
-      e.spell(c)
-    e.putClose()
-  of bSet:
-    e.putOpen(vSet, v.marked)
-    for k, _ in v.els:
-      e.spell(k)
-    e.putClose()
+    frame:
+      for child in v.items:
+        e.write child
   of bDict:
-    e.putOpen(vDict, v.marked)
-    for k, val in v.dict:
-      e.spell(k)
-      e.spell(val)
-    e.putClose()
+    frame:
+      for key, val in v.dict:
+        e.write key
+        e.write val
+  of bSet:
+    frame:
+      for val, _ in v.els:
+        e.write val
 
-func spell*(v: Value): seq[byte] =
-  ## The vouched spelling of `v`: one Encoder walk, then finalize.
-  var e = initEncoder()
-  e.spell(v)
-  e.finalize()
-
-# ================ Drafting a judged value ================
-
-func directChildren(spans: openArray[Span], i: int): int =
-  ## how many direct children the frame at `i` has: index arithmetic
-  ## only, so a frame's seq is allocated once at the right size
-  var j = i + 1
-  while j <= i + spans[i].count:
-    inc result
-    j += spans[j].count + 1
-
-proc draft*(data: openArray[byte], spans: openArray[Span], i = 0): Value =
-  ## Bring the judged value at `i` into the Nim-owned domain: a copying
-  ## walk over the span list — every payload is copied, nothing points
-  ## back into `data`. No checks: judge already proved shape, content,
-  ## and order, and spans carry the payload offsets.
-  let s = spans[i]
-  template payloadStr(): string =
-    var r = newString(s.hi - s.payLo)
-    if r.len > 0:
-      copyMem(addr r[0], addr data[s.payLo], r.len)
-    r
-  case s.kind
-  of vNil:
-    result = null(s.marked)
-  of vNum:
-    let spelling = payloadStr()
+proc toValue*(view: ValueView): Value =
+  case view.kind
+  of bNil:
+    return null(view.mark)
+  of bNum:
+    let s = view.payloadBytes.toString()
     try:
-      result = num(int(parseBiggestInt(spelling)), s.marked)
+      return num(parseBiggestInt(s), view.mark)
     except ValueError:
-      raise newException(ValueError, "numeral outside int64: " & spelling)
-  of vText:
-    result = text(payloadStr(), s.marked)
-  of vSym:
-    result = sym(payloadStr(), s.marked)
-  of vBytes:
-    var b = newSeq[byte](s.hi - s.payLo)
-    if b.len > 0:
-      copyMem(addr b[0], addr data[s.payLo], b.len)
-    result = bytes(b, s.marked)
-  of vList, vRec:
-    var kids = newSeqOfCap[Value](directChildren(spans, i))
-    var j = i + 1
-    while j <= i + s.count:
-      kids.add draft(data, spans, j)
-      j += spans[j].count + 1
-    result = if s.kind == vList: initList(kids, s.marked)
-             else: initRec(kids, s.marked)
-  of vSet:
-    result = initSet(s.marked)
-    var j = i + 1
-    while j <= i + s.count:
-      result.els[draft(data, spans, j)] = true
-      j += spans[j].count + 1
-  of vDict:
-    result = initDict(s.marked)
-    var j = i + 1
-    while j <= i + s.count:
-      let k = draft(data, spans, j)
-      j += spans[j].count + 1
-      result.dict[k] = draft(data, spans, j)
-      j += spans[j].count + 1
+      raise newException(ValueError, "numeral outside int64: " & s)
+  of bText:
+    return text(view.payloadBytes.toString(), view.mark)
+  of bSym:
+    return sym(view.payloadBytes.toString(), view.mark)
+  of bBytes:
+    return bytes(@(view.payloadBytes), view.mark)
+  of bList:
+    result = initList(view.mark)
+    for child in view.children:
+      result.items.add child.toValue
+  of bRec:
+    result = initRec(toValue(view.children[0]), view.mark)
+    for i in 1..<view.children.len:
+      result.items.add toValue(view.children[i])
+  of bSet:
+    result = initSet(view.mark)
+    for child in view.children:
+      result.els.incl child.toValue
+  of bDict:
+    result = initDict(view.mark)
+    for (key, val) in view.entries:
+      result.dict[key.toValue] = val.toValue

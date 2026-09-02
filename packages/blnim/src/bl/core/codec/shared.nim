@@ -17,6 +17,14 @@ template ensure*(cond: bool) =
   result = cond
   if not result: return
 
+func toString*(a: openArray[byte]): string =
+  result = newString(a.len)
+  if a.len > 0:
+    copyMem(addr result[0], addr a[0], a.len)
+
+template toBytes*(a: string): openArray[byte] =
+  a.toOpenArrayByte(0, a.high)
+
 func cmpBytes*(a, b: openArray[byte]): int =
   let n = min(a.len, b.len)
   if n > 0:
@@ -146,6 +154,7 @@ func partialKind*(b: byte): PartialValueKind =
     guard h.inlineLen == 0, "frame lenBits must be 0"
     pvOpenFrame
 
+
 type
   Buffer* = ref object
    pos*: Natural
@@ -160,6 +169,9 @@ func newBuffer*(data: sink seq[byte]): Buffer =
 
 func atEnd*(self: Buffer): bool =
   self.pos == self.data.len
+
+template bytes*(self: Buffer): openArray[byte] =
+  self.data.toOpenArray(0, self.data.high)
 
 iterator partialValues*(self: Buffer): PartialValue =
 

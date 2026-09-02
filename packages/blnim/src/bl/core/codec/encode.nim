@@ -3,11 +3,17 @@ import ./shared
 type
   Encoder* = ref object
     buf*: Buffer
-    depth: int
+    depth: Natural
+
+proc newEncoder*(buf: Buffer = newBuffer()): Encoder =
+  Encoder(buf: buf)
+
+proc putRaw*(e: Encoder, data: openArray[byte]) =
+  e.buf.data.add data
 
 proc putHeader(e: Encoder, kind: Kind, mark: bool, len: int) =
   case kind
-  of bNum: 
+  of bNum:
     guard len > 0, "num cannot have a length of 0"
   of bNil, bList, bRec, bDict, bSet:
     guard len == 0, "invalid len for kind: " & $kind
@@ -18,7 +24,7 @@ proc putHeader(e: Encoder, kind: Kind, mark: bool, len: int) =
     m: byte = if mark: MarkBit else: 0
     l: byte = byte min(len, 7)
     h: byte = ((k shl 4) or m or l)
-  
+
   e.buf.data.add h
 
   if len in 7..254:
@@ -30,6 +36,7 @@ proc putHeader(e: Encoder, kind: Kind, mark: bool, len: int) =
 
 proc putScalar*(e: Encoder, kind: Kind, mark: bool, payload: openArray[byte] = []) =
   guard kind in bNil..bBytes, "not a scalar kind"
+  guard payload.len <= MaxPayload.int, "payload too large"
   e.putHeader(kind, mark, payload.len)
   e.buf.data.add payload
 
@@ -44,10 +51,22 @@ proc putClose*(e: Encoder) =
   dec e.depth
   e.buf.data.add EndByte
 
+func pending*(e: Encoder): bool =
+  e.depth > 0
+
+func ready*(e: Encoder): bool =
+  not e.pending
+
+template bytes*(e: Encoder): openArray[byte] =
+  guard e.ready, "encoder still pending"
+  e.buf.bytes
+
 template frame*(e: Encoder, kind: Kind, mark: bool, body: untyped) =
   e.putOpen(kind, mark)
   body
   e.putClose()
 
 template frame*(e: Encoder, kind: Kind, body: untyped) =
-  frame(e, kind, false, body)
+  e.putOpen(kind, false)
+  body
+  e.putClose()

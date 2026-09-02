@@ -42,7 +42,7 @@ func span*(self: ValueView): tuple[lo, hi: int] =
 func validated*(self: ValueView): bool =
   self.validated
 
-template toOpenArray*(self: ValueView): openArray[byte] =
+template bytes*(self: ValueView): openArray[byte] =
   let (lo, hi) = self.span
   self.buf.data.toOpenArray(lo, hi)
 
@@ -51,7 +51,7 @@ template payloadBytes*(self: ValueView): openArray[byte] =
   self.buf.data.toOpenArray(lo + self.payloadLen.skipLen, hi)
 
 func cmp*(a, b: ValueView): int =
-  cmpBytes(a.toOpenArray, b.toOpenArray)
+  cmpBytes(a.bytes, b.bytes)
 
 func `==`*(a, b: ValueView): bool =
   if a.isNil and b.isNil: 
@@ -63,30 +63,9 @@ func `==`*(a, b: ValueView): bool =
 func `<`*(a, b: ValueView): bool =
   cmp(a, b) < 0
 
-func root*(self: ValueView): ValueView =
-  var r {.cursor.} = self
-  while r.parent != nil:
-    r = r.parent
-  return r
-
-proc childrenDo*(self: ValueView, cb: Callback, deep = false) =
-  template recur(val) =
-    cb(val)
-    if deep:
-      val.childrenDo(cb, deep = true)
-  case self.kind
-  of bDict:
-    for (key, val) in self.entries:
-      recur key
-      recur val
-  of bList, bRec, bSet:
-    for child in self.children:
-      recur child
-  else: discard
-
 proc validate*(self: ValueView)
 
-proc validate(self: Entry) =
+proc validate*(self: Entry) =
   validate self.key
   validate self.val
 
@@ -128,6 +107,27 @@ proc validate*(self: ValueView) =
   of bList:
     validate self.children
   ok
+
+func root*(self: ValueView): ValueView =
+  var r {.cursor.} = self
+  while r.parent != nil:
+    r = r.parent
+  return r
+
+proc childrenDo*(self: ValueView, cb: Callback, deep = false) =
+  template recur(val) =
+    cb(val)
+    if deep:
+      val.childrenDo(cb, deep = true)
+  case self.kind
+  of bDict:
+    for (key, val) in self.entries:
+      recur key
+      recur val
+  of bList, bRec, bSet:
+    for child in self.children:
+      recur child
+  else: discard
 
 # ================ Decoder ================
 
@@ -208,20 +208,5 @@ iterator unchecked*(self: Decoder): ValueView =
   for val in self.items(false): 
     yield val
 
-when isMainModule:
-  import benchy
-  let
-    path = "./tests/bench-data/mixed-100mb.blb"
-    file = open(path)
-    size = getFileSize(file)
-    buf = newBuffer(newSeq[byte](size))
-    decoder = newDecoder(buf)
-
-  discard file.readBuffer(addr(buf.data[0]), size)
-
-  timeIt "decode":
-    buf.pos = 0
-    var count = 0
-    for value in decoder.unchecked:
-      inc count
-    echo count
+template bytes*(self: Decoder): openArray[byte] =
+  self.buf.bytes
