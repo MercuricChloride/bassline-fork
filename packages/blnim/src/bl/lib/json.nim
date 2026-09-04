@@ -9,9 +9,11 @@ type
 template refuse(msg: string) =
   raise newException(JsonRefusal, msg)
 
-template guardJson(cond, msg) =
-  if not cond:
-    refuse msg
+proc toJson*(self: Num): JsonNode =
+  if self.isWide:
+    parseJson(self.wide)
+  else:
+    %* self.toInt
 
 proc toJson*(self: Value): JsonNode =
   result = %* { "kind": $self.kind }
@@ -20,7 +22,7 @@ proc toJson*(self: Value): JsonNode =
   case self.kind
   of bNil: discard
   of bNum:
-    result["value"] = %* self.num
+    result["value"] = self.num.toJson
   of bText, bSym:
     result["value"] = %* self.text
   of bBytes:
@@ -58,7 +60,7 @@ func parseKind(k: string): Kind =
 proc toValue*(node: JsonNode): Value
 
 func hexBytes(s: string): seq[byte] =
-  guardJson s.startsWith("0x"):
+  guard s.startsWith("0x"):
     "hexBytes must start with 0x"
 
   try:
@@ -74,15 +76,15 @@ proc members(node: JsonNode): seq[Value] =
     result.add toValue(el)
 
 proc toValue*(node: JsonNode): Value =
-  guardJson node.kind == JObject,
+  guard node.kind == JObject,
     "value must be an object"
   
-  guardJson "kind" in node,
+  guard "kind" in node,
     "value must have a kind"
   
   let k = node["kind"]
 
-  guardJson k.kind == JString,
+  guard k.kind == JString,
     "value.kind must be a string"
 
   let kind = parseKind k.str
@@ -91,16 +93,16 @@ proc toValue*(node: JsonNode): Value =
   
   if node.hasKey("mark"):
     let m = node["mark"]
-    guardJson m.kind == JBool, "mark must be a bool"
+    guard m.kind == JBool, "mark must be a bool"
     if m.bval:
       mark = true
 
   if kind == bNil:
-    guardJson not(node.hasKey("value")),
+    guard not(node.hasKey("value")),
       "nil carries no value"
     return null(mark)
   
-  guardJson node.hasKey("value"),
+  guard node.hasKey("value"),
     $kind & " needs a value"
 
   let v = node["value"]
@@ -111,14 +113,18 @@ proc toValue*(node: JsonNode): Value =
   of bNum:
     case v.kind
     of JInt: return num(v.getBiggestInt, mark)
-    of JString: refuse "integer outside the range this reading holds: " & v.str
+    of JString:
+      # the parser keeps a number past int64 as a raw number node,
+      # which prints as its digits where a string prints quoted
+      guard $v == v.str, "not an integer: " & $v
+      return num(v.str, mark)
     else: refuse "not an integer: " & $v
   
   of bText, bSym:
-    guardJson v.kind == JString,
+    guard v.kind == JString,
       $kind & " is a string"
 
-    guardJson isValidUtf8(v.str.toBytes),
+    guard isValidUtf8(v.str.toBytes),
       "malformed UTF-8 in " & $kind
     if kind == bText:
       return text(v.str, mark)
@@ -126,7 +132,7 @@ proc toValue*(node: JsonNode): Value =
       return sym(v.str, mark)
 
   of bBytes:
-    guardJson v.kind == JString:
+    guard v.kind == JString:
       "bytes must be a hex string"
     return bytes(hexBytes(v.str), mark)
 
@@ -135,21 +141,21 @@ proc toValue*(node: JsonNode): Value =
   
   of bRec:
     let items = members(v)
-    guardJson items.len > 0,
+    guard items.len > 0,
       "record must have a head"
     return initRec(items, mark)
   
   of bDict:
-    guardJson v.kind == JArray,
+    guard v.kind == JArray,
       "dict entries are an array of [key, value] pairs"
     
     result = initDict(mark)
 
     for entry in v:
-      guardJson entry.kind == JArray and entry.len == 2,
+      guard entry.kind == JArray and entry.len == 2,
         "a dict entry is [key, value]"
       let k = toValue(entry[0])
-      guardJson k notin result.dict,
+      guard k notin result.dict,
         "duplicate dict key: " & $k
       result.dict[k] = toValue(entry[1])
 

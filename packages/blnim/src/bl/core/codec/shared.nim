@@ -11,9 +11,13 @@ const
 
 type CodecError* = object of CatchableError
 
+template refuse(msg: string) =
+  raise newException(CodecError, msg)
+
 template guard*(cond: bool, msg: string) =
+  mixin refuse
   if not cond:
-    raise newException(CodecError, msg)
+    refuse(msg)
 
 template ensure*(cond: bool) =
   result = cond
@@ -33,6 +37,11 @@ func cmpBytes*(a, b: openArray[byte]): int =
     let r = cmpMem(addr a[0], addr b[0], n)
     if r != 0: return r
   a.len - b.len
+
+func cmpShortlex*(x, y: openArray[byte]): int =
+  result = cmp(x.len, y.len)
+  if result != 0: return
+  result = cmpBytes(x, y)
 
 func isValidInt*(bytes: openArray[byte]): bool =
   ensure bytes.len > 0

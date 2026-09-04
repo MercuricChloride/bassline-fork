@@ -12,13 +12,13 @@ export reader
 
 const HexDigits = {'0' .. '9', 'a' .. 'f', 'A' .. 'F'}
 
-proc blSplice*[T](x: T, marked: static bool): Value =
+proc blSplice*[T](x: T, mark: static bool): Value =
   ## a spliced value keeps whatever mark it came with, unless the
-  ## splice itself is marked
+  ## splice itself is mark
   mixin toValue
   result = toValue(x)
-  when marked:
-    result.marked = true
+  when mark:
+    result.mark = true
 
 # ================ THE MACRO ================
 
@@ -71,7 +71,7 @@ proc numLit(n: NimNode, lit: string): NimNode =
     bad(n, "not a canonical number: " & lit)
   newLit(i)
 
-proc build(n: NimNode, marked: bool): NimNode
+proc build(n: NimNode, mark: bool): NimNode
 
 proc frameParts(n: NimNode, first: int): (seq[NimNode], bool) =
   ## every element of a frame, and whether any of them spreads
@@ -81,18 +81,18 @@ proc frameParts(n: NimNode, first: int): (seq[NimNode], bool) =
       result[1] = true
     result[0].add c
 
-proc buildFrame(n: NimNode, first: int, marked: bool, maker: static string): NimNode =
+proc buildFrame(n: NimNode, first: int, mark: bool, maker: static string): NimNode =
   ## a positional frame: the plain case is one constructor call; a
   ## frame with a spread in it is accumulated and then constructed
   let (els, spreads) = frameParts(n, first)
   let mk = bindSym(maker)
   if els.len == 0:
-    return newCall(mk, newLit(marked))
+    return newCall(mk, newLit(mark))
   if not spreads:
     var arr = nnkBracket.newTree()
     for c in els:
       arr.add build(c, false)
-    return newCall(mk, nnkPrefix.newTree(ident"@", arr), newLit(marked))
+    return newCall(mk, nnkPrefix.newTree(ident"@", arr), newLit(mark))
   let acc = genSym(nskVar, "els")
   var body = newStmtList(
     newVarStmt(acc, newCall(nnkBracketExpr.newTree(ident"newSeq", bindSym"Value")))
@@ -105,59 +105,59 @@ proc buildFrame(n: NimNode, first: int, marked: bool, maker: static string): Nim
       )
     else:
       body.add newCall(ident"add", acc, build(c, false))
-  body.add newCall(mk, acc, newLit(marked))
+  body.add newCall(mk, acc, newLit(mark))
   nnkBlockStmt.newTree(newEmptyNode(), body)
 
-proc buildDict(n: NimNode, marked: bool): NimNode =
+proc buildDict(n: NimNode, mark: bool): NimNode =
   if n.len == 0:
-    return newCall(bindSym"initDict", newLit(marked))
+    return newCall(bindSym"initDict", newLit(mark))
   var arr = nnkBracket.newTree()
   for e in n:
     if e.kind != nnkExprColonExpr:
       bad(e, "a dict is entries; write {k: v} or {:} for the empty one")
     arr.add nnkTupleConstr.newTree(build(e[0], false), build(e[1], false))
-  newCall(bindSym"initDict", nnkPrefix.newTree(ident"@", arr), newLit(marked))
+  newCall(bindSym"initDict", nnkPrefix.newTree(ident"@", arr), newLit(mark))
 
-proc build(n: NimNode, marked: bool): NimNode =
+proc build(n: NimNode, mark: bool): NimNode =
   case n.kind
   of nnkStmtList:
     if n.len != 1:
       bad(n, "one value here; a block of several is a program")
-    build(n[0], marked)
+    build(n[0], mark)
   of nnkPar:
     if n.len != 1:
       bad(n, "() groups one value")
-    build(n[0], marked)
+    build(n[0], mark)
   of nnkNilLit:
-    newCall(bindSym"null", newLit(marked))
+    newCall(bindSym"null", newLit(mark))
   of nnkIntLit .. nnkUInt64Lit:
-    newCall(bindSym"num", newLit(n.intVal), newLit(marked))
+    newCall(bindSym"num", newLit(n.intVal), newLit(mark))
   of nnkFloatLit .. nnkFloat128Lit:
     bad(n, "there are no non-integer numbers; say (dec 15 -1) or (rat 42 54)")
   of nnkStrLit, nnkRStrLit, nnkTripleStrLit:
-    newCall(bindSym"text", newLit(n.strVal), newLit(marked))
+    newCall(bindSym"text", newLit(n.strVal), newLit(mark))
   of nnkIdent, nnkSym, nnkAccQuoted:
     var name = identOf(n)
     if name.endsWith("!") and name.len > 1:
-      # `n!` -- the textual spelling of a marked atom, for holes and
+      # `n!` -- the textual spelling of a mark atom, for holes and
       # for the rule words, so a shape reads the same in both syntaxes
       name.setLen(name.len - 1)
       return newCall(bindSym"sym", newLit(name), newLit(true))
-    newCall(bindSym"sym", newLit(name), newLit(marked))
+    newCall(bindSym"sym", newLit(name), newLit(mark))
   of nnkCallStrLit:
     let lit = n[1].strVal
     case identOf(n[0])
-    of "n": newCall(bindSym"num", numLit(n, lit), newLit(marked))
-    of "s": newCall(bindSym"sym", newLit(lit), newLit(marked))
-    of "t": newCall(bindSym"text", newLit(lit), newLit(marked))
-    of "x": newCall(bindSym"bytes", hexLit(n, lit), newLit(marked))
-    of "b": newCall(bindSym"bytes", newCall(bindSym"toBytes", newLit(lit)), newLit(marked))
+    of "n": newCall(bindSym"num", numLit(n, lit), newLit(mark))
+    of "s": newCall(bindSym"sym", newLit(lit), newLit(mark))
+    of "t": newCall(bindSym"text", newLit(lit), newLit(mark))
+    of "x": newCall(bindSym"bytes", hexLit(n, lit), newLit(mark))
+    of "b": newCall(bindSym"bytes", newCall(bindSym"toBytes", newLit(lit)), newLit(mark))
     else: bad(n, "unknown literal " & identOf(n[0]) & "\"...\"; n s t x b are the ones")
   of nnkPrefix:
     # Nim reads a run of operator characters as one token, so `!%x`
     # arrives as the single prefix `!%`. The mark peels off the front
     var op = identOf(n[0])
-    var mk = marked
+    var mk = mark
     if op.startsWith("!"):
       if mk:
         bad(n, "a value carries one mark")
@@ -173,11 +173,11 @@ proc build(n: NimNode, marked: bool): NimNode =
     else:
       bad(n, "no meaning for the prefix " & identOf(n[0]))
   of nnkBracket:
-    buildFrame(n, 0, marked, "initList")
+    buildFrame(n, 0, mark, "initList")
   of nnkCurly:
-    buildFrame(n, 0, marked, "initSet")
+    buildFrame(n, 0, mark, "initSet")
   of nnkTableConstr:
-    buildDict(n, marked)
+    buildDict(n, mark)
   of nnkCall, nnkCommand:
     # a record: the callee is the head. A head that is not a plain
     # name is written parenthesised -- (%h)(a b) -- and reads as one
@@ -188,7 +188,7 @@ proc build(n: NimNode, marked: bool): NimNode =
       head = build(n[0], false)
     else:
       bad(n[0], "a record's head is a name or a parenthesised value")
-    let rest = buildFrame(n, 1, marked, "initRec")
+    let rest = buildFrame(n, 1, mark, "initRec")
     # splice the head in as element zero
     if rest.kind == nnkBlockStmt:
       let acc = rest[1][0][0][0]
@@ -196,7 +196,7 @@ proc build(n: NimNode, marked: bool): NimNode =
       rest
     elif rest.len == 2:
       # a head with no other elements came back as the empty-frame call
-      newCall(bindSym"initRec", nnkPrefix.newTree(ident"@", nnkBracket.newTree(head)), newLit(marked))
+      newCall(bindSym"initRec", nnkPrefix.newTree(ident"@", nnkBracket.newTree(head)), newLit(mark))
     else:
       rest[1][1].insert 0, head
       rest

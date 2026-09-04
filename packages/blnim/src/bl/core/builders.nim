@@ -3,13 +3,51 @@ import ./buffer
 import btree, codec
 export btree, codec
 
+template refuse(msg: string) =
+  raise newException(ValueError, msg)
+
+type
+  Num* = object
+    case isWide*: bool
+    of true:
+      wideNum: string
+    of false:
+      intNum: int
+
+converter toNum*(n: int): Num =
+  Num(isWide: false, intNum: n)
+
+func initNum*(s: string): Num =
+  ## s is a canonical spelling; past int64 it is held as it is spelled
+  guard isValidInt(s.toBytes), "not a canonical number: " & s
+  try:
+    Num(isWide: false, intNum: parseBiggestInt(s))
+  except ValueError:
+    Num(isWide: true, wideNum: s)
+
+func isInt*(n: Num): bool =
+  not n.isWide
+
+func toInt*(n: Num): int =
+  guard n.isInt, "num is wide, not an int"
+  n.intNum
+
+func wide*(n: Num): string =
+  if n.isWide:
+    n.wideNum
+  else:
+    $(n.intNum)
+
+func `$`*(n: Num): string =
+  n.wide
+
 type
   Value* = object
     mark*: bool
     case kind*: Kind
     of bNil: discard
     of bNum:
-      num*: int
+      num*: Num
     of bText, bSym:
       text*: string
     of bBytes:
@@ -24,8 +62,11 @@ type
 func null*(mark = false): Value =
   Value(kind: bNil, mark: mark)
 
-func num*(n: int, mark = false):  Value =
+func num*(n: int, mark = false): Value =
   Value(kind: bNum, mark: mark, num: n)
+
+func num*(n: string, mark = false): Value =
+  Value(kind: bNum, mark: mark, num: initNum(n))
 
 func text*(t: string, mark = false): Value =
   Value(kind: bText, text: t, mark: mark)
@@ -72,6 +113,12 @@ func spellingLen*(x: int): int =
     m = m div 10
     inc result
 
+func spellingLen*(x: Num): int =
+  if x.isWide:
+    x.wide.len
+  else:
+    x.toInt.spellingLen
+
 func cmpNums*(x, y: int): int =
   ## ascii shortlex over the decimal strings
   ## without making them strings
@@ -82,8 +129,11 @@ func cmpNums*(x, y: int): int =
     return if nx: -1 else: 1
   diff magnitude(x), magnitude(y)
 
-func cmpStrings*(x, y: string): int =
-  cmpBytes(x.toBytes, y.toBytes)
+func cmpNums*(x, y: Num): int =
+  if x.isWide or y.isWide:
+    cmpShortlex(x.wide.toBytes, y.wide.toBytes)
+  else:
+    cmpNums(x.toInt, y.toInt)
 
 func cmp*(a, b: Value): int =
   diff a.kind, b.kind
@@ -93,11 +143,9 @@ func cmp*(a, b: Value): int =
   of bNum:
     result = cmpNums(a.num, b.num)
   of bText, bSym:
-    diff a.text.len, b.text.len
-    result = cmpBytes(a.text.toBytes, b.text.toBytes)
+    result = cmpShortlex(a.text.toBytes, b.text.toBytes)
   of bBytes:
-    diff a.bytes.len, b.bytes.len
-    result = cmpBytes(a.bytes, b.bytes)
+    result = cmpShortlex(a.bytes, b.bytes)
   of bList, bRec:
     for i in 0 ..< min(a.items.len, b.items.len):
       diff a.items[i], b.items[i]
@@ -139,6 +187,10 @@ proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
   result = initDict(mark)
   for (k, v) in entries:
     result.dict[k] = v
+
+func head*(v: Value): lent Value =
+  guard v.kind in {bList, bRec}, "head must be used with a list / record"
+  return v.items[0]
 
 # ================ Misc converstion fns ================
 
@@ -202,10 +254,7 @@ proc toValue*(view: ValueView): Value =
     return null(view.mark)
   of bNum:
     let s = view.payloadBytes.toString()
-    try:
-      return num(parseBiggestInt(s), view.mark)
-    except ValueError:
-      raise newException(ValueError, "numeral outside int64: " & s)
+    return num(s, view.mark)
   of bText:
     return text(view.payloadBytes.toString(), view.mark)
   of bSym:

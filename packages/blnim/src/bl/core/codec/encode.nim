@@ -1,5 +1,8 @@
 import ./shared
 
+template refuse(msg: string) =
+  raise newException(CodecError, msg)
+
 type
   Encoder* = ref object
     buf*: Buffer[byte]

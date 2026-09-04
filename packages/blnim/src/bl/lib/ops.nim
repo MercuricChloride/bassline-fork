@@ -6,6 +6,9 @@
 import ../core
 import blmacro
 
+template refuse(msg: string) =
+  raise newException(ValueError, msg)
+
 # ================ Walking & accessing ================
 
 iterator items*(v: Value): Value =
@@ -39,23 +42,23 @@ func contains*(v, key: Value): bool =
   of bDict:
     key in v.dict
   else:
-    raise newException(ValueError, "contains requires a set / dict")
+    refuse "contains requires a set / dict"
 
 func `[]`*(v, key: Value): lent Value =
   case v.kind
   of bList, bRec:
-    doAssert key.kind == bNum, "[] for a list requires an index"
-    return v.items[key.num]
+    guard key.kind == bNum, "[] for a list requires an index"
+    return v.items.data[key.num.toInt]
   of bDict:
     return v.dict[key]
   else:
-    raise newException(ValueError, "[] requires a list, record, or dict")
+    refuse "[] requires a list, record, or dict"
 
 # ================ Similarity ================
 
 func similar*(v, examplar: Value): bool =
   if examplar.kind != v.kind: return
-  if examplar.marked != v.marked: return
+  if examplar.mark != v.mark: return
 
   case examplar.kind
   of bList:
@@ -86,7 +89,7 @@ func similar*(v, examplar: Value): bool =
 #[
 ================ Shapes ================
 
-A shape is a value with holes. A hole is a marked atom and the atom
+A shape is a value with holes. A hole is a mark atom and the atom
 is its name, aside from `_!` which binds nothing. 
 
 `extract` recognises a value by a shape, where literal parts must match,
@@ -101,14 +104,14 @@ unification there.
 ]#
 
 func isHole*(v: Value): bool =
-  v.marked and v.kind in {bNil..bBytes}
+  v.mark and v.kind in {bNil..bBytes}
 
 func isAnon*(v: Value): bool =
   v == sym("_", true)
 
 func holeName(hole: Value): Value =
   result = hole
-  result.marked = false
+  result.mark = false
 
 func hasHoles*(v: Value): bool =
   if isHole(v): return true
@@ -137,7 +140,7 @@ proc extract*(shape, v: Value, bindings: var Value): bool =
       return bindings.dict[name] == v
     bindings.dict[name] = v
     return true
-  if shape.kind != v.kind or shape.marked != v.marked:
+  if shape.kind != v.kind or shape.mark != v.mark:
     return false
   case shape.kind
   of bList, bRec:
@@ -149,15 +152,14 @@ proc extract*(shape, v: Value, bindings: var Value): bool =
     # the shape's keys must be there; keys the value has besides are
     # not its concern
     for k, sv in shape.dict:
-      if hasHoles(k):
-        raise newException(ValueError, "a hole in a dict key: " & $k)
+      guard not hasHoles k, "a hole in a dict key: " & $k
+      
       if k notin v.dict: return false
       if not extract(sv, v.dict[k], bindings): return false
     true
   of bSet:
     for m in shape.els.keys:
-      if hasHoles(m):
-        raise newException(ValueError, "a hole in a set member: " & $m)
+      guard not hasHoles m, "a hole in a set member: " & $m
     shape == v
   else:
     shape == v
@@ -175,14 +177,14 @@ proc inject*(shape, bindings: Value): Value =
     var kids = newSeqOfCap[Value](shape.items.len)
     for c in shape.items:
       kids.add inject(c, bindings)
-    result = if shape.kind == bList: initList(kids, shape.marked)
-             else: initRec(kids, shape.marked)
+    result = if shape.kind == bList: initList(kids, shape.mark)
+             else: initRec(kids, shape.mark)
   of bDict:
-    result = initDict(shape.marked)
+    result = initDict(shape.mark)
     for k, val in shape.dict:
       result.dict[inject(k, bindings)] = inject(val, bindings)
   of bSet:
-    result = initSet(shape.marked)
+    result = initSet(shape.mark)
     for m in shape.els.keys:
       result.els[inject(m, bindings)] = true
   else:

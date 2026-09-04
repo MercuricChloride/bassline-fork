@@ -16,6 +16,7 @@ export builders
 type
   ReadError* = object of CatchableError
   Incomplete* = object of ReadError
+
 const
   Ws = {' ', '\t', '\n', '\r'}
   Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '\'', '"', ';', '!'}
@@ -247,12 +248,10 @@ proc datum(s: string, pos: var int): Value =
             fail(s, start + i, "'_' sits between digits")
         else:
           digits.add c
-      if not isValidInt(digits.toOpenArrayByte(0, digits.high)):
-        fail(s, start, "not a canonical number: " & tok)
       try:
-        result = num(parseBiggestInt(digits).int)
+        result = num(digits)   # the spelling's law is the builder's
       except ValueError:
-        fail(s, start, "number outside the range this reading holds: " & tok)
+        fail(s, start, "not a canonical number: " & tok)
     elif tok == "nil":
       result = null()
     else:
