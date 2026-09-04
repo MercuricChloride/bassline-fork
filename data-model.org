@@ -26,9 +26,6 @@ contents, it lets the contents of the data focus on expressing
 "dialects", semantically rich vocabulary, without inappropriately
 mixing the two.
 
-
-
-
 * Design Goals
 
 All Bassline programs communicate and operate using this model as a
@@ -44,7 +41,7 @@ refer to as dialects.
 
 The data values are inspired by Rebol, EDN, and [[https://preserves.dev/preserves.html][Preserves]].
 
-The primary difference lies in the usage of "actionable" values.
+The primary difference lies in values having a gramatical "mark".
 
 The data model is syntax free, so any syntax you can provide that
 supports what we describe is fair game, with one exception: identity
@@ -135,7 +132,6 @@ The model distinguishes between three epistemic states:
 3. Silence
 
    A value isn't present, and thus doesn't have a denotation.
-
 
 **** Integers
 
@@ -277,7 +273,6 @@ must be zero everywhere else.
 A header with tag =0x0= is invalid and the decoder must crash. The
 purpose of this is that zeroed memory never decodes as a value, and in
 particular never as null.
-
 
 *** Scalar lengths
 

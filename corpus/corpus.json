@@ -1,0 +1,3157 @@
+[
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "nil"
+      },
+      {
+        "kind": "nil"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x10"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "nil-marked"
+      },
+      {
+        "kind": "nil",
+        "mark": true
+      },
+      {
+        "kind": "bytes",
+        "value": "0x18"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "zero"
+      },
+      {
+        "kind": "number",
+        "value": 0
+      },
+      {
+        "kind": "bytes",
+        "value": "0x2130"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "one"
+      },
+      {
+        "kind": "number",
+        "value": 1
+      },
+      {
+        "kind": "bytes",
+        "value": "0x2131"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "minus-one"
+      },
+      {
+        "kind": "number",
+        "value": -1
+      },
+      {
+        "kind": "bytes",
+        "value": "0x222d31"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "ten"
+      },
+      {
+        "kind": "number",
+        "value": 10
+      },
+      {
+        "kind": "bytes",
+        "value": "0x223130"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-marked"
+      },
+      {
+        "kind": "number",
+        "mark": true,
+        "value": 42
+      },
+      {
+        "kind": "bytes",
+        "value": "0x2a3432"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "int64-max"
+      },
+      {
+        "kind": "number",
+        "value": 9223372036854775807
+      },
+      {
+        "kind": "bytes",
+        "value": "0x271339323233333732303336383534373735383037"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "int64-min"
+      },
+      {
+        "kind": "number",
+        "value": -9223372036854775808
+      },
+      {
+        "kind": "bytes",
+        "value": "0x27142d39323233333732303336383534373735383038"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-empty"
+      },
+      {
+        "kind": "text",
+        "value": ""
+      },
+      {
+        "kind": "bytes",
+        "value": "0x30"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-hi"
+      },
+      {
+        "kind": "text",
+        "value": "hi"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x326869"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-inline-max"
+      },
+      {
+        "kind": "text",
+        "value": "abcdef"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x36616263646566"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-medium-min"
+      },
+      {
+        "kind": "text",
+        "value": "abcdefg"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x370761626364656667"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-medium-max"
+      },
+      {
+        "kind": "text",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x37fe6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-large-min"
+      },
+      {
+        "kind": "text",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x37ff000000ff616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-utf8"
+      },
+      {
+        "kind": "text",
+        "value": "héllo"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x3668c3a96c6c6f"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-escapes"
+      },
+      {
+        "kind": "text",
+        "value": "a\n\t\r\\\"b"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x3707610a090d5c2262"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-marked"
+      },
+      {
+        "kind": "text",
+        "mark": true,
+        "value": "go"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x3a676f"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "sym"
+      },
+      {
+        "kind": "symbol",
+        "value": "go"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x42676f"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "sym-marked"
+      },
+      {
+        "kind": "symbol",
+        "mark": true,
+        "value": "go"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x4a676f"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "sym-quoted"
+      },
+      {
+        "kind": "symbol",
+        "value": "a b"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x43612062"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "sym-nil"
+      },
+      {
+        "kind": "symbol",
+        "value": "nil"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x436e696c"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "sym-empty"
+      },
+      {
+        "kind": "symbol",
+        "value": ""
+      },
+      {
+        "kind": "bytes",
+        "value": "0x40"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "bytes-empty"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x50"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "bytes"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xdeadbeef"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x54deadbeef"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "bytes-marked"
+      },
+      {
+        "kind": "bytes",
+        "mark": true,
+        "value": "0xff"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x59ff"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "bytes-large-min"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x57ff000000ff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "list-empty"
+      },
+      {
+        "kind": "list",
+        "value": []
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "list"
+      },
+      {
+        "kind": "list",
+        "value": [
+          {
+            "kind": "number",
+            "value": 1
+          },
+          {
+            "kind": "number",
+            "value": 2
+          },
+          {
+            "kind": "number",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60213121322133a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "list-nested"
+      },
+      {
+        "kind": "list",
+        "value": [
+          {
+            "kind": "list",
+            "value": []
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x6060a0a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "list-marked"
+      },
+      {
+        "kind": "list",
+        "mark": true,
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "a"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x684161a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "list-deep-16"
+      },
+      {
+        "kind": "list",
+        "value": [
+          {
+            "kind": "list",
+            "value": [
+              {
+                "kind": "list",
+                "value": [
+                  {
+                    "kind": "list",
+                    "value": [
+                      {
+                        "kind": "list",
+                        "value": [
+                          {
+                            "kind": "list",
+                            "value": [
+                              {
+                                "kind": "list",
+                                "value": [
+                                  {
+                                    "kind": "list",
+                                    "value": [
+                                      {
+                                        "kind": "list",
+                                        "value": [
+                                          {
+                                            "kind": "list",
+                                            "value": [
+                                              {
+                                                "kind": "list",
+                                                "value": [
+                                                  {
+                                                    "kind": "list",
+                                                    "value": [
+                                                      {
+                                                        "kind": "list",
+                                                        "value": [
+                                                          {
+                                                            "kind": "list",
+                                                            "value": [
+                                                              {
+                                                                "kind": "list",
+                                                                "value": [
+                                                                  {
+                                                                    "kind": "list",
+                                                                    "value": []
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60606060606060606060606060606060a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "rec"
+      },
+      {
+        "kind": "record",
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "f"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x704166a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "rec-fields"
+      },
+      {
+        "kind": "record",
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "f"
+          },
+          {
+            "kind": "number",
+            "value": 1
+          },
+          {
+            "kind": "text",
+            "value": "x"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x70416621313178a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "rec-marked"
+      },
+      {
+        "kind": "record",
+        "mark": true,
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "go"
+          },
+          {
+            "kind": "number",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x7842676f2131a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "rec-frame-head"
+      },
+      {
+        "kind": "record",
+        "value": [
+          {
+            "kind": "record",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "a"
+              }
+            ]
+          },
+          {
+            "kind": "symbol",
+            "value": "b"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x70704161a04162a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-empty"
+      },
+      {
+        "kind": "dict",
+        "value": []
+      },
+      {
+        "kind": "bytes",
+        "value": "0x80a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "value": "a"
+            },
+            {
+              "kind": "number",
+              "value": 1
+            }
+          ]
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x8041612131a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-shortlex"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "value": "b"
+            },
+            {
+              "kind": "number",
+              "value": 1
+            }
+          ],
+          [
+            {
+              "kind": "symbol",
+              "value": "ab"
+            },
+            {
+              "kind": "number",
+              "value": 2
+            }
+          ]
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x80416221314261622132a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-key-kinds"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "number",
+              "value": 1
+            },
+            {
+              "kind": "symbol",
+              "value": "a"
+            }
+          ],
+          [
+            {
+              "kind": "text",
+              "value": "1"
+            },
+            {
+              "kind": "symbol",
+              "value": "b"
+            }
+          ]
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x802131416131314162a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-marked"
+      },
+      {
+        "kind": "dict",
+        "mark": true,
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "value": "k"
+            },
+            {
+              "kind": "symbol",
+              "value": "v"
+            }
+          ]
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x88416b4176a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-marked-key"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "value": "go"
+            },
+            {
+              "kind": "number",
+              "value": 1
+            }
+          ],
+          [
+            {
+              "kind": "symbol",
+              "mark": true,
+              "value": "go"
+            },
+            {
+              "kind": "number",
+              "value": 2
+            }
+          ]
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x8042676f21314a676f2132a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-nested"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "value": "k"
+            },
+            {
+              "kind": "dict",
+              "value": [
+                [
+                  {
+                    "kind": "symbol",
+                    "value": "j"
+                  },
+                  {
+                    "kind": "list",
+                    "value": [
+                      {
+                        "kind": "number",
+                        "value": 1
+                      }
+                    ]
+                  }
+                ]
+              ]
+            }
+          ]
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x80416b80416a602131a0a0a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-empty"
+      },
+      {
+        "kind": "set",
+        "value": []
+      },
+      {
+        "kind": "bytes",
+        "value": "0x90a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set"
+      },
+      {
+        "kind": "set",
+        "value": [
+          {
+            "kind": "number",
+            "value": 1
+          },
+          {
+            "kind": "number",
+            "value": 2
+          },
+          {
+            "kind": "number",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x90213121322133a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-shortlex"
+      },
+      {
+        "kind": "set",
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "b"
+          },
+          {
+            "kind": "symbol",
+            "value": "ab"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x904162426162a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-kinds"
+      },
+      {
+        "kind": "set",
+        "value": [
+          {
+            "kind": "nil"
+          },
+          {
+            "kind": "number",
+            "value": 0
+          },
+          {
+            "kind": "text",
+            "value": ""
+          },
+          {
+            "kind": "symbol",
+            "value": ""
+          },
+          {
+            "kind": "bytes",
+            "value": "0x"
+          },
+          {
+            "kind": "list",
+            "value": []
+          },
+          {
+            "kind": "record",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "h"
+              }
+            ]
+          },
+          {
+            "kind": "dict",
+            "value": []
+          },
+          {
+            "kind": "set",
+            "value": []
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x9010213030405060a0704168a080a090a0a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-mark-order"
+      },
+      {
+        "kind": "set",
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "x"
+          },
+          {
+            "kind": "symbol",
+            "mark": true,
+            "value": "x"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x9041784978a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-shorter-frame-after"
+      },
+      {
+        "kind": "set",
+        "value": [
+          {
+            "kind": "list",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "a"
+              },
+              {
+                "kind": "symbol",
+                "value": "b"
+              }
+            ]
+          },
+          {
+            "kind": "list",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "a"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x906041614162a0604161a0a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-int-order"
+      },
+      {
+        "kind": "set",
+        "value": [
+          {
+            "kind": "number",
+            "value": 1
+          },
+          {
+            "kind": "number",
+            "value": 9
+          },
+          {
+            "kind": "number",
+            "value": -1
+          },
+          {
+            "kind": "number",
+            "value": 10
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x9021312139222d31223130a0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "message"
+      },
+      {
+        "kind": "record",
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "msg"
+          },
+          {
+            "kind": "text",
+            "value": "hello"
+          },
+          {
+            "kind": "number",
+            "value": 42
+          },
+          {
+            "kind": "dict",
+            "value": [
+              [
+                {
+                  "kind": "symbol",
+                  "value": "k"
+                },
+                {
+                  "kind": "symbol",
+                  "value": "v"
+                }
+              ],
+              [
+                {
+                  "kind": "symbol",
+                  "value": "x"
+                },
+                {
+                  "kind": "list",
+                  "value": [
+                    {
+                      "kind": "number",
+                      "value": 1
+                    },
+                    {
+                      "kind": "number",
+                      "value": 2
+                    },
+                    {
+                      "kind": "number",
+                      "value": 3
+                    }
+                  ]
+                }
+              ]
+            ]
+          },
+          {
+            "kind": "symbol",
+            "mark": true,
+            "value": "go"
+          }
+        ]
+      },
+      {
+        "kind": "bytes",
+        "value": "0x70436d73673568656c6c6f22343280416b4176417860213121322133a0a04a676fa0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-past-int64"
+      },
+      {
+        "kind": "number",
+        "value": 123456789012345678901234567890
+      },
+      {
+        "kind": "bytes",
+        "value": "0x271e313233343536373839303132333435363738393031323334353637383930"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "ce"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-negative-past-int64"
+      },
+      {
+        "kind": "number",
+        "value": -123456789012345678901234567890
+      },
+      {
+        "kind": "bytes",
+        "value": "0x271f2d313233343536373839303132333435363738393031323334353637383930"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "tag-zero"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x00"
+      },
+      {
+        "kind": "symbol",
+        "value": "invalid-tag"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "tag-b"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xb0"
+      },
+      {
+        "kind": "symbol",
+        "value": "invalid-tag"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "tag-f"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xf0"
+      },
+      {
+        "kind": "symbol",
+        "value": "invalid-tag"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-len-bits"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xa1"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-with-bits"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-mark-bit"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xa8"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-with-bits"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-at-top"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xa0"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-at-top"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-after-value"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60a0a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "end-at-top"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "nil-len-bits"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x11"
+      },
+      {
+        "kind": "symbol",
+        "value": "length-bits"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "list-len-bits"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x61a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "length-bits"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "medium-form-for-small"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x3703616263"
+      },
+      {
+        "kind": "symbol",
+        "value": "non-minimal-length"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "large-form-for-medium"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x37ff0000001061616161616161616161616161616161"
+      },
+      {
+        "kind": "symbol",
+        "value": "non-minimal-length"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-empty"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x20"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-integer"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-negative-zero"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x222d30"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-integer"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-leading-zero"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x223031"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-integer"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-bare-minus"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x212d"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-integer"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "int-not-digits"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x2161"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-integer"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-bad-utf8"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x31ff"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-utf8"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "sym-overlong-utf8"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x42c080"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-utf8"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "text-surrogate"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x33eda080"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-utf8"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "record-empty"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x70a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "empty-record"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-stranded-key"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x804161a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "stranded-key"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-out-of-order"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x804162213141612132a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "out-of-order"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-duplicate-key"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x804161213141612132a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "duplicate"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-out-of-order"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x9041624161a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "out-of-order"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-duplicate"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x9041614161a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "duplicate"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "set-shortlex-violated"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x904261624162a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "out-of-order"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "nested-stranded-key"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60804161a0a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "stranded-key"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reject"
+      },
+      {
+        "kind": "symbol",
+        "value": "nested-bad-integer"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60222d30a0"
+      },
+      {
+        "kind": "symbol",
+        "value": "bad-integer"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "starved"
+      },
+      {
+        "kind": "symbol",
+        "value": "open-list"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x60"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "starved"
+      },
+      {
+        "kind": "symbol",
+        "value": "short-payload"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x336162"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "starved"
+      },
+      {
+        "kind": "symbol",
+        "value": "medium-no-length"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x37"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "starved"
+      },
+      {
+        "kind": "symbol",
+        "value": "large-short-length"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x37ff000000"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "starved"
+      },
+      {
+        "kind": "symbol",
+        "value": "list-unclosed"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x602131"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "starved"
+      },
+      {
+        "kind": "symbol",
+        "value": "dict-key-then-end-of-input"
+      },
+      {
+        "kind": "bytes",
+        "value": "0x804161"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "1_000"
+      },
+      {
+        "kind": "number",
+        "value": 1000
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "-1_000"
+      },
+      {
+        "kind": "number",
+        "value": -1000
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "0xDE_AD"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xdead"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "0xDEAD"
+      },
+      {
+        "kind": "bytes",
+        "value": "0xdead"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "'nil'"
+      },
+      {
+        "kind": "symbol",
+        "value": "nil"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "nil!"
+      },
+      {
+        "kind": "nil",
+        "mark": true
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "nilx"
+      },
+      {
+        "kind": "symbol",
+        "value": "nilx"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "_5"
+      },
+      {
+        "kind": "symbol",
+        "value": "_5"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "+5"
+      },
+      {
+        "kind": "symbol",
+        "value": "+5"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "->"
+      },
+      {
+        "kind": "symbol",
+        "value": "->"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "'a!b'"
+      },
+      {
+        "kind": "symbol",
+        "value": "a!b"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "{foo:bar}"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "value": "foo"
+            },
+            {
+              "kind": "symbol",
+              "value": "bar"
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "{go!: 1}"
+      },
+      {
+        "kind": "dict",
+        "value": [
+          [
+            {
+              "kind": "symbol",
+              "mark": true,
+              "value": "go"
+            },
+            {
+              "kind": "number",
+              "value": 1
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "; a comment\n5"
+      },
+      {
+        "kind": "number",
+        "value": 5
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "[go! stop]"
+      },
+      {
+        "kind": "list",
+        "value": [
+          {
+            "kind": "symbol",
+            "mark": true,
+            "value": "go"
+          },
+          {
+            "kind": "symbol",
+            "value": "stop"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "(f go! !(g))"
+      },
+      {
+        "kind": "record",
+        "value": [
+          {
+            "kind": "symbol",
+            "value": "f"
+          },
+          {
+            "kind": "symbol",
+            "mark": true,
+            "value": "go"
+          },
+          {
+            "kind": "record",
+            "mark": true,
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "g"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "reads"
+      },
+      {
+        "kind": "text",
+        "value": "\"a\nb\""
+      },
+      {
+        "kind": "text",
+        "value": "a\nb"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "007"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "-0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1.5"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "42px"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1-2"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1."
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1_"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1__000"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "0_0"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "0x123"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "0x_de"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{a b: c}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{a: 1 b}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{: a}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{a:}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{1 1}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{a: 1 a: 2}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "()"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "! (f)"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "!!(f)"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "!x"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "(f)!"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "!(f)!"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "a!b"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1 2"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "[1 2"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "(f a"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "{a: 1"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "{a b"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "{a"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "{a:"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "\"open"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "!"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "go !"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "incomplete"
+      },
+      {
+        "kind": "text",
+        "value": "[1 [2] "
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "document"
+      },
+      {
+        "kind": "text",
+        "value": "1 2 3"
+      },
+      {
+        "kind": "list",
+        "value": [
+          {
+            "kind": "number",
+            "value": 1
+          },
+          {
+            "kind": "number",
+            "value": 2
+          },
+          {
+            "kind": "number",
+            "value": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "document"
+      },
+      {
+        "kind": "text",
+        "value": "; only a comment\n"
+      },
+      {
+        "kind": "list",
+        "value": []
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "document"
+      },
+      {
+        "kind": "text",
+        "value": ""
+      },
+      {
+        "kind": "list",
+        "value": []
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "document"
+      },
+      {
+        "kind": "text",
+        "value": "(a) [b] {c} {d: e} f"
+      },
+      {
+        "kind": "list",
+        "value": [
+          {
+            "kind": "record",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "a"
+              }
+            ]
+          },
+          {
+            "kind": "list",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "b"
+              }
+            ]
+          },
+          {
+            "kind": "set",
+            "value": [
+              {
+                "kind": "symbol",
+                "value": "c"
+              }
+            ]
+          },
+          {
+            "kind": "dict",
+            "value": [
+              [
+                {
+                  "kind": "symbol",
+                  "value": "d"
+                },
+                {
+                  "kind": "symbol",
+                  "value": "e"
+                }
+              ]
+            ]
+          },
+          {
+            "kind": "symbol",
+            "value": "f"
+          }
+        ]
+      }
+    ]
+  }
+]

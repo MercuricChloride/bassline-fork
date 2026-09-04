@@ -329,6 +329,11 @@ func escapedLen(s: string, q: char): int =
     inc result
     if c == q or c in {'\\', '\n', '\t', '\r'}: inc result
 
+func hexString*(bytes: openArray[byte]): string =
+  result = "0x"
+  for b in bytes:
+    result.add b.toHex.toLowerAscii
+
 func printAtom(v: Value): string =
   case v.kind
   of bNil: 
@@ -343,8 +348,7 @@ func printAtom(v: Value): string =
   of bText: 
     result = "\"" & escaped(v.text, '"') & "\""
   of bBytes:
-    result = "0x"
-    for b in v.bytes: result.add b.toHex.toLowerAscii
+    result = v.bytes.hexString
   else: discard
   if v.mark: result.add '!'
 

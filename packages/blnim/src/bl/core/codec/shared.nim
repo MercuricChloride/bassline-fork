@@ -125,6 +125,18 @@ type
       payloadLen*: uint32
     else: discard
 
+func `$`*(kind: Kind): string =
+  case kind
+  of bNil: "nil"
+  of bNum: "number"
+  of bText: "text"
+  of bSym: "symbol"
+  of bBytes: "bytes"
+  of bList: "list"
+  of bRec: "record"
+  of bDict: "dict"
+  of bSet: "set"
+
 func tag*(kind: Kind): byte =
   byte(kind.ord + 1)
 
