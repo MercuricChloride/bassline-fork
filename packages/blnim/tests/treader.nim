@@ -1,37 +1,27 @@
 ## the text dialect: what the corpus does not already say. The
 ## reader's own cases (reads, refuses, incomplete, document) run in
-## tcorpus; here the printer's layouts read back, prefixes of a text
-## are never refused, and the rules around each token.
+## tcorpus. Here a text is checked by the CE bytes it reads to, and
+## a printing by the bytes it starts from, so the oracle is the spec's
+## encoding and never another front end.
 
 import std/[strutils, unittest]
 import bl/core
-import bl/lib/[blah, blmacro]
+import bl/lib/blah
 import ./corpus
 
-template reads(s: string) =
-  discard readValue(s)
+proc ce(hex: string): seq[byte] =
+  ## CE bytes spelled in hex, spaces between for the eye
+  @(hex.replace(" ", "").parseHexStr.toBytes)
 
-template readsAs(s: string, v: Value) =
-  check readValue(s) == v
+template spells(s: string, hex: string) =
+  ## the text reads to the value whose canonical encoding is hex
+  check ceBytes(readValue(s)) == ce(hex)
 
-template prints(v: Value, s: string) =
-  check $v == s
-
-template rejects(s: string) =
-  expect ReadError:
-    discard readValue(s)
-
-template incomplete(s: string) =
-  expect Incomplete:
-    discard readDocument(s)
-
-template refuses(s: string) =
-  ## refused outright: an Incomplete is not a refusal
-  expect ReadError:
-    try:
-      discard readDocument(s)
-    except Incomplete:
-      discard
+template prints(hex: string, s: string) =
+  ## the value whose canonical encoding is hex prints as s
+  let l = land(ce(hex))
+  require l.values.len == 1
+  check $l.values[0].toValue == s
 
 proc prefixesRead(t: string): int =
   ## every prefix ending in whitespace has all its tokens terminated,
@@ -51,17 +41,18 @@ suite "printer":
     let
       name = c.items[1].text
       value = c.items[2]
+      expect = c.items[3].bytes
     test name:
       for width in [high(int), 40, 16, 1]:
-        readsAs pretty(value, width), value
+        check ceBytes(readValue(pretty(value, width))) == expect
       discard prefixesRead(pretty(value, 16))
 
   test "random values":
     # blah's values run to megabytes; a shallower value is enough here
     for _ in 0 ..< 200:
       let v = randValue(3)
-      readsAs $v, v
-      readsAs pretty(v, 40), v
+      check readValue($v) == v
+      check readValue(pretty(v, 40)) == v
 
   test "prefixes of small random values":
     # the prefix law reads every prefix, so keep the texts short
@@ -75,70 +66,73 @@ suite "printer":
     check incompletes > 0
 
   test "dicts and sets print in canonical order":
-    prints bl({b: 1, a: 2}), "{a: 2 b: 1}"
-    prints bl({c, b, a}), "{a b c}"
-    prints bl({10, 9, -1}), "{9 -1 10}"   # shortlex: '-' sorts before the digits
+    prints "80 4161 2132 4162 2131 a0", "{a: 2 b: 1}"
+    prints "90 4161 4162 4163 a0", "{a b c}"
+    prints "90 2139 222d31 223130 a0", "{9 -1 10}"   # shortlex: '-' sorts before the digits
 
 suite "nil":
   test "reserved, quotable, markable":
-    readsAs "'nil'", sym"nil"
-    readsAs "nil!", null(true)
-    readsAs "nilx", sym"nilx"
-    readsAs "nil", null()
-    prints sym"nil", "'nil'"
+    spells "nil", "10"
+    spells "nil!", "18"
+    spells "'nil'", "43 6e696c"
+    spells "nilx", "44 6e696c78"
+    prints "43 6e696c", "'nil'"
 
 suite "numbers":
   test "'_' separates digits and never survives the reading":
-    readsAs "1_000_000", bl(1_000_000)
-    prints readValue("1_000"), "1000"
-    readsAs "_5", sym"_5"
-    readsAs "_5_", sym"_5_"
-  test "past int64 is held as spelled":
-    check readValue("123456789012345678901234567890").num.isWide
-    prints readValue("123456789012345678901234567890"), "123456789012345678901234567890"
-    prints readValue("-123456789012345678901234567890"), "-123456789012345678901234567890"
-    check readValue("9223372036854775807").num.isInt
-    check readValue("9223372036854775808").num.isWide
+    spells "1_000_000", "27 07 31303030303030"
+    spells "_5", "42 5f35"
+    spells "_5_", "43 5f355f"
+  test "past int64 reads and prints as spelled":
+    spells "123456789012345678901234567890",
+      "27 1e 313233343536373839303132333435363738393031323334353637383930"
+    prints "27 1f 2d313233343536373839303132333435363738393031323334353637383930",
+      "-123456789012345678901234567890"
 
 suite "strings and symbols":
   test "escapes":
-    readsAs "\"a\\n\\t\\r\\\\\\\"b\"", text("a\n\t\r\\\"b")
-    readsAs "\"a\nb\"", text("a\nb")
-    readsAs "'a\\'b'", sym"a'b"
+    spells "\"a\\n\\t\\r\\\\\\\"b\"", "37 07 61 0a 09 0d 5c 22 62"
+    spells "\"a\nb\"", "33 61 0a 62"
+    spells "'a\\'b'", "43 61 27 62"
     rejects "\"bad \\z escape\""
-  test "bare symbols print bare":
-    for s in ["->", "-", "<=", "+5", "*", "?", "a.b", ",", "a,b", "#", "#weird", "`tick"]:
-      readsAs s, sym(s)
-      prints sym(s), s
+  test "bare symbols read bare and print bare":
+    for (s, hex) in [("->", "42 2d3e"), ("-", "41 2d"), ("<=", "42 3c3d"),
+                     ("+5", "42 2b35"), ("*", "41 2a"), ("?", "41 3f"),
+                     ("a.b", "43 612e62"), (",", "41 2c"), ("a,b", "43 612c62"),
+                     ("#", "41 23"), ("#weird", "46 237765697264"),
+                     ("`tick", "45 607469636b")]:
+      checkpoint(s)
+      spells s, hex
+      prints hex, s
   test "a delimiter inside a symbol quotes it":
-    readsAs "'a!b'", sym"a!b"
-    prints sym"a!b", "'a!b'"
-    prints sym"a b", "'a b'"
-    prints sym"a:b", "'a:b'"
+    spells "'a!b'", "43 612162"
+    prints "43 612162", "'a!b'"
+    prints "43 612062", "'a b'"
+    prints "43 613a62", "'a:b'"
   test "malformed UTF-8 is refused":
     rejects "\"\xFF\""
     rejects "'\xC0\x80'"
 
 suite "bytes":
   test "either case, '_' between digits":
-    readsAs "0xDEAD", bl(x"dead")
-    readsAs "0xde_ad", bl(x"dead")
-    readsAs "0xd_e_a_d", bl(x"dead")
-    readsAs "0x", bl(x"")
-    prints bl(x"dead"), "0xdead"
+    spells "0xDEAD", "52 dead"
+    spells "0xde_ad", "52 dead"
+    spells "0xd_e_a_d", "52 dead"
+    spells "0x", "50"
+    prints "52 dead", "0xdead"
 
 suite "braces and marks":
   test "the first element decides set or dict":
-    readsAs "{foo:bar}", bl({foo: bar})
-    readsAs "{go!: 1}", bl({!go: 1})
+    spells "{foo:bar}", "80 43666f6f 43626172 a0"
+    spells "{go!: 1}", "80 4a676f 2131 a0"
   test "marks touch their value":
-    readsAs "[go! stop]", bl([!go, stop])
-    readsAs "(f go! !(g))", bl(f(!go, !g()))
+    spells "[go! stop]", "60 4a676f 4473746f70 a0"
+    spells "(f go! !(g))", "70 4166 4a676f 78 4167 a0 a0"
     rejects "!;c\n(f)"
 
 suite "documents":
   test "readValue wants exactly one value":
-    reads "1"
+    spells "1", "21 31"
     rejects ""
     rejects "1 2"
   test "Incomplete is a ReadError, so a prefix is rejected too":

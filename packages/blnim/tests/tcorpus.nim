@@ -8,19 +8,6 @@ import bl/core
 import bl/lib/[json, blmacro]
 import ./corpus
 
-type Outcome = enum read, refused, incomplete
-
-proc reading(src: string, whole = false): Outcome =
-  ## how the reader leaves src: whole reads it as a document
-  try:
-    if whole: discard readDocument(src)
-    else: discard readValue(src)
-    read
-  except Incomplete:
-    incomplete
-  except ReadError:
-    refused
-
 suite "ce":
   filter ce, c:
     let
@@ -35,7 +22,6 @@ suite "ce":
       check not l.pending
       if l.values.len == 1:
         check l.values[0].toValue == value
-      check readValue($value) == value
 
 suite "reject":
   filter reject, c:
@@ -69,13 +55,13 @@ suite "refuses":
   filter refuses, c:
     let src = c.items[1].text
     test src.escape:
-      check reading(src) == refused
+      refuses src
 
 suite "incomplete":
   filter incomplete, c:
     let src = c.items[1].text
     test src.escape:
-      check reading(src, whole = true) == incomplete
+      incomplete src
 
 suite "document":
   filter document, c:
@@ -86,10 +72,6 @@ suite "document":
       check readDocument(src) == values.items.data
 
 suite "derived":
-  test "every case survives the JSON dialect":
-    for c in cases:
-      check c.toJson.toValue == c
-
   test "corpus.json is the cases":
     let records = parseJson(readFile(Corpus / "corpus.json"))
     check records.len == cases.len
@@ -97,7 +79,8 @@ suite "derived":
       check records[i].toValue == cases[i]
 
   test "corpus.blb is the cases":
-    let l = land(cast[seq[byte]](readFile(Corpus / "corpus.blb")))
+    let blb = readFile(Corpus / "corpus.blb")
+    let l = land(blb.toBytes)
     check not l.refused
     check not l.pending
     check l.values.len == cases.len

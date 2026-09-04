@@ -1,4 +1,4 @@
-import std/os
+import std/[os, unittest]
 import bl/core
 import bl/lib/[json, blmacro]
 
@@ -24,6 +24,23 @@ type Landed* = object
   pending*: bool
   refused*: bool
   why*: string
+
+template rejects*(s: string) =
+  ## a ReadError of any kind including incomplete
+  expect ReadError:
+    discard readValue(s)
+
+template incomplete*(s: string) =
+  expect Incomplete:
+    discard readValue(s)
+
+template refuses*(s: string) =
+  ## refused outright and not incomplete
+  expect ReadError:
+    try:
+      discard readValue(s)
+    except Incomplete:
+      discard
 
 proc land*(bytes: openArray[byte]): Landed =
   var d = newDecoder(newBuffer(bytes))

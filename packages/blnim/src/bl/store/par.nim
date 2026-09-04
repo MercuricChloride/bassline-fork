@@ -1,5 +1,3 @@
-## blstore_par.nim
-## =========================================================================
 ## Parallel operations over blstore, via malebolgia's structured
 ## concurrency. Everything here rides on one fact: a committed Snapshot
 ## is an immutable value (no ref, no destructor, committed pages

@@ -1,6 +1,9 @@
-import std/[unittest]
+## Value: cmp is CE order, and Num holds every integer
+
+import std/[math, unittest]
 import bl/core
 import bl/lib/blah
+import ./corpus
 
 suite "ordering":
 
@@ -31,23 +34,42 @@ suite "ordering":
     check initRec(@[sym"f", num 1]) < initRec(@[sym"f"])
     check initList() > initList(@[num 1])
 
-suite "encodings":
+  test "value order is byte order":
+    var values: seq[Value]
+    for _ in 0 ..< 80:
+      values.add randValue(3)
+    var spelled: seq[seq[byte]]
+    for v in values:
+      spelled.add ceBytes(v)
+    for i in 0 ..< values.len:
+      for j in 0 ..< values.len:
+        check cmp(values[i], values[j]).sgn == cmpBytes(spelled[i], spelled[j]).sgn
 
-  test "round trips":
-    var
-      encoder = newEncoder()
-      decoder = newDecoder()
-      vals: seq[Value]
-    
-    for val in blah 10:
-      encoder.write val
-      vals.add val
+suite "numbers":
 
-    echo "encoded: ", (encoder.buf.data.len / 1_000_000), " mb"
-    decoder.buf.add encoder.bytes
-    
-    var i = 0
-    for val in decoder:
-      check vals[i] == val.toValue()
-      inc i
-    require i == vals.len
+  test "a spelling that fits int64 is an int":
+    check initNum("42").isInt
+    check initNum("-9223372036854775808").isInt
+    check initNum("9223372036854775807").isInt
+    check initNum("42").toInt == 42
+
+  test "past int64 is held as spelled":
+    check initNum("9223372036854775808").isWide
+    check initNum("-9223372036854775809").isWide
+    check $initNum("123456789012345678901234567890") == "123456789012345678901234567890"
+    expect ValueError:
+      discard initNum("9223372036854775808").toInt
+
+  test "only a canonical spelling is a number":
+    for s in ["007", "-0", "1_000", "", "-", "abc", "12x", "1.5"]:
+      checkpoint(s)
+      expect ValueError:
+        discard initNum(s)
+
+  test "wide and int compare as their spellings":
+    let two63 = num("9223372036854775808")
+    check num(int.high) < two63          # both nineteen digits
+    check two63 < num(int.low)           # twenty digits with the sign
+    check num("99999999999999999999") > num(1000000000000000000)
+    check num("-99999999999999999999") > num("99999999999999999999")
+    check num("123456789012345678901234567890") == num("123456789012345678901234567890")

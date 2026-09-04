@@ -1,5 +1,3 @@
-## store.nim
-## =========================================================================
 ## An append-only, copy-on-write B+tree holding a monotone set of
 ## canonically-encoded (CE) byte strings. Key-only: an element's bytes are
 ## simultaneously its key, its value, and its identity. The storage layer
@@ -36,9 +34,7 @@
 ##
 ## Known bets / pitfalls (named, per the running checklist):
 ##
-##   * Native-endian on-disk integers. Fine on your machines (LE); a
-##     portable format wants explicit LE load/store helpers. Retrofit is
-##     mechanical but touches every accessor — decide before shipping.
+##   * Native-endian on-disk integers
 ##   * Packed structs cast onto arbitrary page offsets: byte-safe codegen
 ##     via {.packed.}, tolerated by x86/arm64 regardless. The pedantic
 ##     alternative is copyMem into locals.
@@ -96,97 +92,119 @@ const
 
 type
   PageKind {.size: 1.} = enum
-    pkNone     = 0                  # zeroed memory never decodes as a
-                                    # valid page — mirror of CE's tag-0 rule
-    pkInterior = 1
-    pkLeaf     = 2
-    pkArena    = 3                  # packed tail arena (v2)
+    pkNone
+    # so zeroed memory never decodes as a valid page
+    pkInterior
+    pkLeaf
+    pkArena
+    # Packed tail arena
 
-  # 12 bytes; fields happen to be naturally aligned even unpacked, but
-  # packed states the layout as an invariant rather than an accident.
   PageHeader {.packed.} = object
+    ## 12 byte header that each page begin with
     kind: PageKind
-    flags: uint8                    # unused; reserves the byte
+    _: uint8 # unused but pads a byte
     cellCount: uint16
-    cellStart: uint32               # offset of lowest cell byte; cells
-                                    # grow DOWN from PageSize toward the
-                                    # slot array. uint32 because the empty
-                                    # value is PageSize itself (16384).
-    rightChild: PageN               # interior only: the (n+1)th child
+    cellStart: uint32
+    ##[
+    offset of lowest cell byte
+    cells grow down from PageSize toward the
+    slot array. uint32 because the empty value
+    is just PageSize itself
+    ]##
+    rightChild: PageN
+    ## for interior pages only, the (n+1)th child
 
-  # Leaf cell = one ELEMENT. Key-only: `len` is the whole element's
-  # length; data holds the inline portion (all of it, or exactly
-  # MaxLocal bytes with the tail packed byte-exact into the arena --
-  # a contiguous byte range starting at (tailPg, tailOff), spanning
-  # next-linked arena pages as needed; its length is derived:
-  # len - MaxLocal).
+  
   LeafObj {.packed.} = object
-    tailPg: PageN                   # 0 = fully inline
-    tailOff: uint16                 # tail start within its arena page
-    len: uint32                     # total element length
+    ##[
+    Leaf cell = one ELEMENT. Key-only: `len` is the whole element's
+    length; data holds the inline portion (all of it, or exactly
+    MaxLocal bytes with the tail packed byte-exact into the arena --
+    a contiguous byte range starting at (tailPg, tailOff), spanning
+    next-linked arena pages as needed; its length is derived:
+    len - MaxLocal).
+    ]##
+    tailPg: PageN
+    ## 0 = fully inline
+    tailOff: uint16
+    ## tail start within its arena page
+    len: uint32
+    ## total element length
     data: UncheckedArray[byte]
 
-  # Interior cell = one SEPARATOR + left child. Invariant, for cell i:
-  #   every element in child_i  <  sep_i  <= every element to its right
-  # Separators are fenceposts: shortest discriminating prefixes, not
-  # elements, and never consulted for anything but routing.
   InteriorObj {.packed.} = object
+    ##[
+    Interior cell = one SEPARATOR + left child. 
+    Invariant, for cell i:
+      every element in child_i  <  sep_i  <= every element to its right
+    Separators are fenceposts: shortest discriminating prefixes, not
+    elements, and never consulted for anything but routing.
+    ]##
     child: PageN
     sepLen: uint16
     sep: UncheckedArray[byte]
 
-  # Arena pages hold element TAILS packed back to back, byte-exact --
-  # this is the v2 chain-packing design. Tails of successive inserts
-  # within one txn share pages; a tail that outgrows the current page
-  # continues in a fresh one via `next`. Once the txn commits, arena
-  # pages freeze like every other page; the next txn opens its own.
-  # No refcounts, no fragmentation, no reclamation: monotonicity makes
-  # sharing free. Residual waste = one partial arena page per txn.
-  # The kind byte keeps every page in the file self-identifying.
   ArenaObj {.packed.} = object
-    kind: PageKind                  # pkArena
+    ##[
+    Arena pages hold element TAILS packed back to back
+    
+    Tails of successive inserts within one txn share pages.
+    A tail that outgrows the current page continues in a fresh one via `next`. 
+    Once the txn commits, arena pages freeze like every other page and the next
+    txn opens its own.
+
+    For this reason making many transactions can create residual waste
+    because you end up with a number of partially filled pages.
+    ]##
+    kind: PageKind
+    ## pkArena
     pad: array[3, uint8]
-    next: PageN                     # continuation page for spanning
-                                    # tails (0 = none opened yet)
-    used: uint32                    # bytes packed so far (integrity /
-                                    # future fsck; readers derive)
+    next: PageN
+    ## continuation page for spanning tails
+    ## or 0 when it has no spanning tails
+    used: uint32
+    ## bytes packed so far
     data: UncheckedArray[byte]
 
-  # Page 0, written once at create. Identifies the file and pins its
-  # geometry so a mismatched PageSize build refuses to open it.
+  
   Superblock {.packed.} = object
+    ## Page 0, written once at create. 
+    ## Identifies the file and its geometry so a mismatched
+    ## PageSize build refuses to open it.
     magic: uint32
     version: uint32
     pageSize: uint32
 
-  # Commit headers are appended at page boundaries after the pages they
-  # publish. `pageCount` counts pages INCLUDING this header page, which
-  # doubles as a validity check: a header at page p must claim p+1.
   CommitHeader {.packed.} = object
+    ## Commit headers are appended at page boundaries after the pages they
+    ## publish. `pageCount` counts pages INCLUDING this header page, which
+    ## doubles as a validity check: a header at page p must claim p+1.
     magic: uint32
     version: uint32
     txid: uint64
-    root: PageN                     # 0 = empty tree
+    root: PageN
+    ## 0 = empty tree
     pageCount: PageN
     digest: array[32, byte]
 
 const
-  HeaderSize = sizeof(PageHeader)                     # 12
-  LeafFixed  = sizeof(LeafObj)                        # 8
-  IntFixed   = sizeof(InteriorObj)                    # 6
-  ArenaHead  = sizeof(ArenaObj)                       # 12
+  HeaderSize = sizeof(PageHeader) # 12
+  LeafFixed  = sizeof(LeafObj) # 8
+  IntFixed   = sizeof(InteriorObj) # 6
+  ArenaHead  = sizeof(ArenaObj) # 12
   ArenaCap*  = PageSize - ArenaHead
 
-  # Inline payload cap: chosen so at least ~4 leaf cells fit a page,
-  # keeping fanout sane even with fat elements (the SQLite maxLocal
-  # move). Elements longer than this pack exactly their tail into the
-  # arena — the inline prefix stays MaxLocal bytes, which is what makes
-  # comparisons against big elements almost always resolve without
-  # touching the tail (first differing byte comes early).
+  
   MaxLocal* = (PageSize - HeaderSize) div 4 - LeafFixed - 2
+  ## Inline payload cap: chosen so at least ~4 leaf cells fit a page,
+  ## keeping fanout sane even with fat elements (the SQLite maxLocal
+  ## move). Elements longer than this pack exactly their tail into the
+  ## arena — the inline prefix stays MaxLocal bytes, which is what makes
+  ## comparisons against big elements almost always resolve without
+  ## touching the tail (first differing byte comes early).
 
-  # Separators must always fit inline; any prefix that discriminates is
-  # legal, so this is a cap on shared-prefix length at split boundaries.
+  ## Separators must always fit inline and not overflow to other pages
+  ## so this is a cap on shared-prefix length at split boundaries.
   MaxSep* = MaxLocal
 
 static:
@@ -211,22 +229,26 @@ proc headerHash(ch: CommitHeader): array[32, byte] =
       sizeof(CommitHeader) - sizeof(CommitHeader.digest) - 1)
   cast[array[32, byte]](hash.digest())
 
-
 # -------------------------------------------------------------------------
 # Byte comparison
 #
-# The single point of key semantics in the whole engine. memcmp over the
-# common prefix; ties broken shorter-first. For complete CE elements the
-# tie branch never fires (self-delimiting ⇒ prefix-free); it exists for
-# separators and prefix probes, and its direction (shorter sorts first)
-# is what makes "sep is a prefix of right's first key" a valid separator
-# and "seek to prefix" a lower bound for the prefix's family.
+
 # -------------------------------------------------------------------------
 
 proc cmpBytes*(a, b: openArray[byte]): int =
+  ##[
+  The single point of key semantics in the whole engine. 
+  
+  memcmp over the common prefix with ties broken shorter-first. 
+  
+  For whole CE elements the tie branch never fires, it exists for
+  separators and prefix probes, and its direction (shorter sorts first)
+  is what makes "sep is a prefix of right's first key" a valid separator
+  and "seek to prefix" a lower bound for the prefix's family.
+  ]##
   let n = min(a.len, b.len)
   if n > 0:
-    let r = cmpMem(unsafeAddr a[0], unsafeAddr b[0], n)
+    let r = cmpMem(addr a[0], addr b[0], n)
     if r != 0: return r
   a.len - b.len
 
@@ -387,7 +409,7 @@ proc addBlob(pg: Page; idx: int; blob: openArray[byte]) =
   doAssert freeSpace(pg) >= need, "addBlob without room (caller bug)"
   let h = hdr(pg)
   h.cellStart -= uint32(blob.len)
-  copyMem(addr pg[h.cellStart.int], unsafeAddr blob[0], blob.len)
+  copyMem(addr pg[h.cellStart.int], addr blob[0], blob.len)
   let n = h.cellCount.int
   let sl = slots(pg)
   if idx < n:
@@ -431,7 +453,7 @@ proc tailWrite[A](db: Db[A]; rest: openArray[byte]): (PageN, uint16) =
   while off < rest.len:
     let n = min(ArenaCap - db.arenaUsed, rest.len - off)
     let ar = cast[ptr ArenaObj](p)
-    copyMem(addr ar.data[db.arenaUsed], unsafeAddr rest[off], n)
+    copyMem(addr ar.data[db.arenaUsed], addr rest[off], n)
     db.arenaUsed += n
     ar.used = uint32(db.arenaUsed)
     off += n
@@ -476,7 +498,7 @@ proc cmpProbeCell[A](s: Snapshot[A]; probe: openArray[byte];
   let total = c.len.int
   let n = min(probe.len, inl)
   if n > 0:
-    let r = cmpMem(unsafeAddr probe[0], addr c.data[0], n)
+    let r = cmpMem(addr probe[0], addr c.data[0], n)
     if r != 0: return r
   if probe.len <= inl or c.tailPg == 0:
     return probe.len - total
@@ -487,7 +509,7 @@ proc cmpProbeCell[A](s: Snapshot[A]; probe: openArray[byte];
     let ar = cast[ptr ArenaObj](s.getPage(pn))
     let m = min(min(ArenaCap - po, total - off), probe.len - off)
     if m > 0:
-      let r = cmpMem(unsafeAddr probe[off], addr ar.data[po], m)
+      let r = cmpMem(addr probe[off], addr ar.data[po], m)
       if r != 0: return r
     off += m
     po += m
@@ -501,7 +523,7 @@ proc elemHasPrefix[A](s: Snapshot[A]; c: ptr LeafObj;
   if prefix.len > c.len.int: return false
   let inl = inlineLenOf(c)
   let n = min(prefix.len, inl)
-  if n > 0 and cmpMem(unsafeAddr prefix[0], addr c.data[0], n) != 0:
+  if n > 0 and cmpMem(addr prefix[0], addr c.data[0], n) != 0:
     return false
   if prefix.len <= inl: return true
   var off = inl
@@ -510,7 +532,7 @@ proc elemHasPrefix[A](s: Snapshot[A]; c: ptr LeafObj;
   while off < prefix.len:
     let ar = cast[ptr ArenaObj](s.getPage(pn))
     let m = min(ArenaCap - po, prefix.len - off)
-    if cmpMem(unsafeAddr prefix[off], addr ar.data[po], m) != 0:
+    if cmpMem(addr prefix[off], addr ar.data[po], m) != 0:
       return false
     off += m
     po += m
@@ -570,7 +592,7 @@ proc buildLeafBlob[A](db: Db[A]; elem: openArray[byte]): seq[byte] =
   c.tailOff = tailOff
   c.len = uint32(elem.len)
   if inl > 0:
-    copyMem(addr c.data[0], unsafeAddr elem[0], inl)
+    copyMem(addr c.data[0], addr elem[0], inl)
 
 proc buildIntBlob(child: PageN; sep: openArray[byte]): seq[byte] =
   result = newSeq[byte](IntFixed + sep.len)
@@ -578,7 +600,7 @@ proc buildIntBlob(child: PageN; sep: openArray[byte]): seq[byte] =
   c.child = child
   c.sepLen = uint16(sep.len)
   if sep.len > 0:
-    copyMem(addr c.sep[0], unsafeAddr sep[0], sep.len)
+    copyMem(addr c.sep[0], addr sep[0], sep.len)
 
 # -------------------------------------------------------------------------
 # Separators
@@ -597,7 +619,7 @@ proc sepBetween(left, right: openArray[byte]): seq[byte] =
     inc i
   doAssert i < right.len, "sepBetween: left does not sort before right"
   result = newSeq[byte](i + 1)
-  copyMem(addr result[0], unsafeAddr right[0], i + 1)
+  copyMem(addr result[0], addr right[0], i + 1)
   doAssert result.len <= MaxSep,
     "adjacent elements share a prefix longer than MaxSep (documented limit)"
 
@@ -624,7 +646,7 @@ proc splitLeaf[A](db: Db[A]; pg: Page; idx: int; newBlob: seq[byte];
   # cells with newBlob spliced in at idx. Random access is free (the
   # snapshot keeps its slot array); the separator step relies on it.
   template cell(j: int): ptr LeafObj =
-    (if j == idx: cast[ptr LeafObj](unsafeAddr newBlob[0])
+    (if j == idx: cast[ptr LeafObj](addr newBlob[0])
      else: leafAt(sp, (if j < idx: j else: j - 1)))
   template cellSize(j: int): int =
     (if j == idx: newBlob.len else: leafCellSize(cell(j)))
@@ -677,7 +699,7 @@ proc splitInterior[A](db: Db[A]; pg: Page; idx: int; newBlob: seq[byte];
   let n = hdr(sp).cellCount.int + 1  # logical cells incl. newBlob
   let savedRight = hdr(sp).rightChild
   template cell(j: int): ptr InteriorObj =
-    (if j == idx: cast[ptr InteriorObj](unsafeAddr newBlob[0])
+    (if j == idx: cast[ptr InteriorObj](addr newBlob[0])
      else: intAt(sp, (if j < idx: j else: j - 1)))
   template cellSize(j: int): int =
     (if j == idx: newBlob.len else: intCellSize(cell(j)))
@@ -1336,7 +1358,7 @@ when isMainModule:
 
   proc toStr(b: seq[byte]): string =
     result = newString(b.len)
-    if b.len > 0: copyMem(addr result[0], unsafeAddr b[0], b.len)
+    if b.len > 0: copyMem(addr result[0], addr b[0], b.len)
 
   proc sortedUnique(xs: seq[seq[byte]]): seq[seq[byte]] =
     result = xs
@@ -1406,7 +1428,7 @@ when isMainModule:
       if c.currentIsInline():
         let (p, n) = c.currentSpan()
         doAssert n == e.len
-        doAssert n == 0 or equalMem(p, unsafeAddr e[0], n)
+        doAssert n == 0 or equalMem(p, addr e[0], n)
         inc spanChecked
       else:
         doAssert e.len > MaxLocal   # only chained elements lack spans

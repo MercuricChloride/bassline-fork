@@ -15,6 +15,7 @@ suite "basic atoms":
   spells "-7": -7
   spells "1000": 1_000
   spells "123": n"123"
+  spells "123456789012345678901234567890": n"123456789012345678901234567890"
   spells "\"hi there\"":
     "hi there"
   spells "foo": foo

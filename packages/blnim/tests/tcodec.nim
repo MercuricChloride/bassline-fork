@@ -1,9 +1,9 @@
 ## the codec against the corpus: a decoder fed a value one byte at a
 ## time waits and never refuses until the last byte lands it, and
 ## bytes a decoder must reject are rejected however they arrive.
-## Random values survive encoding, and value order is byte order.
+## Random values survive encoding, alone and concatenated.
 
-import std/[math, unittest]
+import std/unittest
 import bl/core
 import bl/lib/blah
 import ./corpus
@@ -35,14 +35,10 @@ suite "one byte at a time":
       bytes = c.items[2].bytes
     test name:
       var d = newDecoder()
-      var refused = false
-      try:
+      expect CodecError:
         for b in bytes:
           d.buf.add b
           for v in d.checked: discard
-      except CodecError:
-        refused = true
-      check refused
 
 suite "random values":
   var values: seq[Value]
@@ -67,11 +63,3 @@ suite "random values":
     check l.values.len == values.len
     for i in 0 ..< min(l.values.len, values.len):
       check l.values[i].toValue == values[i]
-
-  test "value order is byte order":
-    var spelled: seq[seq[byte]]
-    for v in values:
-      spelled.add ceBytes(v)
-    for i in 0 ..< values.len:
-      for j in 0 ..< values.len:
-        check cmp(values[i], values[j]).sgn == cmpBytes(spelled[i], spelled[j]).sgn

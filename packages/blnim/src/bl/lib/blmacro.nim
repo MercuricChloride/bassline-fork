@@ -58,18 +58,17 @@ proc hexLit(n: NimNode, lit: string): NimNode =
   nnkPrefix.newTree(ident"@", arr)
 
 proc numLit(n: NimNode, lit: string): NimNode =
-  ## n"123" → a checked integer: canonical iff it round-trips
+  ## n"123" → a checked integer: canonical, and an int literal when
+  ## it fits int64, else its spelling for `num(string)` to hold wide
   var digits: string
   for c in lit:
     if c != '_': digits.add c
-  var i: BiggestInt
-  try:
-    i = parseBiggestInt(digits)
-  except ValueError:
-    bad(n, "not a number this reading holds: " & lit)
-  if $i != digits:
+  if not isValidInt(digits.toBytes):
     bad(n, "not a canonical number: " & lit)
-  newLit(i)
+  try:
+    newLit(parseBiggestInt(digits))
+  except ValueError:
+    newLit(digits)
 
 proc build(n: NimNode, mark: bool): NimNode
 
