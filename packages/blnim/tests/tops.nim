@@ -1,95 +1,139 @@
 ## ops: similar, and shapes with holes -- extract and inject
-import std/[strutils, random]
-import pkg/core
-import lib/ops
-import ./corpus
 
-proc s(v, e: string): bool = similar(readValue(v), readValue(e))
+import std/[random, unittest]
+import bl/core
+import bl/lib/[ops, blah, blmacro]
 
-# similar: containment. Atoms by kind and mark; lists and records a
-# prefix, positions by shape; dict keys required, values by shape,
-# extras ignored; set members literal; not symmetric
-for c in cases(): doAssert similar(c.value, c.value), c.name
-doAssert s("1", "2") and s("\"a\"", "\"\"") and not s("a", "\"a\"") and not s("a!", "a")
-doAssert s("[1 2 3]", "[]") and s("(file a b)", "(file)") and s("{a: 1}", "{:}") and s("{1 2}", "{}")
-doAssert s("[1 \"x\" [a]]", "[0 \"\" []]") and not s("[1]", "[0 0]")
-doAssert s("(file \"n\" 0xff 42)", "(file \"\" 0x)") and not s("(dir \"n\")", "(file \"\")")
-doAssert s("{a: 1 b: \"x\"}", "{a: 0}") and not s("{a: \"x\"}", "{a: 0}") and not s("{b: 1}", "{a: 0}")
-doAssert s("{1 2 3}", "{2}") and not s("{1 2 3}", "{0}") and not s("{\"x\" 7}", "{\"\"}")
-doAssert s("[1 2]", "[1]") and not s("[1]", "[1 2]")
+template fits(v, e: untyped) =
+  check similar(bl(v), bl(e))
 
-# extract: literal parts equal, holes bind by name
-proc fit(shape, v: string): (bool, Value) =
+template misfits(v, e: untyped) =
+  check not similar(bl(v), bl(e))
+
+template extracts(shape, v, bindings: untyped) =
+  ## the shape fits v, binding exactly bindings
   var b: Value
-  result[0] = extract(readValue(shape), readValue(v), b)
-  result[1] = b
-proc bound(shape, v: string): string =
-  let (ok, b) = fit(shape, v)
-  if ok: $b else: "no"
+  check extract(bl(shape), bl(v), b)
+  check b == bl(bindings)
 
-doAssert bound("(file name! digest!)", "(file \"a.txt\" 0xff)") == "{name: \"a.txt\" digest: 0xff}"
-doAssert bound("(file name! digest!)", "(dir \"a.txt\" 0xff)") == "no"          # head literal
-doAssert bound("(file name!)", "(file \"a\" 0xff)") == "no"                    # arity strict
-doAssert bound("[x! y! x!]", "[1 2 1]") == "{x: 1 y: 2}"                       # repeated hole agrees
-doAssert bound("[x! y! x!]", "[1 2 3]") == "no"
-doAssert bound("[_! _! z!]", "[1 2 3]") == "{z: 3}"                            # anonymous binds nothing
-doAssert bound("{k: v! extra: 1}", "{k: [1 2] extra: 1 more: 0}") == "{v: [1 2]}"   # extra keys ignored
-doAssert bound("{k: v!}", "{j: 1}") == "no"                                    # missing key
-doAssert bound("!(f x!)", "!(f 1)") == "{x: 1}" and bound("!(f x!)", "(f 1)") == "no"   # frame marks literal
-doAssert bound("(h! 1)", "(foo 1)") == "{h: foo}"                              # a head can be a hole
-doAssert bound("{a b}", "{a b}") == "{:}" and bound("{a b}", "{a b c}") == "no"   # hole-free sets: equality
-doAssert bound("7!", "[1 2]") == "{7: [1 2]}"                                  # any marked atom names a hole
-doAssert bound("go!", "go!") == "{go: go!}"                                    # a marked atom in the value is what a hole sees
-# a hole in a dict key or a set member is ambiguous: refused, not matched
-for (bad, v) in [("{k!: 1}", "{k: 1}"), ("{a! b}", "{a b}")]:
+template misextracts(shape, v: untyped) =
   var b: Value
-  try:
-    discard extract(readValue(bad), readValue(v), b)
-    doAssert false, "accepted an ambiguous shape: " & bad
-  except ValueError:
-    discard
-doAssert bound("[{x: [h!]} 1]", "[{x: [5]} 1]") == "{h: 5}"                   # a hole in a dict value is fine
+  check not extract(bl(shape), bl(v), b)
 
-# inject: holes filled, unbound holes and _! kept, so filling composes
-proc fill(shape, b: string): string = $inject(readValue(shape), readValue(b))
-doAssert fill("(file name! digest!)", "{name: \"a\" digest: 0xff}") == "(file \"a\" 0xff)"
-doAssert fill("(file name! digest!)", "{name: \"a\"}") == "(file \"a\" digest!)"
-doAssert fill("(file name! digest!)", "{:}") == "(file name! digest!)"
-doAssert fill("[_! x!]", "{x: 1 _: 2}") == "[_! 1]"
-doAssert fill("{k!: v!}", "{k: a v: 1}") == "{a: 1}"                           # every position, keys too
-doAssert fill("{x! 3}", "{x: 1}") == "{1 3}"
-doAssert fill("!(f x!)", "{x: [1]}") == "!(f [1])"
-doAssert fill("(f x!)", "{x: y!}") == "(f y!)"                                 # a binding may itself be a hole
-doAssert fill(fill("(f a! b!)", "{a: 1}"), "{b: 2}") == "(f 1 2)"
+template ambiguous(shape, v: untyped) =
+  ## a hole where a value is looked up by, not matched: refused
+  var b: Value
+  expect ValueError:
+    discard extract(bl(shape), bl(v), b)
+
+template injects(shape, bindings, filled: untyped) =
+  check inject(bl(shape), bl(bindings)) == bl(filled)
+
+suite "similar":
+  # containment. Atoms by kind and mark; lists and records a prefix,
+  # positions by shape; dict keys required, values by shape, extras
+  # ignored; set members literal; not symmetric
+  test "atoms by kind and mark":
+    fits 1, 2
+    fits "a", ""
+    misfits a, "a"
+    misfits !a, a
+  test "an empty frame fits any frame of its kind":
+    fits [1, 2, 3], []
+    fits file(a, b), file()
+    fits {a: 1}, {:}
+    fits {1, 2}, {}
+  test "lists and records: a prefix, positions by shape":
+    fits [1, "x", [a]], [0, "", []]
+    misfits [1], [0, 0]
+    fits file("n", x"ff", 42), file("", x"")
+    misfits dir("n"), file("")
+    fits [1, 2], [1]
+    misfits [1], [1, 2]
+  test "dicts: keys required, values by shape, extras ignored":
+    fits {a: 1, b: "x"}, {a: 0}
+    misfits {a: "x"}, {a: 0}
+    misfits {b: 1}, {a: 0}
+  test "sets: members literal":
+    fits {1, 2, 3}, {2}
+    misfits {1, 2, 3}, {0}
+    misfits {"x", 7}, {""}
+
+suite "extract":
+  # literal parts equal, holes bind by name
+  test "holes bind, literals must match":
+    extracts file(!name, !digest), file("a.txt", x"ff"), {name: "a.txt", digest: x"ff"}
+    misextracts file(!name, !digest), dir("a.txt", x"ff")
+    misextracts file(!name), file("a", x"ff")
+  test "a repeated hole must agree":
+    extracts [!x, !y, !x], [1, 2, 1], {x: 1, y: 2}
+    misextracts [!x, !y, !x], [1, 2, 3]
+  test "the anonymous hole binds nothing":
+    extracts [`_!`, `_!`, !z], [1, 2, 3], {z: 3}
+  test "dicts: extra keys ignored, missing keys fail":
+    extracts {k: !v, extra: 1}, {k: [1, 2], extra: 1, more: 0}, {v: [1, 2]}
+    misextracts {k: !v}, {j: 1}
+    extracts [{x: [!h]}, 1], [{x: [5]}, 1], {h: 5}
+  test "frame marks are literal":
+    extracts !f(!x), !f(1), {x: 1}
+    misextracts !f(!x), f(1)
+  test "a head can be a hole":
+    extracts `h!`(1), foo(1), {h: foo}
+  test "hole-free sets are equality":
+    extracts {a, b}, {a, b}, {:}
+    misextracts {a, b}, {a, b, c}
+  test "any marked atom names a hole":
+    extracts !7, [1, 2], {7: [1, 2]}
+    extracts !go, !go, {go: !go}
+  test "a hole in a dict key or a set member is ambiguous":
+    ambiguous {!k: 1}, {k: 1}
+    ambiguous {!a, b}, {a, b}
+
+suite "inject":
+  # holes filled, unbound holes and _! kept, so filling composes
+  test "fills what is bound":
+    injects file(!name, !digest), {name: "a", digest: x"ff"}, file("a", x"ff")
+    injects file(!name, !digest), {name: "a"}, file("a", !digest)
+    injects file(!name, !digest), {:}, file(!name, !digest)
+    injects [`_!`, !x], {x: 1, `_`: 2}, [`_!`, 1]
+  test "every position, keys and members too":
+    injects {!k: !v}, {k: a, v: 1}, {a: 1}
+    injects {!x, 3}, {x: 1}, {1, 3}
+    injects !f(!x), {x: [1]}, !f([1])
+  test "composes":
+    injects f(!x), {x: !y}, f(!y)
+    check inject(inject(bl(f(!a, !b)), bl({a: 1})), bl({b: 2})) == bl(f(1, 2))
 
 # the laws, on generated values: punch holes into a value, extract
 # from the original, inject back
+
 proc unmarkAtoms(v: Value): Value =
   ## marked atoms would read as holes, so the generated value has none
   case v.kind
   of bList, bRec:
     var kids: seq[Value]
     for c in v.items: kids.add unmarkAtoms(c)
-    result = if v.kind == bList: initList(kids, v.marked) else: initRec(kids, v.marked)
+    result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
   of bDict:
-    result = initDict(v.marked)
+    result = initDict(v.mark)
     for k, val in v.dict: result.dict[unmarkAtoms(k)] = unmarkAtoms(val)
   of bSet:
-    result = initSet(v.marked)
+    result = initSet(v.mark)
     for m in v.els.keys: result.els[unmarkAtoms(m)] = true
   else:
     result = v
-    result.marked = false
+    result.mark = false
 
 var rng = initRand(3)
 var holes = 0
+
 proc punch(v: Value, expect: var Value): Value =
   ## the shape: some atoms in list/record positions and dict values
   ## become holes, named in order; what they replace goes to `expect`
   case v.kind
   of bList, bRec:
     var kids: seq[Value]
-    for i, c in v.items:
+    for c in v.items:
       if c.kind notin {bList, bRec, bDict, bSet} and rng.rand(1.0) < 0.4:
         let name = sym("h" & $holes)
         inc holes
@@ -97,23 +141,24 @@ proc punch(v: Value, expect: var Value): Value =
         kids.add sym(name.text, true)
       else:
         kids.add punch(c, expect)
-    result = if v.kind == bList: initList(kids, v.marked) else: initRec(kids, v.marked)
+    result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
   of bDict:
-    result = initDict(v.marked)
+    result = initDict(v.mark)
     for k, val in v.dict:
       result.dict[k] = punch(val, expect)
   else:
     result = v
 
-var g = initValueGen(23)
-for _ in 0 ..< 300:
-  let v = unmarkAtoms(g.genValue(3))
-  var expect = initDict()
-  let shape = punch(v, expect)
-  var b: Value
-  doAssert extract(shape, v, b), $shape & " should fit " & $v
-  doAssert b == expect, $b & " vs " & $expect
-  doAssert inject(shape, b) == v, $shape
-  doAssert similar(v, v) and similar(inject(shape, b), v)
-doAssert holes > 100
-echo "tops ok"
+suite "laws":
+  test "extract then inject on random values":
+    for _ in 0 ..< 300:
+      let v = unmarkAtoms(randValue(3))
+      var expect = initDict()
+      let shape = punch(v, expect)
+      var b: Value
+      checkpoint($shape & " should fit " & $v)
+      check extract(shape, v, b)
+      check b == expect
+      check inject(shape, b) == v
+      check similar(inject(shape, b), v)
+    check holes > 100

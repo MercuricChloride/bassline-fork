@@ -8,26 +8,6 @@ import bl/core
 import bl/lib/[json, blmacro]
 import ./corpus
 
-proc ceBytes(self: Value): seq[byte] =
-  let enc = newEncoder()
-  enc.write self
-  enc.buf.data
-
-type Landed = object
-  values: seq[ValueView]
-  pending: bool
-  error: string
-
-proc land(bytes: seq[byte]): Landed =
-  ## everything the decoder yields for bytes, and how it was left
-  var d = newDecoder(newBuffer(bytes))
-  try:
-    for view in d.checked:
-      result.values.add view
-  except CodecError as e:
-    result.error = e.msg
-  result.pending = d.pending
-
 type Outcome = enum read, refused, incomplete
 
 proc reading(src: string, whole = false): Outcome =
@@ -50,7 +30,7 @@ suite "ce":
     test name:
       check ceBytes(value) == expect
       let l = land(expect)
-      check l.error == ""
+      check not l.refused
       check l.values.len == 1
       check not l.pending
       if l.values.len == 1:
@@ -64,7 +44,7 @@ suite "reject":
       bytes = c.items[2].bytes
     test name:
       let l = land(bytes)
-      check l.error != ""
+      check l.refused
 
 suite "starved":
   filter starved, c:
@@ -73,7 +53,7 @@ suite "starved":
       bytes = c.items[2].bytes
     test name:
       let l = land(bytes)
-      check l.error == ""
+      check not l.refused
       check l.values.len == 0
       check l.pending
 
@@ -118,7 +98,7 @@ suite "derived":
 
   test "corpus.blb is the cases":
     let l = land(cast[seq[byte]](readFile(Corpus / "corpus.blb")))
-    check l.error == ""
+    check not l.refused
     check not l.pending
     check l.values.len == cases.len
     for i in 0 ..< min(l.values.len, cases.len):

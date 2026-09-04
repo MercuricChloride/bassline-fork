@@ -14,6 +14,27 @@ template filter*(name, val, body) =
     if head(val) == bl(name):
       body
 
+proc ceBytes*(v: Value): seq[byte] =
+  let enc = newEncoder()
+  enc.write v
+  enc.buf.data
+
+type Landed* = object
+  values*: seq[ValueView]
+  pending*: bool
+  refused*: bool
+  why*: string
+
+proc land*(bytes: openArray[byte]): Landed =
+  var d = newDecoder(newBuffer(bytes))
+  try:
+    for view in d.checked:
+      result.values.add view
+  except CodecError as e:
+    result.refused = true
+    result.why = e.msg
+  result.pending = d.pending
+
 when isMainModule:
   let
     records = newJArray()

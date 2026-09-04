@@ -1,74 +1,84 @@
-## the store holds spelled values in exactly the codec's byte order,
-## on both backends, byte-identically
-import std/[algorithm, os]
-import pkg/store
-import pkg/core/[codec, reader]
+## the store holds spelled values in value order: a scan hands back
+## exactly the values sorted by `cmp`, spelled, on both backends,
+## byte-identically
+
+import std/[algorithm, os, unittest]
+import bl/core
+import bl/store/store
+import bl/lib/blah
 import ./corpus
 
-let cs = cases()
-var elems: seq[seq[byte]]
-for c in cs:
-  elems.add c.bytes
-var g = initValueGen(5)
-for _ in 0 ..< 500:
-  elems.add spell(g.genValue(3))
+# the elements: every corpus value, and random ones
 
-var expect = elems
-expect.sort(proc(a, b: seq[byte]): int = codec.cmpBytes(a, b))
+var values: seq[Value]
+filter ce, c:
+  values.add c.items[2]
+for _ in 0 ..< 500:
+  values.add randValue(3)
+
+var ordered = values
+ordered.sort(cmp)
 var i = 1
-while i < expect.len:                       # the store is a set
-  if expect[i] == expect[i - 1]: expect.delete(i)
+while i < ordered.len:                      # the store is a set
+  if ordered[i] == ordered[i - 1]: ordered.delete(i)
   else: inc i
 
-proc check[A](db: Db[A], label: string) =
+var expect: seq[seq[byte]]
+for v in ordered:
+  expect.add ceBytes(v)
+
+proc holds[A](db: Db[A]) =
+  ## db, after every element went in, scans as the values in order
   db.withTx:
-    for e in elems:
-      discard db.insert(e)
+    for v in values:
+      discard db.insert(ceBytes(v))
   var got: seq[seq[byte]]
   for e in db.scan():
     got.add e
-  doAssert got == expect, label & ": scan order is not cmpBytes order"
+  check got == expect
   let snap = db.snapshot()
-  for c in cs:
-    doAssert snap.member(c.bytes), label & ": " & c.name
-  doAssert not snap.member(spell(sym("not-in-the-store")))
-  var c2 = snap.newCursorAt(cs[0].bytes)  # zero-copy spans judge clean
+  for v in values:
+    check snap.member(ceBytes(v))
+  check not snap.member(ceBytes(sym"not-in-the-store"))
+  # what the store hands back in place is a value the codec accepts
+  var cur = snap.newCursorAt(expect[0])
   var n = 0
-  while c2.isValid:
-    if c2.currentIsInline:
-      let (p, len) = c2.currentSpan()
-      judge(toOpenArray(p, 0, len - 1))
+  while cur.isValid:
+    if cur.currentIsInline:
+      let (p, len) = cur.currentSpan()
+      let l = land(toOpenArray(p, 0, len - 1))
+      check not l.refused
+      check l.values.len == 1
       inc n
-    c2.advance()
-  doAssert n > 0
+    cur.advance()
+  check n > 0
 
-# the store's own byte order is the codec's
-for a in cs:
-  for b in cs:
-    doAssert (store.cmpBytes(a.bytes, b.bytes) < 0) == (codec.cmpBytes(a.bytes, b.bytes) < 0)
+suite "backends":
+  let
+    memPath = getTempDir() / "bl_tstore_mem.db"
+    filePath = getTempDir() / "bl_tstore_file.db"
+  removeFile(memPath)
+  removeFile(filePath)
 
-var mem = createMemDb()
-check(mem, "mem")
-let memPath = "/tmp/bl_tstore_mem.db"
-removeFile(memPath)
-mem.dump(memPath)
+  test "memory":
+    var mem = createMemDb()
+    holds(mem)
+    mem.dump(memPath)
+    mem.close()
 
-let filePath = "/tmp/bl_tstore_file.db"
-removeFile(filePath)
-var fdb = createDb(filePath)
-check(fdb, "file")
-doAssert fdb.pages == mem.pages
-fdb.close()
-mem.close()
-doAssert readFile(memPath) == readFile(filePath), "backends produced different pages"
+  test "mmap":
+    var fdb = createDb(filePath)
+    holds(fdb)
+    fdb.close()
 
-# and the file reopens to the same set
-var back = openDb(filePath)
-var again: seq[seq[byte]]
-for e in back.scan(): again.add e
-doAssert again == expect
-back.close()
-removeFile(memPath)
-removeFile(filePath)
+  test "byte-identical pages":
+    check readFile(memPath) == readFile(filePath)
 
-echo "tstore ok"
+  test "the file reopens to the same set":
+    var back = openDb(filePath)
+    var again: seq[seq[byte]]
+    for e in back.scan(): again.add e
+    check again == expect
+    back.close()
+    removeFile(memPath)
+    removeFile(filePath)

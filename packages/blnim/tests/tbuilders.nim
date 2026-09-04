@@ -25,8 +25,11 @@ suite "ordering":
     check num(-1) < num(-2)
     check text("z") < text("aa")
 
-  test "longer frames short first":
-    discard
+  test "a frame sorts after the longer frame it prefixes":
+    check initList(@[num 1, num 2]) < initList(@[num 1])
+    check initList(@[num 1, num 2]) < initList(@[num 2])
+    check initRec(@[sym"f", num 1]) < initRec(@[sym"f"])
+    check initList() > initList(@[num 1])
 
 suite "encodings":
 

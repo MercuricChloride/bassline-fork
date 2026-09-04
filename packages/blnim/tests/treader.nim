@@ -1,129 +1,154 @@
-## the text dialect: reader and printer against the corpus, plus the
-## reader's own rules
-import pkg/core/reader
+## the text dialect: what the corpus does not already say. The
+## reader's own cases (reads, refuses, incomplete, document) run in
+## tcorpus; here the printer's layouts read back, prefixes of a text
+## are never refused, and the rules around each token.
+
+import std/[strutils, unittest]
+import bl/core
+import bl/lib/[blah, blmacro]
 import ./corpus
 
-proc rejects(t: string): bool =
-  try:
-    discard readValue(t)
-    false
-  except ReadError:
-    true
+template reads(s: string) =
+  discard readValue(s)
 
-# corpus: the text reads to the value, the value prints as the text,
-# and what was read spells to the bytes
-for c in cases():
-  let v = readValue(c.text)
-  doAssert v == c.value, c.name
-  doAssert $v == c.text, c.name & ": printed " & $v
-  doAssert $c.value == c.text, c.name
-  doAssert spell(v) == c.bytes, c.name
+template readsAs(s: string, v: Value) =
+  check readValue(s) == v
 
-# random values survive the text round trip
-var g = initValueGen(23)
-for _ in 0 ..< 1000:
-  let v = g.genValue()
-  let t = $v
-  let back = readValue(t)
-  doAssert back == v, t
-  doAssert $back == t, t
+template prints(v: Value, s: string) =
+  check $v == s
 
-# nil is reserved, quotable, markable
-doAssert readValue("'nil'") == sym"nil"
-doAssert readValue("nil!") == null(true)
-doAssert readValue("nilx") == sym"nilx"
+template rejects(s: string) =
+  expect ReadError:
+    discard readValue(s)
 
-# numbers, and '_' as a digit separator that never survives the reading
-doAssert readValue("1_000_000") == num 1_000_000
-doAssert readValue("-1_000") == num(-1000)
-doAssert $readValue("1_000") == "1000"
-doAssert readValue("_5") == sym"_5"          # no digit in front: a symbol
-doAssert readValue("_5_") == sym"_5_"
-doAssert rejects("1_")
-doAssert rejects("1__000")
-doAssert rejects("0_0")                       # canonicality is judged on the digits
-for s in ["007", "-0", "1.5", "42px", "1-2", "1."]:
-  doAssert rejects(s), s
-doAssert readValue("123456789012345678901234567890").num.isWide  # past int64 is held as spelled
-doAssert $readValue("-123456789012345678901234567890") == "-123456789012345678901234567890"
+template incomplete(s: string) =
+  expect Incomplete:
+    discard readDocument(s)
 
-# strings
-doAssert readValue("\"a\\n\\t\\r\\\\\\\"b\"") == text("a\n\t\r\\\"b")
-doAssert readValue("\"a\nb\"") == text("a\nb")          # a literal newline is legal
-
-# symbols
-for s in ["->", "-", "<=", "+5", "*", "?", "a.b", ",", "a,b", "#", "#weird", "`tick"]:
-  doAssert readValue(s) == sym(s), s
-  doAssert $sym(s) == s, s
-doAssert readValue("'a\\'b'") == sym"a'b"
-doAssert readValue("'a!b'") == sym"a!b"                  # '!' delimits, so quoted
-doAssert $sym"a!b" == "'a!b'"
-
-# bytes
-doAssert readValue("0xDEAD") == bytes(@[byte 0xDE, 0xAD])   # either case reads
-doAssert readValue("0xde_ad") == bytes(@[byte 0xDE, 0xAD])
-doAssert readValue("0xd_e_a_d") == bytes(@[byte 0xDE, 0xAD])
-doAssert rejects("0x123")
-doAssert rejects("0x_de")
-
-# braces: the first element decides set or dict
-doAssert readValue("{foo:bar}") == initDict(@[(sym"foo", sym"bar")])
-doAssert readValue("{go!: 1}") == initDict(@[(sym("go", true), num 1)])
-doAssert rejects("{a b: c}")
-doAssert rejects("{a: 1 b}")
-doAssert rejects("{: a}")
-doAssert rejects("{a:}")
-doAssert rejects("{1 1}")                     # duplicate member
-doAssert rejects("{a: 1 a: 2}")               # duplicate key
-doAssert rejects("()")                        # a record needs a head
-
-# marks: atoms behind, frames in front, touching
-doAssert readValue("[go! stop]") == initList(@[sym("go", true), sym"stop"])
-doAssert readValue("(f go! !(g))") ==
-  initRec(@[sym"f", sym("go", true), initRec(@[sym"g"], true)])
-for s in ["! (f)", "!!(f)", "!", "!x", "(f)!", "!(f)!", "go !", "a!b", "!;c\n(f)"]:
-  doAssert rejects(s), s
-
-# documents and comments
-doAssert readDocument("1 2 3").len == 3
-doAssert readDocument("; only a comment\n").len == 0
-doAssert $readValue("; a comment\n5") == "5"
-doAssert rejects("1 2")                       # readValue wants exactly one
-doAssert rejects("")
-doAssert rejects("[1")
-doAssert rejects("\"\xFF\"")                  # malformed UTF-8
-doAssert rejects("'\xC0\x80'")
-
-# Incomplete: a prefix of a valid text that ends at whitespace -- so
-# every token in it is terminated -- is never refused outright: it
-# reads, or it is Incomplete (a ReadError, so old handlers still catch
-# it). Refusals proper are decided by the text already present
-block:
-  var incompletes = 0
-  for c in cases():
-    let t = c.text
-    for n in 1 .. t.len:
-      if t[n - 1] notin {' ', '\n', '\t'}: continue
-      try:
-        discard readDocument(t[0 ..< n])
-      except Incomplete:
-        inc incompletes
-      except ReadError as e:
-        doAssert false, c.name & " prefix " & $n & " refused: " & e.msg
-  doAssert incompletes > 0
-  for t in ["[1 2", "(f a", "{a: 1", "{a b", "{a", "{a:", "\"open", "!", "[1 [2] "]:
+template refuses(s: string) =
+  ## refused outright: an Incomplete is not a refusal
+  expect ReadError:
     try:
-      discard readDocument(t)
-      doAssert false, "read as complete: " & t
+      discard readDocument(s)
     except Incomplete:
       discard
-  for t in ["{a: 1 b}", "[1)", "\"bad \\z escape\"", "{a: 1 a: 2}", "()"]:
-    try:
-      discard readDocument(t)
-      doAssert false, "accepted: " & t
-    except Incomplete:
-      doAssert false, "incomplete, should be refused: " & t
-    except ReadError:
-      discard
 
-echo "reader ok"
+proc prefixesRead(t: string): int =
+  ## every prefix ending in whitespace has all its tokens terminated,
+  ## so it reads or is Incomplete, never refused; counts the incompletes
+  for n in 1 .. t.len:
+    if t[n - 1] notin {' ', '\n', '\t'}: continue
+    try:
+      discard readDocument(t[0 ..< n])
+    except Incomplete:
+      inc result
+    except ReadError as e:
+      checkpoint(t & " prefix " & $n & " refused: " & e.msg)
+      check false
+
+suite "printer":
+  filter ce, c:
+    let
+      name = c.items[1].text
+      value = c.items[2]
+    test name:
+      for width in [high(int), 40, 16, 1]:
+        readsAs pretty(value, width), value
+      discard prefixesRead(pretty(value, 16))
+
+  test "random values":
+    # blah's values run to megabytes; a shallower value is enough here
+    for _ in 0 ..< 200:
+      let v = randValue(3)
+      readsAs $v, v
+      readsAs pretty(v, 40), v
+
+  test "prefixes of small random values":
+    # the prefix law reads every prefix, so keep the texts short
+    var incompletes = 0
+    var n = 0
+    while n < 50:
+      let t = pretty(randValue(4), 40)
+      if t.len > 400: continue
+      incompletes += prefixesRead(t)
+      inc n
+    check incompletes > 0
+
+  test "dicts and sets print in canonical order":
+    prints bl({b: 1, a: 2}), "{a: 2 b: 1}"
+    prints bl({c, b, a}), "{a b c}"
+    prints bl({10, 9, -1}), "{9 -1 10}"   # shortlex: '-' sorts before the digits
+
+suite "nil":
+  test "reserved, quotable, markable":
+    readsAs "'nil'", sym"nil"
+    readsAs "nil!", null(true)
+    readsAs "nilx", sym"nilx"
+    readsAs "nil", null()
+    prints sym"nil", "'nil'"
+
+suite "numbers":
+  test "'_' separates digits and never survives the reading":
+    readsAs "1_000_000", bl(1_000_000)
+    prints readValue("1_000"), "1000"
+    readsAs "_5", sym"_5"
+    readsAs "_5_", sym"_5_"
+  test "past int64 is held as spelled":
+    check readValue("123456789012345678901234567890").num.isWide
+    prints readValue("123456789012345678901234567890"), "123456789012345678901234567890"
+    prints readValue("-123456789012345678901234567890"), "-123456789012345678901234567890"
+    check readValue("9223372036854775807").num.isInt
+    check readValue("9223372036854775808").num.isWide
+
+suite "strings and symbols":
+  test "escapes":
+    readsAs "\"a\\n\\t\\r\\\\\\\"b\"", text("a\n\t\r\\\"b")
+    readsAs "\"a\nb\"", text("a\nb")
+    readsAs "'a\\'b'", sym"a'b"
+    rejects "\"bad \\z escape\""
+  test "bare symbols print bare":
+    for s in ["->", "-", "<=", "+5", "*", "?", "a.b", ",", "a,b", "#", "#weird", "`tick"]:
+      readsAs s, sym(s)
+      prints sym(s), s
+  test "a delimiter inside a symbol quotes it":
+    readsAs "'a!b'", sym"a!b"
+    prints sym"a!b", "'a!b'"
+    prints sym"a b", "'a b'"
+    prints sym"a:b", "'a:b'"
+  test "malformed UTF-8 is refused":
+    rejects "\"\xFF\""
+    rejects "'\xC0\x80'"
+
+suite "bytes":
+  test "either case, '_' between digits":
+    readsAs "0xDEAD", bl(x"dead")
+    readsAs "0xde_ad", bl(x"dead")
+    readsAs "0xd_e_a_d", bl(x"dead")
+    readsAs "0x", bl(x"")
+    prints bl(x"dead"), "0xdead"
+
+suite "braces and marks":
+  test "the first element decides set or dict":
+    readsAs "{foo:bar}", bl({foo: bar})
+    readsAs "{go!: 1}", bl({!go: 1})
+  test "marks touch their value":
+    readsAs "[go! stop]", bl([!go, stop])
+    readsAs "(f go! !(g))", bl(f(!go, !g()))
+    rejects "!;c\n(f)"
+
+suite "documents":
+  test "readValue wants exactly one value":
+    reads "1"
+    rejects ""
+    rejects "1 2"
+  test "Incomplete is a ReadError, so a prefix is rejected too":
+    rejects "[1"
+    rejects "\"open"
+    incomplete "[1"
+    incomplete "\"open"
+  test "refused outright, not incomplete":
+    refuses "{a: 1 b}"
+    refuses "[1)"
+    refuses "\"bad \\z escape\""
+    refuses "{a: 1 a: 2}"
+    refuses "()"

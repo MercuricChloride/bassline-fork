@@ -2,6 +2,7 @@
 !*/
 !*.*
 nimcache/
+.nimcache/
 nimblecache/
 htmldocs/
 /deps
