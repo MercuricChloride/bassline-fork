@@ -2,10 +2,10 @@ import ./shared
 
 type
   Encoder* = ref object
-    buf*: Buffer
+    buf*: Buffer[byte]
     depth: Natural
 
-proc newEncoder*(buf: Buffer = newBuffer()): Encoder =
+proc newEncoder*(buf: Buffer[byte] = newBuffer[byte]()): Encoder =
   Encoder(buf: buf)
 
 proc putRaw*(e: Encoder, data: openArray[byte]) =

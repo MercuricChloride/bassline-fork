@@ -7,8 +7,10 @@ const
 
 type
   Entry*[K, V] = tuple[key: K, val: V]
+
   NodeKind = enum
     nkLeaf, nkInternal
+
   Node[K, V] {.acyclic.} = ref object
     case kind: NodeKind
     of nkLeaf:
@@ -20,11 +22,15 @@ type
       # separators: kids[i] < keys[i] <= kids[i+1]
       kids: seq[Node[K, V]]
 
-  BTree*[K, V] = object
+  BTree*[K, V] {.acyclic.} = ref object
     entries: int
     root: Node[K, V]
 
-func initBTree*[K, V](): BTree[K, V] =
+  BTreeSet*[T] = BTree[T, bool]
+
+# ================ Constructor ================
+
+func newBTree*[K, V](): BTree[K, V] =
   BTree[K, V](root: Node[K, V](kind: nkLeaf))
 
 func len*[K, V](t: BTree[K, V]): int =

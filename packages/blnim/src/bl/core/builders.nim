@@ -1,5 +1,5 @@
 import std/strutils
-from std/math import sgn
+import ./buffer
 import btree, codec
 export btree, codec
 
@@ -15,7 +15,7 @@ type
     of bBytes:
       bytes*: seq[byte]
     of bList, bRec:
-      items*: seq[Value]
+      items*: Buffer[Value]
     of bDict:
       dict*: BTree[Value, Value]
     of bSet:
@@ -36,17 +36,22 @@ func sym*(t: string, mark = false): Value =
 func bytes*(b: sink seq[byte], mark = false): Value =
   Value(kind: bBytes, bytes: b, mark: mark)
 
-func initList*(mark = false): Value =
-  Value(kind: bList, items: @[], mark: mark)
+func bytes*(b: openArray[byte], mark = false): Value =
+  bytes(@b, mark)
 
-func initRec*(head: Value, mark = false): Value =
-  Value(kind: bRec, items: @[head], mark: mark)
+func initList*(mark = false): Value =
+  Value(kind: bList, items: newBuffer[Value](), mark: mark)
+
+proc initRec*(head: Value, mark = false): Value =
+  Value(kind: bRec, items: newBuffer(@[head]), mark: mark)
 
 func initDict*(mark = false): Value =
-  Value(kind: bDict, dict: initBTree[Value, Value](), mark: mark)
+  Value(kind: bDict, dict: newBTree[Value, Value](), mark: mark)
 
 func initSet*(mark = false): Value =
-  Value(kind: bSet, els: initBTree[Value, bool](), mark: mark)
+  Value(kind: bSet, els: newBTree[Value, bool](), mark: mark)
+
+# ================ Comparators ================
 
 template diff(a, b) =
   result = cmp(a, b)
@@ -88,13 +93,15 @@ func cmp*(a, b: Value): int =
   of bNum:
     result = cmpNums(a.num, b.num)
   of bText, bSym:
+    diff a.text.len, b.text.len
     result = cmpBytes(a.text.toBytes, b.text.toBytes)
   of bBytes:
+    diff a.bytes.len, b.bytes.len
     result = cmpBytes(a.bytes, b.bytes)
   of bList, bRec:
     for i in 0 ..< min(a.items.len, b.items.len):
       diff a.items[i], b.items[i]
-    # looks backwards, but matches that frames are terminated with 0xA0
+    # this looks backwards, but frames are terminated with 0xA0
     # which causes shorter frames to be > longer frames
     diff b.items.len, a.items.len
   of bDict:
@@ -110,17 +117,18 @@ func cmp*(a, b: Value): int =
 
 func `==`*(a, b: Value): bool =
   cmp(a, b) == 0
+
 func `<`*(a, b: Value): bool =
   cmp(a, b) < 0
 
 # ================ Frame constructors ================
 
 func initList*(items: sink seq[Value], mark = false): Value =
-  Value(kind: bList, items: items, mark: mark)
+  Value(kind: bList, items: newBuffer(items), mark: mark)
 
-func initRec*(items: sink seq[Value], mark = false): Value =
+proc initRec*(items: sink seq[Value], mark = false): Value =
   doAssert items.len > 0, "a record needs a head"
-  Value(kind: bRec, items: items, mark: mark)
+  Value(kind: bRec, items: newBuffer(items), mark: mark)
 
 proc initSet*(items: sink seq[Value], mark = false): Value =
   result = initSet(mark)
@@ -132,13 +140,24 @@ proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
   for (k, v) in entries:
     result.dict[k] = v
 
-func toValue*(v: Value): Value = v
-func toValue*(i: int): Value = num(i)
-func toValue*(i: int64): Value = num(int(i))
-func toValue*(s: string): Value = text(s)
-func toValue*(b: seq[byte]): Value = bytes(b)
+# ================ Misc converstion fns ================
 
-func toValue*[T](xs: openArray[T]): Value =
+func toValue*(v: Value): Value = 
+  v
+
+func toValue*(i: int): Value = 
+  num(i)
+
+func toValue*(i: int64): Value = 
+  num(int(i))
+
+func toValue*(s: string): Value = 
+  text(s)
+
+func toValue*(b: seq[byte]): Value = 
+  bytes(b)
+
+proc toValue*[T](xs: openArray[T]): Value =
   mixin toValue
   result = initList()
   for x in xs:

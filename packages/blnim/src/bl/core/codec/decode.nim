@@ -4,7 +4,7 @@ import ./shared
 
 type
   ValueView* = ref object
-    buf: Buffer
+    buf: Buffer[byte]
     offset*, len*: int
     parent* {.cursor.}: ValueView
     validated: bool
@@ -16,7 +16,6 @@ type
       children: seq[ValueView]
     of bDict:
       entries: seq[Entry]
-
   Entry = tuple[key, val: ValueView]
 
   Callback = proc(val: ValueView)
@@ -131,18 +130,21 @@ proc childrenDo*(self: ValueView, cb: Callback, deep = false) =
 
 # ================ Decoder ================
 
-type Decoder* = ref object
-    buf: Buffer
+type Decoder* = object
+    cursor: Cursor[byte]
     frames: seq[ValueView]
     pending: bool
 
-proc newDecoder*(buf: Buffer = newBuffer()): Decoder =
-  Decoder(buf: buf, frames: newSeqOfCap[ValueView](MaxDepth))
+proc newDecoder*(buf: Buffer[byte] = newBuffer[byte]()): Decoder =
+  Decoder(cursor: buf.initCursor(), frames: newSeqOfCap[ValueView](MaxDepth))
 
 func pending*(self: Decoder): bool =
   self.pending
 
-proc toValue(pv: PartialValue, buf: Buffer): ValueView =
+func buf*(self: Decoder): Buffer[byte] =
+  self.cursor.buf
+
+proc toValue(pv: PartialValue, buf: Buffer[byte]): ValueView =
     let 
       h = headerData buf.data[pv.offset]
       k = h.kind
@@ -157,7 +159,7 @@ proc toValue(pv: PartialValue, buf: Buffer): ValueView =
     of bDict:
       ValueView(kind: k, buf: buf, offset: pv.offset, entries: @[])
 
-iterator items*(self: Decoder, shouldValidate = true): ValueView =
+iterator items*(self: var Decoder, shouldValidate = true): ValueView =
 
   template maybeYield(v: ValueView) =
     if self.frames.len == 0:
@@ -178,7 +180,7 @@ iterator items*(self: Decoder, shouldValidate = true): ValueView =
           frame.entries.add (key: v, val: nil)
 
   try:
-    for part in self.buf.partialValues:
+    for part in self.cursor.partialValues:
       case part.kind
       of pvNil:
         let v = part.toValue(self.buf)
@@ -200,11 +202,11 @@ iterator items*(self: Decoder, shouldValidate = true): ValueView =
   except BufferStarvedError:
     self.pending = true
 
-iterator checked*(self: Decoder): ValueView =
+iterator checked*(self: var Decoder): ValueView =
   for val in self.items(true): 
     yield val
 
-iterator unchecked*(self: Decoder): ValueView =
+iterator unchecked*(self: var Decoder): ValueView =
   for val in self.items(false): 
     yield val
 

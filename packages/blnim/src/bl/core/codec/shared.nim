@@ -1,5 +1,7 @@
 from std/bitops import countTrailingZeroBits
 from std/endians import littleEndian64
+import ../buffer
+export buffer
 
 const
   MaxDepth* {.intdefine.} = 64
@@ -154,34 +156,17 @@ func partialKind*(b: byte): PartialValueKind =
     guard h.inlineLen == 0, "frame lenBits must be 0"
     pvOpenFrame
 
-
-type
-  Buffer* = ref object
-   pos*: Natural
-   data*: seq[byte]
-  BufferStarvedError* = object of CatchableError
-
-func newBuffer*(): Buffer = 
-  Buffer()
-
-func newBuffer*(data: sink seq[byte]): Buffer =
-  Buffer(data: data)
-
-func atEnd*(self: Buffer): bool =
-  self.pos == self.data.len
-
-template bytes*(self: Buffer): openArray[byte] =
+template bytes*(self: Buffer[byte]): openArray[byte] =
   self.data.toOpenArray(0, self.data.high)
 
-iterator partialValues*(self: Buffer): PartialValue =
-
+iterator partialValues*(self: var Cursor[byte]): PartialValue =
   template needs(n: Natural, msg: string) =
-    if (self.pos + n) > self.data.len:
-      raise newException(BufferStarvedError, msg)
+    if (self.pos + n) > self.buf.len:
+      starved(msg)
 
-  while self.data.len > self.pos:
+  while self.buf.len > self.pos:
     let
-      b = self.data[self.pos]
+      b = self.buf[self.pos]
       pk = b.partialKind
     case pk
     of pvNil, pvOpenFrame, pvCloseFrame:
@@ -191,13 +176,13 @@ iterator partialValues*(self: Buffer): PartialValue =
       var len = b.headerData.inlineLen
       if len == 7:
         needs 2, "expected a length byte"
-        len = int self.data[self.pos + 1]
+        len = int self.buf[self.pos + 1]
         guard len >= 7, "non minimal u8 length"
         if len == 255:
           needs 6, "expected 4 length bytes"
           len = 0
           for i in 2 .. 5:
-            len = (len shl 8) or int self.data[self.pos + i]
+            len = (len shl 8) or int self.buf[self.pos + i]
           guard len >= 255, "non minimal u32 length"
       let
         skip = uint32(len).skipLen
