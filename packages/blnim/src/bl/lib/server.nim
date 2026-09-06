@@ -2,36 +2,41 @@
 ##
 ## A connection carries a bare concatenation of CE-encoded values.
 ## The surface hands each landed value to a callback along with the
-## Conn it arrived on; what to retain, how to reply, and what anything
-## means is the app's business. Replies are paired unilateral sends,
+## Conn it arrived on. Replies are paired unilateral sends,
 ## not a request/response protocol.
 ##
 ## Malformed input is fatal to a connection: past one bad byte there
 ## is no sound resync point, so the socket is closed.
-import std/[asyncnet, asyncdispatch, options, os, posix, nativesockets]
-import pkg/core
-export asyncnet, asyncdispatch
+
+import std/[asyncnet, asyncdispatch, nativesockets, tables]
+import ../core
+import ./msg
+export asyncnet, asyncdispatch, msg
+
 const RecvChunk = 16 * 1024
+  ## how much to pull from the socket at once; the decoder buffers the
+  ## rest, and refuses a value past `MaxValueBytes`
 
 type
   Conn* = ref object
     socket: AsyncSocket
     address*: string
-    decoder: StreamDecoder
+    decoder: Decoder
+    taskId: int
+    tasks: Table[int, Future[void]]   # replies still in flight
 
-  Handler* = proc(conn: Conn, value: Value): Future[void]
+  Handler* = proc(conn: Conn, msg: Msg): Future[void]
   ConnCallback* = proc(conn: Conn)
-  ErrorCallback* = proc(conn: Conn, error: ref Exception)
+  ErrorCallback* = proc(conn: Conn, error: ref Exception) {.gcsafe.}
 
   Landing* = ref object
     socket: AsyncSocket
-    unixPath: string
     onValue: Handler
     onOpen: ConnCallback
     onClose: ConnCallback
     onError: ErrorCallback
-    maxDepth: int
-    maxValueBytes: int
+    connId: int
+    connections*: Table[int, Future[void]]
 
 # ================ CONN ================
 
@@ -42,200 +47,128 @@ proc close*(conn: Conn) =
 proc isClosed*(conn: Conn): bool =
   conn.socket.isClosed
 
-proc receive*(conn: Conn): Future[Option[Value]] {.async.} =
-  ## The next value from the peer, or none once the connection is done.
-  ## Malformed input raises DecodeError and the connection is
-  ## then unusable for reading.
-  while true:
-    let value = conn.decoder.next()
-    if value.isSome:
-      return value
-    let data = await conn.socket.recv(RecvChunk)
-    if data.len == 0:
-      return none Value
-    conn.decoder.feed(data.toOpenArrayByte(0, data.high))
-
 proc send*(conn: Conn, value: Value): Future[void] {.async.} =
   ## Speak one value to the peer. The value is encoded in full before
   ## anything is sent, so the wire never sees a partial emission.
-  ## Concurrent sends on one Conn don't interleave bytes: the
+  ## Concurrent sends on one Conn don't interleave bytes bc the
   ## dispatcher queues whole-buffer writes per socket.
-  await conn.socket.send(encodeToString(value))
+  await conn.socket.send(value.ce.toString)
 
-proc connect*(
-    host: string, port: Port, maxDepth = 64, maxValueBytes = DefaultMaxValueBytes
-): Future[Conn] {.async.} =
-  ## The client half: connect somewhere values are landing.
-  let socket = newAsyncSocket(buffered = false)
+proc pump*(conn: Conn, onValue: proc(v: Value): Future[void]) {.async.} =
+  ## Drives the connection passing every value from the connection
+  ## into onValue in order until closed. 
+  ## 
+  ## Malformed input raises a `CodecError` and closes the connection
+  ##
+  ## The decoder is drained whole each turn with completed values copied out, 
+  ## then the buffer is compacted, so a long stream stays bounded.
+  while true:
+    var data: string
+    try:
+      data = await conn.socket.recv(RecvChunk)
+    except OSError:
+      if conn.socket.isClosed: return # closed from our side
+      raise
+    if data.len == 0: return # peer closed
+    conn.decoder.buf.add(data.toBytes)
+    var batch: seq[Value]
+    for view in conn.decoder.checked:
+      batch.add view.toValue
+    conn.decoder.compact()
+    for v in batch:
+      await onValue(v)
+
+proc connect*(host: string, port: Port): Future[Conn] {.async.} =
+  ## Opens a connection to a landing
+  let 
+    socket = newAsyncSocket(buffered = false)
+    decoder = newDecoder()
   try:
     await socket.connect(host, port)
   except CatchableError:
-    socket.close() # asyncnet has no finalizer; the fd would leak
+    socket.close()
     raise
-  result = Conn(
-    socket: socket, address: host, decoder: initStreamDecoder(maxDepth, maxValueBytes)
-  )
-
-proc connectUnix*(
-    path: string, maxDepth = 64, maxValueBytes = DefaultMaxValueBytes
-): Future[Conn] {.async.} =
-  ## The client half for a local place: connect to a unix socket path.
-  let socket =
-    newAsyncSocket(nativesockets.AF_UNIX, SOCK_STREAM, IPPROTO_IP, buffered = false)
-  try:
-    await asyncnet.connectUnix(socket, path)
-  except CatchableError:
-    socket.close() # asyncnet has no finalizer; the fd would leak
-    raise
-  result = Conn(
-    socket: socket, address: path, decoder: initStreamDecoder(maxDepth, maxValueBytes)
-  )
+  return Conn(socket: socket, address: host, decoder: decoder)
 
 # ================ LANDING ================
 
-proc claimUnixPath(path: string) =
-  ## A crashed place leaves its socket file behind. Take the path only
-  ## when it provably is such a leftover: a socket, owned by us, and
-  ## refusing connections. Anything else stays put -- never unlink a
-  ## regular file or follow a symlink just because a name is occupied.
-  var st: Stat
-  if lstat(path.cstring, st) != 0:
-    return # nothing there; bind will make it
-  if not S_ISSOCK(st.st_mode):
-    raise newException(OSError, path & " exists and is not a socket")
-  if st.st_uid != getuid():
-    raise newException(OSError, path & " is somebody else's socket")
-  # probe: a live place accepts, a dead one refuses
-  let fd = posix.socket(posix.AF_UNIX, posix.SOCK_STREAM, 0)
-  if cint(fd) < 0:
-    raiseOSError(osLastError())
-  defer:
-    discard posix.close(cint(fd))
-  var sa: Sockaddr_un
-  sa.sun_family = TSa_Family(posix.AF_UNIX)
-  if path.len >= sa.sun_path.len:
-    raise newException(OSError, "path too long for a unix socket: " & path)
-  copyMem(addr sa.sun_path[0], path.cstring, path.len + 1)
-  if posix.connect(fd, cast[ptr SockAddr](addr sa), SockLen(sizeof(sa))) == 0:
-    raise newException(OSError, "a place is already landed on " & path)
-  if osLastError() != OSErrorCode(ECONNREFUSED):
-    raiseOSError(osLastError())
-  removeFile(path)
-
-proc landingUnix*(
-    path: string,
-    onValue: Handler,
-    onOpen: ConnCallback = nil,
-    onClose: ConnCallback = nil,
-    onError: ErrorCallback = nil,
-    maxDepth = 64,
-    maxValueBytes = DefaultMaxValueBytes,
-): Landing =
-  ## Binds a listening unix socket for values to land on. The socket
-  ## is created user-only; loosening access is a deliberate act with
-  ## chmod, not a default.
-  if path.len >= 104: # sockaddr_un on this platform
-    raise newException(OSError, "path too long for a unix socket: " & path)
-  let parent = path.parentDir
-  if parent.len > 0:
-    createDir(parent)
-  claimUnixPath(path)
-  let socket =
-    newAsyncSocket(nativesockets.AF_UNIX, SOCK_STREAM, IPPROTO_IP, buffered = false)
-  let oldMask = umask(0o177)
-  try:
-    asyncnet.bindUnix(socket, path)
-    socket.listen()
-  except CatchableError:
-    discard umask(oldMask)
-    socket.close() # asyncnet has no finalizer; the fd would leak
-    raise
-  discard umask(oldMask)
-  Landing(
-    socket: socket,
-    unixPath: path,
-    onValue: onValue,
-    onOpen: onOpen,
-    onClose: onClose,
-    onError: onError,
-    maxDepth: maxDepth,
-    maxValueBytes: maxValueBytes,
-  )
-
-proc landing*(
-    port: Port,
-    onValue: Handler,
-    onOpen: ConnCallback = nil,
-    onClose: ConnCallback = nil,
-    onError: ErrorCallback = nil,
-    address = "",
-    maxDepth = 64,
-    maxValueBytes = DefaultMaxValueBytes,
-): Landing =
-  ## Binds a listening socket for values to land on.
-  ##
-  ## Sockets are unbuffered bc asyncnet's buffered recv loops until it
-  ## fills the full requested size, stalling on inputs smaller than
-  ## the chunk. Accepted sockets inherit the listener's flag, and the
-  ## stream decoder buffers for itself anyway.
-  let socket = newAsyncSocket(buffered = false)
-  try:
-    socket.setSockOpt(OptReuseAddr, true)
-    socket.bindAddr(port, address)
-    socket.listen()
-  except CatchableError:
-    socket.close() # asyncnet has no finalizer; the fd would leak
-    raise
-  Landing(
-    socket: socket,
-    onValue: onValue,
-    onOpen: onOpen,
-    onClose: onClose,
-    onError: onError,
-    maxDepth: maxDepth,
-    maxValueBytes: maxValueBytes,
-  )
-
-proc localPort*(l: Landing): Port =
-  l.socket.getLocalAddr()[1]
-
 proc close*(l: Landing) =
-  ## Stop accepting. Established connections are left alone; the app
-  ## holds any Conns it cared to keep. A unix landing removes the
-  ## socket it bound.
+  ## Stop accepting.
+  ## Established connections are left alone so
+  ## close those if you care
   if not l.socket.isClosed:
     l.socket.close()
-  if l.unixPath.len > 0:
-    removeFile(l.unixPath)
+
+proc port*(l: Landing): Port =
+  l.socket.getLocalAddr()[1]
+
+proc nextTaskId(conn: Conn): int =
+  inc conn.taskId
+  result = conn.taskId
+
+proc nextConnId(l: Landing): int =
+  result = l.connId
+  inc l.connId
+
+proc handleErr(l: Landing, conn: Conn, err: ref Exception) =
+  if l.onError != nil:
+    l.onError(conn, err)
+  else:
+    raise err
+
+proc handleOpen(l: Landing, conn: Conn) =
+  if l.onOpen != nil:
+    l.onOpen(conn)
+
+proc handleClose(l: Landing, conn: Conn) =
+  if l.onClose != nil:
+    l.onClose(conn)
+
+proc replyTo(l: Landing, conn: Conn): Send =
+  ## creates a unilateral reply path for one connection
+  ## for creating messages
+  proc(m: Msg): bool =
+    if conn.socket.isClosed:
+      return false
+    let
+      id = conn.nextTaskId
+      fut = conn.send(m.value)
+    conn.tasks[id] = fut
+    fut.addCallback proc(f: Future[void]) =
+      conn.tasks.del id
+      # a failed background send can't unwind anywhere useful; just
+      # report it if the app asked to hear
+      if f.failed:
+        l.handleErr(conn, f.readError)
+    true
+
+proc drain(conn: Conn) {.async.} =
+  ## waits for the replies still in flight so none are lost to a close
+  var pending: seq[Future[void]]
+  for f in conn.tasks.values: pending.add f
+  for f in pending:
+    try: await f
+    except CatchableError: discard
 
 proc process(l: Landing, conn: Conn) {.async.} =
-  # nothing may escape into asyncCheck so a bug in one connection's
-  # handler closes that connection, not the whole surface.
-  # tbd if we are going to keep it like this or not
+  ## Drives the logic for connection
+  ## If the handler blows up it closes the
+  ## connection, not the whole landing surface
+  let onReply = l.replyTo(conn)
   try:
-    if l.onOpen != nil:
-      l.onOpen(conn)
-    while true:
-      let value = await conn.receive()
-      if value.isNone:
-        break
-      await l.onValue(conn, value.get)
+    l.handleOpen(conn)
+    await conn.pump(proc(v: Value) {.async.} =
+      await l.onValue(conn, newMsg(v, onReply, -1)))
   except Exception as e:
-    if l.onError != nil:
-      try:
-        l.onError(conn, e)
-      except Exception:
-        discard
+    # Exception since a Defect in a handler (ie a bad index)
+    # is still that connection's problem, not the landings
+    l.handleErr(conn, e)
   finally:
-    try:
-      conn.close()
-    except Exception:
-      discard
-    if l.onClose != nil:
-      try:
-        l.onClose(conn)
-      except Exception:
-        discard
+    await conn.drain()
+    try: conn.close()
+    except: discard
+    try: l.handleClose(conn)
+    except: discard
 
 proc serve*(l: Landing) {.async.} =
   ## The accept loop. Runs until the landing is closed.
@@ -249,13 +182,44 @@ proc serve*(l: Landing) {.async.} =
       # so we don't hot-spin on a persistent accept failure
       await sleepAsync(100)
       continue
-    let conn = Conn(
-      socket: accepted.client,
-      address:
-        if l.unixPath.len > 0:
-          l.unixPath
-        else:
-          accepted.address,
-      decoder: initStreamDecoder(l.maxDepth, l.maxValueBytes),
-    )
-    asyncCheck l.process(conn)
+    let
+      id = l.nextConnId
+      conn = Conn(
+        socket: accepted.client,
+        address: accepted.address,
+        decoder: newDecoder())
+      fut = l.process(conn)
+    
+    l.connections[id] = fut
+    fut.addCallback(
+      proc() = l.connections.del id)
+
+proc newLanding*(
+    port: Port,
+    onValue: Handler,
+    onOpen: ConnCallback = nil,
+    onClose: ConnCallback = nil,
+    onError: ErrorCallback = nil,
+    address = "",
+): Landing =
+  ## Binds a listening socket for values to land on.
+  ##
+  ## Sockets are unbuffered bc asyncnet's buffered recv loops until it
+  ## fills the full requested size, stalling on inputs smaller than
+  ## the chunk. Accepted sockets inherit the listener's flag, and the
+  ## stream decoder buffers for itself anyway.
+  let socket = newAsyncSocket(buffered = false)
+  try:
+    socket.setSockOpt(OptReuseAddr, true)
+    socket.bindAddr(port, address)
+    socket.listen()
+  except CatchableError:
+    socket.close()
+    raise
+  Landing(
+    socket: socket,
+    onValue: onValue,
+    onOpen: onOpen,
+    onClose: onClose,
+    onError: onError,
+  )

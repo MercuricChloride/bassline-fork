@@ -136,15 +136,37 @@ type Decoder* = object
     cursor: Cursor[byte]
     frames: seq[ValueView]
     pending: bool
+    maxValueBytes: int   ## refuse a value that buffers past this
 
-proc newDecoder*(buf: Buffer[byte] = newBuffer[byte]()): Decoder =
-  Decoder(cursor: buf.initCursor(), frames: newSeqOfCap[ValueView](MaxDepth))
+proc newDecoder*(buf: Buffer[byte] = newBuffer[byte](),
+                 maxValueBytes = MaxValueBytes): Decoder =
+  Decoder(cursor: buf.initCursor(), frames: newSeqOfCap[ValueView](MaxDepth),
+          maxValueBytes: maxValueBytes)
 
 func pending*(self: Decoder): bool =
   self.pending
 
 func buf*(self: Decoder): Buffer[byte] =
   self.cursor.buf
+
+proc compact*(self: var Decoder) =
+  ## NOTE: THIS CAN BE DANGEROUS IF THE DECODER IS LONG LIVED!
+  ##
+  ## This is because it shifts the buffer that `ValueView`s point
+  ## into, so any view from an earlier pass is going to have
+  ## garbage. So only call this between full drains.
+  ## 
+  ## Drops the bytes already decoded, rebasing the cursor to what is
+  ## still pending.
+  let pos = self.cursor.pos
+  if pos == 0 or self.frames.len > 0:
+    return
+  let rest = self.cursor.buf.data.len - pos
+  if rest > 0:
+    moveMem(addr self.cursor.buf.data[0],
+            addr self.cursor.buf.data[pos], rest)
+  self.cursor.buf.data.setLen(rest)
+  self.cursor.pos = 0
 
 proc toValue(pv: PartialValue, buf: Buffer[byte]): ValueView =
     let 
@@ -182,7 +204,7 @@ iterator items*(self: var Decoder, shouldValidate = true): ValueView =
           frame.entries.add (key: v, val: nil)
 
   try:
-    for part in self.cursor.partialValues:
+    for part in self.cursor.partialValues(self.maxValueBytes):
       case part.kind
       of pvNil:
         let v = part.toValue(self.buf)
@@ -203,6 +225,13 @@ iterator items*(self: var Decoder, shouldValidate = true): ValueView =
 
   except BufferStarvedError:
     self.pending = true
+
+  # a frame that never closes would buffer without bound, so cap the
+  # bytes held since the outermost open frame began (checked on either
+  # exit, since a run of empty members starves nothing)
+  if self.frames.len > 0:
+    guard self.cursor.buf.len - self.frames[0].offset <= self.maxValueBytes,
+      "unclosed frame exceeds the value-size cap"
 
 iterator checked*(self: var Decoder): ValueView =
   for val in self.items(true): 

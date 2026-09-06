@@ -4,6 +4,7 @@
 ## Random values survive encoding, alone and concatenated.
 
 import std/unittest
+from std/sequtils import repeat
 import bl/core
 import bl/lib/blah
 import ./corpus
@@ -39,6 +40,27 @@ suite "one byte at a time":
         for b in bytes:
           d.buf.add b
           for v in d.checked: discard
+
+suite "value size cap":
+  const cap = 4096
+  proc decoded(bytes: openArray[byte]): seq[Value] =
+    var d = newDecoder(maxValueBytes = cap)
+    d.buf.add bytes
+    for v in d.checked: result.add v.toValue
+
+  test "a scalar header over the cap is refused before any payload":
+    let full = ce(bytes(newSeq[byte](cap + 1)))
+    let header = full[0 ..< full.len - cap - 1]      # no payload behind it
+    expect CodecError: discard decoded(header)
+
+  test "a frame that never closes is refused once it holds over the cap":
+    let stream = ce(initList())[0 ..< ^1] & # a list header, no END
+                 repeat(ce(null())[0], cap) # one-byte members, over the cap
+    expect CodecError: discard decoded(stream)
+
+  test "a value at the cap decodes":
+    let v = bytes(newSeq[byte](cap div 2))
+    check decoded(ce(v)) == @[v]
 
 suite "random values":
   var values: seq[Value]

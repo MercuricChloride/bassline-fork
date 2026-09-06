@@ -5,6 +5,12 @@ export buffer
 
 const
   MaxDepth* {.intdefine.} = 64
+  MaxValueBytes* {.intdefine.} = 100 * 1024 * 1024
+    ## default cap on what a decoder buffer for one value: a scalar
+    ## payload this large, or an unclosed frame that reaches this many
+    ## bytes, is refused rather than held. CE tops out at ~4.3GB; a
+    ## receiver draws the line lower at its boundary. Per-decoder
+    ## override via `newDecoder(maxValueBytes = …)`.
   MaxPayload* = uint32.high
   EndByte*: byte = 0xA0
   MarkBit*: byte = 0x08
@@ -182,7 +188,7 @@ func partialKind*(b: byte): PartialValueKind =
 template bytes*(self: Buffer[byte]): openArray[byte] =
   self.data.toOpenArray(0, self.data.high)
 
-iterator partialValues*(self: var Cursor[byte]): PartialValue =
+iterator partialValues*(self: var Cursor[byte], maxBytes = MaxValueBytes): PartialValue =
   template needs(n: Natural, msg: string) =
     if (self.pos + n) > self.buf.len:
       starved(msg)
@@ -207,6 +213,7 @@ iterator partialValues*(self: var Cursor[byte]): PartialValue =
           for i in 2 .. 5:
             len = (len shl 8) or int self.buf[self.pos + i]
           guard len >= 255, "non minimal u32 length"
+      guard len <= maxBytes, "scalar payload exceeds the value-size cap"
       let
         skip = uint32(len).skipLen
         total = skip + len
