@@ -30,6 +30,10 @@ proc identOf(n: NimNode): string =
   case n.kind
   of nnkIdent, nnkSym:
     result = n.strVal
+  of nnkOpenSymChoice, nnkClosedSymChoice:
+    # an operator a template already bound to its overloads, as `%%`
+    # is to the unsigned modulo; every choice spells the same name
+    result = n[0].strVal
   of nnkAccQuoted:
     for c in n:
       result.add identOf(c)

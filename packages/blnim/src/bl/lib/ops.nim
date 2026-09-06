@@ -86,6 +86,52 @@ func similar*(v, examplar: Value): bool =
 
   return true
 
+# ================ Prefix ================
+
+func prefixes*(a, b: Value): bool =
+  ## Whether `a` is a prefix of `b`: what `b`'s canonical encoding
+  ## yields when stopped early, with every frame the stop left open
+  ## closed by END. Reflexive. Kind and mark must agree. Among scalars
+  ## only equal values are prefixes, since a scalar carries its own
+  ## length. In a frame every member but the last must equal `b`'s,
+  ## and the last is itself a prefix of `b`'s, since a truncation only
+  ## drops a suffix. Dicts and sets compare in canonical order, so a
+  ## prefix is a leading run of the sorted members, not a subset.
+  if a.kind != b.kind or a.mark != b.mark:
+    return false
+  case a.kind
+  of bNil, bNum, bText, bSym, bBytes:
+    return a == b
+  of bList, bRec:
+    let n = a.items.len
+    if n > b.items.len: return false
+    for i in 0 ..< n:
+      if i + 1 == n:
+        if not prefixes(a.items[i], b.items[i]): return false
+      elif a.items[i] != b.items[i]:
+        return false
+  of bDict:
+    let n = a.dict.len
+    if n > b.dict.len: return false
+    var i = 0
+    for ea, eb in lockstep(a.dict, b.dict):
+      if i + 1 == n:
+        if ea.key != eb.key or not prefixes(ea.val, eb.val): return false
+      elif ea.key != eb.key or ea.val != eb.val:
+        return false
+      inc i
+  of bSet:
+    let n = a.els.len
+    if n > b.els.len: return false
+    var i = 0
+    for ea, eb in lockstep(a.els, b.els):
+      if i + 1 == n:
+        if not prefixes(ea.key, eb.key): return false
+      elif ea.key != eb.key:
+        return false
+      inc i
+  true
+
 #[
 ================ Shapes ================
 

@@ -206,7 +206,7 @@ func toValue*(i: int64): Value =
 func toValue*(s: string): Value = 
   text(s)
 
-func toValue*(b: seq[byte]): Value = 
+func toValue*(b: openArray[byte]): Value = 
   bytes(b)
 
 proc toValue*[T](xs: openArray[T]): Value =
@@ -247,6 +247,12 @@ proc write*(e: Encoder, v: Value) =
     frame:
       for val, _ in v.els:
         e.write val
+
+proc ce*(v: Value): seq[byte] =
+  ## a value's CE bytes
+  let e = newEncoder()
+  e.write v
+  e.buf.data
 
 proc toValue*(view: ValueView): Value =
   case view.kind

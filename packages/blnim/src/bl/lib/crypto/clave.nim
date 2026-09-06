@@ -1,80 +1,47 @@
-## clave is a minimal attestation value dialect.
-## It offers keypairs, signatures, and signed values.
-##
-## Signatures cover a value's CE bytes, so what is attested is the
-## value itself. The dialect is three shapes:
-##
-##   Keypairs as a value
-##   But don't send this around silly!
-##   (keypair <scheme> 0x<seed> 0x<public>)
-##
-##   A self contained signature
-##   (signature <scheme> 0x<sig> 0x<public>)
-##
-##   A pair that travels as one value
-##   (signed <value> <signature>)
-##
-## Scheme is eddsa-blake2b (monocypher's EdDSA). This can be extended
-## to support other schemes later, but i'm one person! This is also
-## what the scheme slot is for.
+##[
+  clave: keypairs, signatures, and signed values.
 
-import std/options
-import pkg/core
-import pkg/lib/obm
-import ./eddsa
+    (keypair scheme! seed! public!)
+    (signature scheme! sig! pubkey!)
+    (signed value! signature!)
 
-const Scheme* = "eddsa-blake2b"
+  A signature covers a value's CE bytes, so what is attested is the
+  value itself. The one scheme is monocypher's EdDSA over curve25519
+  with blake2b, spoken as `eddsa-blake2b`; the library describes it
+  and the lengths it fixes, so the derived types are its arrays.
 
-type
-  Seed* = eddsa.Seed
-  Key* = eddsa.Key
+  A keypair is a value so it can be kept; the secret key is derived
+  from the seed when it is needed and never spoken.
+]##
 
-  Keypair* = object
-    seed*: Seed
-    secret: SecretKey
-    public*: Key
+import ../../core
+import ../blmacro
+import ./[eddsa, types]
 
-  KeypairShape {.blRecord: sym"keypair".} = object
-    scheme: Lit[Scheme]
-    seed: Seed
-    public: Key
-
-  Signature* {.blRecord: sym"signature".} = object
-    scheme*: Lit[Scheme]
-    sig*: Sig
-    public*: Key
-
-  Signed* {.blRecord: sym"signed".} = object
-    value*: Value
-    signature*: Signature
-
-func keypairFromSeed*(seed: Seed): Keypair =
+proc keypairFromSeed*(seed: Seed): Keypair =
+  ## the pair a seed derives
   # monocypher wipes the seed it derives from, and Nim passes arrays
-  # by hidden pointer, so the wipe would reach the caller's copy
-  result.seed = seed
+  # by hidden pointer, so it is handed a copy
   var scratch = seed
-  let (secret, public) = keyPair(scratch)
-  result.secret = secret
-  result.public = public
+  let (_, pubkey) = keyPair(scratch)
+  Keypair(scheme: Scheme, seed: seed, pubkey: pubkey)
 
-func sign*(kp: Keypair, x: Value): Sig =
-  eddsa.sign(kp.secret, x.encode)
+proc secret(kp: Keypair): SecretKey =
+  var scratch = kp.seed
+  keyPair(scratch)[0]
 
-func toValue*(kp: Keypair): Value =
-  KeypairShape(seed: kp.seed, public: kp.public).toValue
+proc sign*(kp: Keypair, v: Value): Signature =
+  ## kp's signature of v's CE bytes
+  Signature(scheme: Scheme, sig: eddsa.sign(kp.secret, ce(v)), pubkey: kp.pubkey)
 
-func fromValue*(v: Value, t: typedesc[Keypair]): Option[Keypair] =
-  ## Recognizes (keypair eddsa-blake2b 0x<32 bytes> 0x<32 bytes>).
-  let kv = fromValue(v, KeypairShape)
-  if kv.isSome:
-    some keypairFromSeed(kv.get.seed)
-  else:
-    none Keypair
+proc signed*(kp: Keypair, v: Value): Signed =
+  ## v alongside kp's signature of it
+  Signed(value: v, sig: kp.sign(v))
 
-func signedValue*(kp: Keypair, x: Value): Value =
-  ## returns x wrapped with its attestation
-  let sig = Signature(sig: sign(kp, x), public: kp.public)
-  Signed(value: x, signature: sig).toValue
+proc holds*(s: Signature, v: Value): bool =
+  ## whether s is a signature of v under its scheme by its key
+  s.scheme == Scheme and check(s.sig, s.pubkey, ce(v))
 
-func holds*(s: Signed): bool =
-  check(s.signature.sig, s.signature.public, encode(s.value))
+proc holds*(s: Signed): bool =
+  ## whether the signature is of the value it travels with
+  s.sig.holds(s.value)

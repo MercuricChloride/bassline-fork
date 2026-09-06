@@ -66,11 +66,42 @@ proc randFrame*(depth = 0): Value =
 proc randValue*(depth = 0): Value =
   if depth > 5:
     return randAtom()
-  
+
   if rand(bool):
     randAtom()
   else:
     randFrame(depth)
+
+proc randPrefix*(v: Value): Value =
+  ## a random value that is a prefix of v (see ops.prefixes): a
+  ## leading run of its members in canonical order, the last maybe
+  ## shortened again. A scalar has only itself as a prefix.
+  case v.kind
+  of bList, bRec:
+    let lo = if v.kind == bRec: 1 else: 0   # a record keeps its head
+    let j = rand(lo .. v.items.len.int)
+    var kids: seq[Value]
+    for i in 0 ..< j:
+      kids.add(if i == j - 1 and rand(bool): randPrefix(v.items[i]) else: v.items[i])
+    result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
+  of bDict:
+    let j = rand(0 .. v.dict.len.int)
+    result = initDict(v.mark)
+    var i = 0
+    for key, val in v.dict:
+      if i >= j: break
+      result.dict[key] = (if i == j - 1 and rand(bool): randPrefix(val) else: val)
+      inc i
+  of bSet:
+    let j = rand(0 .. v.els.len.int)
+    result = initSet(v.mark)
+    var i = 0
+    for m in v.els.keys:
+      if i >= j: break
+      result.els.incl(if i == j - 1 and rand(bool): randPrefix(m) else: m)
+      inc i
+  else:
+    result = v
 
 iterator blah*(count: Natural = 10): Value =
   for _ in 0..<count:

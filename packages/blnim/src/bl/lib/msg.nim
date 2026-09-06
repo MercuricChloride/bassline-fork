@@ -26,12 +26,7 @@ type
     onReply: Send
     gas: int
 
-proc voidSend(msg: Msg): bool = discard
-
-var
-  defaultMsgSend*: Send = voidSend
-  defaultRoute*: Send = voidSend
-  defaultGas* = 1
+const defaultGas* = 1
 
 # ================ Messages ================
 
@@ -63,7 +58,7 @@ proc reply*(msg, res: Msg): bool {.discardable.} =
   if msg.onReply != nil:
     msg.onReply(res)
   else:
-    defaultMsgSend(res)
+    false
 
 func fork*(msg: Msg, gas = msg.gas): Msg =
   proc onReply(res: Msg): bool =
@@ -93,11 +88,3 @@ proc fanout*(msg: Msg, sends: openArray[Send]): bool =
 template logger*(s): Send =
   proc(msg: Msg): bool =
     echo s, msg.value
-
-proc disableLogging*() =
-  defaultMsgSend = voidSend
-  defaultRoute = voidSend
-
-proc enableLogging*() =
-  defaultMsgSend = logger "defaultMsgSend: "
-  defaultRoute = logger "defaultRoute: "

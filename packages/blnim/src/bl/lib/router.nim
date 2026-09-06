@@ -4,19 +4,15 @@ export msg, ops
 
 template router*(body: untyped): Send =
   ##[
-  Defines an anonymous send with a fallthrough
-  to `defaultRoute`
-  
+  Defines an anonymous send
   Used in tandem with `route`
   ]##
   proc(msg {.inject.}: Msg): bool =
     body
-    result = defaultRoute(msg)
 
 template router*(name, body: untyped) =
   ##[
-  Defines a named send with a fallthrough
-  to `defaultRoute`.
+  Defines a named send.
   Used in tandem with `route`
   ]##
   let name {.inject.} : Send  = router(body)

@@ -45,6 +45,19 @@ iterator mpairs*[T](buf: Buffer[T]): (Natural, var T) =
   for i, v in buf.data.mpairs:
     yield (i, v)
 
+iterator chunks*[T](buf: openArray[T], size: Natural): seq[T] =
+  if buf.len > 0:
+    var i = 0
+    while i < buf.len:
+      let hi = min(buf.len, i + size)
+      var c = buf.data[i..<hi]
+      yield c
+      inc i, size
+
+iterator chunks*[T](buf: Buffer[T], size: Natural): seq[T] =
+  for c in buf.data.chunks(size):
+    yield c
+
 # ================ Cursor ================
 
 type

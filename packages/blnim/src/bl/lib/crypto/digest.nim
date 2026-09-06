@@ -1,125 +1,78 @@
+##[
+  Digests over a value's CE bytes.
+
+    (digest algo! bytes!)
+
+  The library describes `digest` with `algo!` a `HashAlgo`, one of
+  sha256 and blake2b, and `bytes!` 32 bytes: blake2b here is
+  blake2b-256, nimcrypto's parameterised form, not a truncation.
+]##
+
 import nimcrypto/[blake2, sha2]
-import pkg/core
-import pkg/lib/obmcommon
+import ../../core
+import ../[blmacro, ops]
 
-# ================ BLAKE2B ================
-#
-# blake2b-256 streams through nimcrypto's Blake2bContext[256]; its init
-# builds the parameter block from the bit width, so this is the real
-# parameterized blake2b-256, not a truncation. monocypher remains the
-# eddsa backend in clave.
+template refuse(msg: string) =
+  raise newException(ValueError, msg)
 
-# a staging buffer in front of the hasher, like ValueWriter's in
-# front of the File: a deep value is tens of thousands of tiny
-# writes, and each update call has a fixed cost
-const DigestBuf = 4096
+let
+  Blake2bAlgo* = bl blake2b
+  Sha256Algo* = bl sha256
 
-type Blake2bWriter = object
-  ctx: Blake2bContext[256]
-  buf: array[DigestBuf, byte]
-  n: int
+type 
+  Hash* = array[32, byte]
+  Digest* = object
+    algo*: Value
+    hash*: Hash
 
-func flush(w: var Blake2bWriter) =
-  if w.n > 0:
-    w.ctx.update(w.buf.toOpenArray(0, w.n - 1))
-    w.n = 0
+func sha256*(bytes: openArray[byte]): Hash =
+  var ctx: sha2.sha256
+  ctx.init()
+  ctx.update(bytes)
+  ctx.finish().data
 
-func write(w: var Blake2bWriter, b: byte) =
-  if w.n >= DigestBuf:
-    w.flush()
-  w.buf[w.n] = b
-  inc w.n
+func blake2b*(bytes: openArray[byte]): Hash =
+  var ctx: Blake2bContext[256]
+  ctx.init()
+  ctx.update(bytes)
+  ctx.finish().data
 
-func write(w: var Blake2bWriter, bytes: openArray[byte]) =
-  if bytes.len >= DigestBuf:
-    # big enough to be its own update; staging it would only copy it
-    w.flush()
-    w.ctx.update(bytes)
-  elif bytes.len > 0:
-    if w.n + bytes.len > DigestBuf:
-      w.flush()
-    copyMem(addr w.buf[w.n], addr bytes[0], bytes.len)
-    w.n += bytes.len
+proc hash*(ce: openArray[byte], algo: Value): Hash =
+  if algo == Sha256Algo:
+    sha256 ce
+  elif algo == Blake2bAlgo:
+    blake2b ce
+  else:
+    refuse "unknown hash algorithm: " & $algo
 
-func initBlake2b(): Blake2bWriter =
-  result.ctx.init()
+proc digest*(value, algo: Value): Digest =
+  ## the digest of v's CE bytes
+  Digest(algo: algo, hash: hash(value.ce, algo))
 
-func finish(w: var Blake2bWriter): array[32, byte] =
-  w.flush()
-  discard w.ctx.finish(result)
+proc verifies*(d: Digest, ce: openArray[byte]): bool =
+  ## whether d is the digest of these CE bytes
+  hash(ce, d.algo) == d.hash
 
-func blake2b*(v: Value): array[32, byte] =
-  ## The blake2b-256 of the value's CE bytes
-  var w = initBlake2b()
-  v.encodeInto(w)
-  w.finish()
+proc verifies*(d: Digest, v: Value): bool =
+  ## whether d is the digest of v
+  d.verifies(ce(v))
 
-func blake2b*(bytes: openArray[byte]): array[32, byte] =
-  ## Over raw bytes. For bytes that are already a value's CE, this
-  ## equals blake2b of the value
-  var w = initBlake2b()
-  w.write(bytes)
-  w.finish()
+func shape*(_: typedesc[Digest]): Value =
+  bl digest(!algo, !hash)
 
-# ================ SHA256 ================
+proc fromValue*(T: typedesc[Digest], v: Value): Digest =
+  var bindings: Value
+  guard T.shape.extract(v, bindings), "invalid digest shape"
+  let
+    algo = bindings[bl algo]
+    hash = bindings[bl hash]
+  guard algo.kind == bSym, "digest algo must be a symbol"
+  guard hash.kind == bBytes, "digest hash must bytes"
+  guard algo == Sha256Algo or algo == Blake2bAlgo, "unknown hash algo"
+  guard hash.bytes.len == 32, "invalid hash length"
 
-type Sha256Writer = object
-  ctx: sha2.sha256
-  buf: array[DigestBuf, byte]
-  n: int
+  result.algo = algo
+  copyMem addr result[0], addr hash.bytes[0], 32
 
-func flush(w: var Sha256Writer) =
-  if w.n > 0:
-    w.ctx.update(w.buf.toOpenArray(0, w.n - 1))
-    w.n = 0
-
-func write(w: var Sha256Writer, b: byte) =
-  if w.n >= DigestBuf:
-    w.flush()
-  w.buf[w.n] = b
-  inc w.n
-
-func write(w: var Sha256Writer, bytes: openArray[byte]) =
-  if bytes.len >= DigestBuf:
-    w.flush()
-    w.ctx.update(bytes)
-  elif bytes.len > 0:
-    if w.n + bytes.len > DigestBuf:
-      w.flush()
-    copyMem(addr w.buf[w.n], addr bytes[0], bytes.len)
-    w.n += bytes.len
-
-func initSha256(): Sha256Writer =
-  result.ctx.init()
-
-func sha256*(v: Value): array[32, byte] =
-  ## The sha256 of the value's CE bytes
-  var w = initSha256()
-  v.encodeInto(w)
-  w.flush()
-  w.ctx.finish().data
-
-func sha256*(bytes: openArray[byte]): array[32, byte] =
-  ## Over raw bytes. For bytes that are already a value's CE, this
-  ## equals sha256 of the value
-  var w = initSha256()
-  w.write(bytes)
-  w.flush()
-  w.ctx.finish().data
-
-const DigestAlgo* = "blake2b"
-
-func digest*(x: Value): Digest =
-  Digest(algo: Sym(DigestAlgo), hash: @(blake2b x))
-
-func knownAlgo*(algo: string): bool =
-  ## the digest algos this build can check; `verifies` speaks exactly these
-  case algo
-  of "blake2b", "sha256": true
-  else: false
-
-func verifies*(d: Digest, ce: openArray[byte]): bool =
-  case $d.algo
-  of "blake2b": @(blake2b(ce)) == d.hash
-  of "sha256": @(sha256(ce)) == d.hash
-  else: false
+proc toValue*(self: Digest): Value =
+  bl digest(%(self.algo), %(self.hash))

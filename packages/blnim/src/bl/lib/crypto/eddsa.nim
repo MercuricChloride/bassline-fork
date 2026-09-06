@@ -4,6 +4,8 @@
 ## good-enuf
 {.compile: "../../../vendor/monocypher/monocypher.c".}
 
+import ./types
+
 when defined(useFuthark):
   import std/os
   import futhark
@@ -15,12 +17,6 @@ when defined(useFuthark):
     "monocypher.h"
 else:
   include ./monocypher_gen
-
-type
-  Seed* = array[32, byte]
-  Key* = array[32, byte]
-  SecretKey* = array[64, byte]
-  Sig* = array[64, byte]
 
 func keyPair*(seed: var Seed): (SecretKey, Key) =
   ## Derives a signing pair. Monocypher wipes the seed it reads, so
