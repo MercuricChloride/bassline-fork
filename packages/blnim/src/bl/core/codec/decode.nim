@@ -47,6 +47,9 @@ template bytes*(self: ValueView): openArray[byte] =
   let (lo, hi) = self.span
   self.buf.data.toOpenArray(lo, hi)
 
+template ce*(self: ValueView): openArray[byte] =
+  self.bytes
+
 template payloadBytes*(self: ValueView): openArray[byte] =
   let (lo, hi) = self.span
   self.buf.data.toOpenArray(lo + self.payloadLen.skipLen, hi)
@@ -243,3 +246,15 @@ iterator unchecked*(self: var Decoder): ValueView =
 
 template bytes*(self: Decoder): openArray[byte] =
   self.buf.bytes
+
+iterator decode*(_: typedesc[ValueView], ce: openArray[byte]): ValueView =
+  var d = newDecoder(newBuffer(ce))
+  for v in d.checked:
+    yield v
+
+proc decode*(_: typedesc[ValueView], ce: openArray[byte]): ValueView =
+  var first = true
+  for v in ValueView.decode(ce):
+    guard first, "decode proc should only produce 1 value"
+    result = v
+    first = false

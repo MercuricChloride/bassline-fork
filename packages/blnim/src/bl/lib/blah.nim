@@ -103,6 +103,6 @@ proc randPrefix*(v: Value): Value =
   else:
     result = v
 
-iterator blah*(count: Natural = 10): Value =
+iterator blah*(count: Natural = 10, depth = 0): Value =
   for _ in 0..<count:
-    yield randValue()
+    yield randValue(depth)

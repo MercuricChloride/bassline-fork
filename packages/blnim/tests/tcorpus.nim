@@ -15,7 +15,7 @@ suite "ce":
       value = c.items[2]
       expect = c.items[3].bytes
     test name:
-      check ceBytes(value) == expect
+      check value.ce == expect
       let l = land(expect)
       check not l.refused
       check l.values.len == 1

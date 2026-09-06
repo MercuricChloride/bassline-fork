@@ -141,6 +141,61 @@ suite "prefixes: laws on generated values":
       check prefixes(p, v)
       check prefixes(q, v)      # transitivity
 
+# ---- frameKey: the byte-key form of prefixes (core/builders) ----
+
+func isBytePrefix(a, b: openArray[byte]): bool =
+  if a.len > b.len: return false
+  for i in 0 ..< a.len:
+    if a[i] != b[i]: return false
+  true
+
+template key(v: untyped): seq[byte] = frameKey(bl v)
+
+suite "frameKey":
+  test "a scalar key is its own bytes -- an exact match":
+    check key("foo") == ce(bl "foo")
+    check key(42) == ce(bl 42)
+    check key(x"a0a0") == ce(bl x"a0a0")
+
+  test "an empty frame key is the bare header -- the whole kind":
+    check key([]) == @[byte 0x60]
+    check key({}) == @[byte 0x90]
+    check key({:}) == @[byte 0x80]
+
+  test "a frame key drops one END per rightmost-spine frame":
+    check key(a()) == ce(bl a())[0 ..< ^1]
+    check key(a(b, c)) == ce(bl a(b, c))[0 ..< ^1]
+    check key(a(b())) == ce(bl a(b()))[0 ..< ^2]
+    check key(r(s(t()))) == ce(bl r(s(t())))[0 ..< ^3]
+    check key({x: 1}) == ce(bl {x: 1})[0 ..< ^1]
+    check key({x: y()}) == ce(bl {x: y()})[0 ..< ^2]
+
+  test "a trailing 0xA0 in the payload is not an END":
+    # (foo 0xA0): ce tail is <bytes payload A0><record END A0>; drop only
+    # the record's, never the payload byte
+    check key(foo(x"a0")) == ce(bl foo(x"a0"))[0 ..< ^1]
+    check key(foo(x"a0")) != ce(bl foo(x"a0"))[0 ..< ^2]
+
+  test "the view and value overloads agree":
+    for _ in 0 ..< 300:
+      let v = randValue(4)
+      check frameKey(v) == frameKey(v.toView)
+
+  test "law: isBytePrefix(frameKey(q), ce(e))  iff  prefixes(q, e)":
+    # randValue(4), not (3): a shallower value is orders of magnitude
+    # smaller, and frameKey re-encodes+decodes through `toView` -- the
+    # law is size-independent, so cheap samples buy more coverage.
+    for _ in 0 ..< 300:
+      let q = randValue(4)
+      let kq = frameKey(q)                    # once, not once per `e`
+      check isBytePrefix(kq, ce(q))           # reflexive: q selects itself
+      let p = randPrefix(q)
+      check isBytePrefix(frameKey(p), ce(q))  # a real prefix selects q
+      check prefixes(p, q)
+      for _ in 0 ..< 6:                       # vs arbitrary others, both ways
+        let e = randValue(4)
+        check isBytePrefix(kq, ce(e)) == prefixes(q, e)
+
 suite "extract":
   # literal parts equal, holes bind by name
   test "holes bind, literals must match":

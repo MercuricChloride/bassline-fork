@@ -3,7 +3,6 @@
 import std/[math, unittest]
 import bl/core
 import bl/lib/blah
-import ./corpus
 
 suite "ordering":
 
@@ -40,7 +39,7 @@ suite "ordering":
       values.add randValue(3)
     var spelled: seq[seq[byte]]
     for v in values:
-      spelled.add ceBytes(v)
+      spelled.add v.ce
     for i in 0 ..< values.len:
       for j in 0 ..< values.len:
         check cmp(values[i], values[j]).sgn == cmpBytes(spelled[i], spelled[j]).sgn

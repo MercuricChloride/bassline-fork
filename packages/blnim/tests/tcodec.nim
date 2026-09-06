@@ -69,7 +69,7 @@ suite "random values":
 
   test "encode then decode":
     for v in values:
-      let l = land(ceBytes(v))
+      let l = land(v.ce)
       check not l.refused
       check l.values.len == 1
       if l.values.len == 1:

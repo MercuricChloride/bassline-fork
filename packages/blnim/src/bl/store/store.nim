@@ -821,6 +821,9 @@ proc insert*[A](db: Db[A]; elem: openArray[byte]): bool =
     db.workRoot = np
   res.inserted
 
+proc incl*[A](db: Db[A]; elem: openArray[byte]): bool {.discardable.} =
+  db.insert(elem)
+
 # -------------------------------------------------------------------------
 # Membership
 # -------------------------------------------------------------------------
@@ -842,6 +845,41 @@ proc member*[A](s: Snapshot[A]; elem: openArray[byte]): bool =
 
 proc member*[A](db: Db[A]; elem: openArray[byte]): bool =
   db.rsnap.member(elem)
+
+proc contains*[A](db: Db[A], elem: openArray[byte]): bool =
+  db.member elem
+
+proc contains*[A](s: Snapshot[A], elem: openArray[byte]): bool =
+  s.member elem
+
+proc low*[A](s: Snapshot[A]): seq[byte] =
+  ## The smallest element of s or `@[]` when the set is empty
+  var pgno = s.root
+  if pgno == 0: return @[]
+  while true:
+    let pg = s.getPage(pgno)
+    case hdr(pg).kind
+    of pkInterior:
+      pgno = getChildAt(pg, 0)
+    of pkLeaf:
+      return s.readElem(leafAt(pg, 0))
+    else: doAssert false, "tree descent hit page kind " & $hdr(pg).kind
+
+proc high*[A](s: Snapshot[A]): seq[byte] =
+  ## The largest element or `@[]` when the set is empty
+  var pgno = s.root
+  if pgno == 0: return @[]
+  while true:
+    let pg = s.getPage(pgno)
+    case hdr(pg).kind
+    of pkInterior:
+      pgno = getChildAt(pg, hdr(pg).cellCount.int)
+    of pkLeaf:
+      return s.readElem(leafAt(pg, hdr(pg).cellCount.int - 1))
+    else: doAssert false, "tree descent hit page kind " & $hdr(pg).kind
+
+proc low*[A](db: Db[A]): seq[byte] = db.rsnap.low
+proc high*[A](db: Db[A]): seq[byte] = db.rsnap.high
 
 proc prefault*(s: Snapshot[MmapArena]; pgno: PageN) =
   ## mmap-backend extra (see mmaparena.prefault). MemArena pages are
@@ -1325,6 +1363,10 @@ proc compact*(srcPath, dstPath: string; batch = 50_000) =
   close src
 
 proc lastTxid*[A](db: Db[A]): uint64 = db.txid
+
+func inTxn*[A](db: Db[A]): bool =
+  ## Whether a transaction is open
+  db.inTxn
 
 # =========================================================================
 # Self-test. Storage never interprets elements, so arbitrary byte strings

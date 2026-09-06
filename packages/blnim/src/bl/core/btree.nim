@@ -129,6 +129,30 @@ func firstLeaf[K, V](t: BTree[K, V]): Node[K, V] =
     if result.entries.len == 0:       # only a root leaf can be empty
       result = nil
 
+func low[K, V](node: Node[K, V]): lent K =
+  ## smallest key under `node`
+  case node.kind
+  of nkLeaf:     return node.entries[0].key
+  of nkInternal: return low(node.kids[0])
+
+func high[K, V](node: Node[K, V]): lent K =
+  ## largest key under `node`
+  case node.kind
+  of nkLeaf:     return node.entries[node.entries.len - 1].key
+  of nkInternal: return high(node.kids[node.kids.len - 1])
+
+func low*[K, V](t: BTree[K, V]): lent K =
+  ## The smallest key. Raises `KeyError` on an empty tree.
+  if t == nil or t.root == nil or t.entries == 0:
+    raise newException(KeyError, "low on an empty btree")
+  return low(t.root)
+
+func high*[K, V](t: BTree[K, V]): lent K =
+  ## The largest key. Raises `KeyError` on an empty tree.
+  if t == nil or t.root == nil or t.entries == 0:
+    raise newException(KeyError, "high on an empty btree")
+  return high(t.root)
+
 iterator pairs*[K, V](t: BTree[K, V]): lent Entry[K, V] =
   var leaf = t.firstLeaf
   while leaf != nil:

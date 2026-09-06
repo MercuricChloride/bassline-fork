@@ -282,3 +282,19 @@ proc toValue*(view: ValueView): Value =
     result = initDict(view.mark)
     for (key, val) in view.entries:
       result.dict[key.toValue] = val.toValue
+
+iterator decode*(_: typedesc[Value], ce: openArray[byte]): Value =
+  for view in ValueView.decode(ce):
+    yield view.toValue
+
+proc decode*(_: typedesc[Value], ce: openArray[byte]): Value =
+  ValueView.decode(ce).toValue
+
+proc toView*(self: Value): ValueView =
+  var
+    buf = newBuffer[byte]()
+    e = newEncoder(buf)
+    d = newDecoder(buf)
+  e.write self
+  for v in d.unchecked:
+    return v

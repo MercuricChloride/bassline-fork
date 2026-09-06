@@ -4,7 +4,7 @@
 
 import std/[algorithm, os, unittest]
 import bl/core
-import bl/store/store
+import bl/store
 import bl/lib/blah
 import ./corpus
 
@@ -13,8 +13,8 @@ import ./corpus
 var values: seq[Value]
 filter ce, c:
   values.add c.items[2]
-for _ in 0 ..< 500:
-  values.add randValue(3)
+for val in blah(500, 3):
+  values.add val
 
 var ordered = values
 ordered.sort(cmp)
@@ -25,21 +25,26 @@ while i < ordered.len:                      # the store is a set
 
 var expect: seq[seq[byte]]
 for v in ordered:
-  expect.add ceBytes(v)
+  expect.add v.ce
 
 proc holds[A](db: Db[A]) =
   ## db, after every element went in, scans as the values in order
   db.withTx:
     for v in values:
-      discard db.insert(ceBytes(v))
+      db.incl v
   var got: seq[seq[byte]]
   for e in db.scan():
     got.add e
   check got == expect
   let snap = db.snapshot()
   for v in values:
-    check snap.member(ceBytes(v))
-  check not snap.member(ceBytes(sym"not-in-the-store"))
+    check v in snap
+  check sym"not-in-the-store" notin snap
+  # bounds: the first and last of the scan, by leftmost / rightmost descent
+  check snap.low == expect[0]
+  check snap.high == expect[^1]
+  check db.low == expect[0]            # Db overload, over the live root
+  check db.high == expect[^1]
   # what the store hands back in place is a value the codec accepts
   var cur = snap.newCursorAt(expect[0])
   var n = 0
@@ -70,6 +75,14 @@ suite "backends":
     var fdb = createDb(filePath)
     holds(fdb)
     fdb.close()
+
+  test "an empty store has empty bounds":
+    var e = createMemDb()
+    check e.low.len == 0
+    check e.high.len == 0
+    check e.snapshot().low.len == 0
+    check e.snapshot().high.len == 0
+    e.close()
 
   test "byte-identical pages":
     check readFile(memPath) == readFile(filePath)

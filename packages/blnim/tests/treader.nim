@@ -15,7 +15,7 @@ proc ce(hex: string): seq[byte] =
 
 template spells(s: string, hex: string) =
   ## the text reads to the value whose canonical encoding is hex
-  check ceBytes(readValue(s)) == ce(hex)
+  check readValue(s).ce == ce(hex)
 
 template prints(hex: string, s: string) =
   ## the value whose canonical encoding is hex prints as s
@@ -44,7 +44,7 @@ suite "printer":
       expect = c.items[3].bytes
     test name:
       for width in [high(int), 40, 16, 1]:
-        check ceBytes(readValue(pretty(value, width))) == expect
+        check readValue(pretty(value, width)).ce == expect
       discard prefixesRead(pretty(value, 16))
 
   test "random values":

@@ -14,11 +14,6 @@ template filter*(name, val, body) =
     if head(val) == bl(name):
       body
 
-proc ceBytes*(v: Value): seq[byte] =
-  let enc = newEncoder()
-  enc.write v
-  enc.buf.data
-
 type Landed* = object
   values*: seq[ValueView]
   pending*: bool

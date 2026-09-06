@@ -1,2 +1,2 @@
-import ./store/store
-export store
+import ./store/[store, values]
+export store, values

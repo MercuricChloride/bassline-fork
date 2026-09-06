@@ -131,6 +131,29 @@ func prefixes*(a, b: Value): bool =
       inc i
   true
 
+proc frameKey*(q: ValueView): seq[byte] =
+  ## The byte-prefix key that selects exactly the values `q` prefixes
+  ## (see `ops.prefixes`): `q`'s CE bytes with one trailing ENDs.
+  ## A scalar `q` yields its bytes unchanged
+  var v = q
+  var opens = 0
+  while v.kind in {bList, bRec, bDict, bSet}:
+    inc opens
+    if v.kind == bDict:
+      let es = v.entries
+      if es.len == 0 or es[es.len - 1].val.isNil: break
+      v = es[es.len - 1].val
+    else:
+      let cs = v.children
+      if cs.len == 0: break
+      v = cs[cs.len - 1]
+  result = @(q.bytes)
+  result.setLen(result.len - opens)
+
+proc frameKey*(q: Value): seq[byte] =
+  ## `frameKey` for an in-memory value: through its view.
+  frameKey(q.toView)
+
 #[
 ================ Shapes ================
 
