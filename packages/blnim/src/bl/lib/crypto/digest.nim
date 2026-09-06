@@ -12,8 +12,7 @@ import nimcrypto/[blake2, sha2]
 import ../../core
 import ../[blmacro, ops]
 
-template refuse(msg: string) =
-  raise newException(ValueError, msg)
+refuseWith ValueError
 
 let
   Blake2bAlgo* = bl blake2b
@@ -67,12 +66,12 @@ proc fromValue*(T: typedesc[Digest], v: Value): Digest =
     algo = bindings[bl algo]
     hash = bindings[bl hash]
   guard algo.kind == bSym, "digest algo must be a symbol"
-  guard hash.kind == bBytes, "digest hash must bytes"
+  guard hash.kind == bBytes, "digest hash must be bytes"
   guard algo == Sha256Algo or algo == Blake2bAlgo, "unknown hash algo"
   guard hash.bytes.len == 32, "invalid hash length"
 
   result.algo = algo
-  copyMem addr result[0], addr hash.bytes[0], 32
+  copyMem addr result.hash[0], addr hash.bytes[0], 32
 
 proc toValue*(self: Digest): Value =
-  bl digest(%(self.algo), %(self.hash))
+  bl digest(%(self.algo), %(@(self.hash)))

@@ -17,6 +17,7 @@
 import ../../core
 import ../blmacro
 import ./[eddsa, types]
+export types
 
 proc keypairFromSeed*(seed: Seed): Keypair =
   ## the pair a seed derives

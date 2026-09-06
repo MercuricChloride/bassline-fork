@@ -1,8 +1,7 @@
 import ../../core
 import ../[blmacro, ops]
 
-template refuse(msg: string) =
-  raise newException(ValueError, msg)
+refuseWith ValueError
 
 let Scheme* = bl `eddsa-blake2b`
 
@@ -33,7 +32,6 @@ func shape*(_: typedesc[Signed]): Value =
   bl signed(!value, !sig)
 
 proc fromValue*(T: typedesc[Signature], v: Value): Signature =
-  bind refuse
   var bindings: Value
   guard T.shape.extract(v, bindings), "invalid signature shape"
   let 
@@ -48,12 +46,11 @@ proc fromValue*(T: typedesc[Signature], v: Value): Signature =
   copyMem addr result.pubkey[0], addr pubkey.bytes[0], 32
 
 proc fromValue*(T: typedesc[Signed], v: Value): Signed =
-  bind refuse
   var bindings: Value
   guard T.shape.extract(v, bindings), "invalid signed shape"
   let
     value = bindings[bl value]
-    sig = Signature.fromValue bindings[bl value]
+    sig = Signature.fromValue bindings[bl sig]
   Signed(value: value, sig: sig)
 
 func toValue*(self: Signature): Value =
@@ -61,3 +58,23 @@ func toValue*(self: Signature): Value =
 
 func toValue*(self: Signed): Value =
   bl signed(%self.value, %self.sig)
+
+func shape*(_: typedesc[Keypair]): Value =
+  bl keypair(!scheme, !seed, !pubkey)
+
+proc fromValue*(T: typedesc[Keypair], v: Value): Keypair =
+  var bindings: Value
+  guard T.shape.extract(v, bindings), "invalid keypair shape"
+  let
+    scheme = bindings[bl scheme]
+    seed = bindings[bl seed]
+    pubkey = bindings[bl pubkey]
+  guard scheme == Scheme, "unknown scheme"
+  guard seed.kind == bBytes and seed.bytes.len == 32, "malformed seed"
+  guard pubkey.kind == bBytes and pubkey.bytes.len == 32, "malformed pubkey"
+  result.scheme = scheme
+  copyMem addr result.seed[0], addr seed.bytes[0], 32
+  copyMem addr result.pubkey[0], addr pubkey.bytes[0], 32
+
+func toValue*(self: Keypair): Value =
+  bl keypair(%self.scheme, %(@(self.seed)), %(@(self.pubkey)))

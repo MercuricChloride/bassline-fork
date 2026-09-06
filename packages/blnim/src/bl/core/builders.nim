@@ -3,8 +3,7 @@ import ./buffer
 import btree, codec
 export btree, codec
 
-template refuse(msg: string) =
-  raise newException(ValueError, msg)
+refuseWith ValueError
 
 type
   Num* = object

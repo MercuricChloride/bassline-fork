@@ -6,8 +6,7 @@ export json
 type
   JsonRefusal* = object of CatchableError
 
-template refuse(msg: string) =
-  raise newException(JsonRefusal, msg)
+refuseWith JsonRefusal
 
 proc toJson*(self: Num): JsonNode =
   if self.isWide:

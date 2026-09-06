@@ -1,8 +1,8 @@
 import ./shared
 
 # ================ Decoded Values ================
-template refuse(msg: string) =
-  raise newException(CodecError, msg)
+
+refuseWith CodecError
 
 type
   ValueView* = ref object

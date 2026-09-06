@@ -6,8 +6,7 @@
 import ../core
 import blmacro
 
-template refuse(msg: string) =
-  raise newException(ValueError, msg)
+refuseWith ValueError
 
 # ================ Walking & accessing ================
 

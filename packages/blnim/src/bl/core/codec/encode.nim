@@ -1,7 +1,6 @@
 import ./shared
 
-template refuse(msg: string) =
-  raise newException(CodecError, msg)
+refuseWith CodecError
 
 type
   Encoder* = ref object

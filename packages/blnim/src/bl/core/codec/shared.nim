@@ -11,13 +11,15 @@ const
 
 type CodecError* = object of CatchableError
 
-template refuse(msg: string) =
-  raise newException(CodecError, msg)
+template refuseWith*(err) {.dirty.} =
+  template refuse(msg: string) =
+    raise newException(err, msg)
 
-template guard*(cond: bool, msg: string) =
-  mixin refuse
-  if not cond:
-    refuse(msg)
+  template guard(cond: bool, msg: string) =
+    if not cond:
+      refuse(msg)
+
+refuseWith CodecError
 
 template ensure*(cond: bool) =
   result = cond
