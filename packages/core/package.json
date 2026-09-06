@@ -19,6 +19,10 @@
     "./lang": {
       "types": "./types/src/lang/index.d.ts",
       "default": "./src/lang/index.js"
+    },
+    "./stream": {
+      "types": "./types/src/stream/index.d.ts",
+      "default": "./src/stream/index.js"
     }
   },
   "scripts": {

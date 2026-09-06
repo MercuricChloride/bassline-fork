@@ -7,7 +7,7 @@ import {
   bytes,
   nil,
   int,
-  string,
+  text,
   symbol,
   list,
   record,
@@ -31,17 +31,17 @@ describe('atom formatting', () => {
     expect(print(nil())).toBe('nil')
     expect(print(int(42n))).toBe('42')
     expect(print(int(-7n))).toBe('-7')
-    expect(print(string('hi'))).toBe('"hi"')
+    expect(print(text('hi'))).toBe('"hi"')
     expect(print(bs(0xde, 0xad))).toBe('0xdead') // lowercase hex
     expect(print(bs())).toBe('0x')
   })
 
   it('escapes only the quote and the backslash in strings', () => {
-    expect(print(string(''))).toBe('""')
-    expect(print(string('say "hi"'))).toBe('"say \\"hi\\""')
-    expect(print(string('a\\b'))).toBe('"a\\\\b"')
-    expect(print(string('a\nb\t'))).toBe('"a\nb\t"') // newline and tab literal
-    expect(print(string("it's fine"))).toBe('"it\'s fine"') // a single quote is literal in a string
+    expect(print(text(''))).toBe('""')
+    expect(print(text('say "hi"'))).toBe('"say \\"hi\\""')
+    expect(print(text('a\\b'))).toBe('"a\\\\b"')
+    expect(print(text('a\nb\t'))).toBe('"a\nb\t"') // newline and tab literal
+    expect(print(text("it's fine"))).toBe('"it\'s fine"') // a single quote is literal in a string
   })
 
   it('prints symbols bare only when they lex back unchanged', () => {
@@ -158,10 +158,10 @@ describe('round-trip: read(print(v)) eq v', () => {
     int(-255n),
     int(123456789012345678901234567890n),
     act(int(7n)),
-    string(''),
-    string('quotes \' and " and \\ and \n newline'),
-    string('unicode π 😀'),
-    act(string('do')),
+    text(''),
+    text('quotes \' and " and \\ and \n newline'),
+    text('unicode π 😀'),
+    act(text('do')),
     symbol('bare'),
     symbol('needs quoting: <>'),
     symbol('a,b'), // , is an ordinary symbol char
@@ -177,7 +177,7 @@ describe('round-trip: read(print(v)) eq v', () => {
     bs(),
     bs(0, 1, 254, 255),
     act(bs(0xab)),
-    list([int(1n), string('two'), symbol('three')]),
+    list([int(1n), text('two'), symbol('three')]),
     list([]),
     act(list([])),
     set([]),

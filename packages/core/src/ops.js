@@ -1,142 +1,106 @@
 // @ts-check
 
-/** @import {Value, Values, Atom} from './forms.js' */
-import { assertValue } from './forms.js'
-import { eq, list, record, set, dict } from './codec.js'
+// Operations over values: walking, the mark predicates, structural rebuild,
+// dict / set access, structural similarity, CE-truncation prefixes, and
+// shapes with holes. A port of the Nim `lib/ops.nim`, plus the dict / set
+// helpers the JS side already had.
+//
+// `similar` and `prefixes` dispatch on one value and match it against the
+// other; they are not visitors and stay plain functions. `walk` is the
+// iterative pre-order driver, re-exported from the visitor module.
+
+import { assertValue, eq, isAtom, byValue, BDict, BSet } from './value/value.js'
+import { list, record, dict, set, symbol } from './value/build.js'
+import { BTree } from './btree.js'
+import { walk } from './value/visitor.js'
 
 /**
- * Yield a value and every constituent, depth-first, in document order.
+ * @import { Value, Frame, BList, BRecord } from './value/value.js'
+ */
+
+export { walk }
+
+// ================ walking ================
+
+/**
+ * The immediate constituents of `v`, in document order. A dict yields
+ * key, value, key, value, ...; an atom yields nothing. (Shallow — `walk` is
+ * the deep version.)
  * @param {Value} v
  * @yields {Value}
  * @returns {Generator<Value, void>}
  */
-export function* walk(v) {
-  yield v
+export function* items(v) {
   switch (v.kind) {
     case 'list':
     case 'record':
+      yield* v.items
+      break
     case 'set':
-      for (const item of v.value) yield* walk(item)
+      yield* v.values()
       break
     case 'dict':
-      for (const [key, value] of v.value) {
-        yield* walk(key)
-        yield* walk(value)
+      for (const [k, val] of v.entries()) {
+        yield k
+        yield val
       }
       break
   }
 }
 
 /**
- *
+ * Every atom in `v`'s tree, in document order.
  * @param {Value} v
- * @yields {Atom}
- * @returns {Generator<Atom, void>}
+ * @yields {Value}
+ * @returns {Generator<Value, void>}
  */
 export function* atoms(v) {
-  for (const val of walk(v)) {
-    switch (val.kind) {
-      case 'nil':
-      case 'int':
-      case 'string':
-      case 'symbol':
-      case 'bytes':
-        yield val
-    }
-  }
+  for (const node of walk(v)) if (isAtom(node)) yield node
 }
 
+// ================ the mark ================
+
 /**
+ * Whether `v` itself carries the mark.
  * @param {Value} v
  */
-export function hasActionable(v) {
-  for (const el of walk(v)) {
-    if (el.actionable) return true
-  }
+export const marked = v => (assertValue(v), v.mark)
+
+/**
+ * Whether the mark appears anywhere in `v`'s tree.
+ * @param {Value} v
+ */
+export function hasMark(v) {
+  for (const node of walk(v)) if (node.mark) return true
   return false
 }
 
 /**
- * True when no value contains itself
+ * Whether `v` is pure data — nothing in it is marked.
  * @param {Value} v
  */
-export function cycleFree(v) {
-  const path = new Set()
-  /**
-   * @param {Value} node
-   * @returns {boolean}
-   */
-  function go(node) {
-    if (path.has(node)) return false
-    path.add(node)
-    let ok = true
-    switch (node.kind) {
-      case 'list':
-      case 'record':
-      case 'set':
-        ok = node.value.every(go)
-        break
-      case 'dict':
-        ok = node.value.every(([key, value]) => go(key) && go(value))
-        break
-    }
-    path.delete(node)
-    return ok
-  }
-  return go(v)
-}
-
-/** @param {Value} v */
-export const isData = v => (assertValue(v), !hasActionable(v))
-
-/** @param {Value} v */
-export const isActionable = v => (assertValue(v), v.actionable)
+export const isData = v => (assertValue(v), !hasMark(v))
 
 /**
- * The same value with the mark set as given (a shallow copy when it differs).
+ * The same value with the mark set as given — a fresh handle over the shared
+ * body. A no-op when the mark already matches.
  * @param {Value} v
- * @param {boolean} actionable
+ * @param {boolean} [on]
  * @returns {Value}
  */
-export function withMark(v, actionable = true) {
+export function withMark(v, on = true) {
   assertValue(v)
-  if (v.actionable === actionable) return v
-  return Object.freeze({ ...v, actionable })
+  return v.withMark(on)
 }
 
-/**
- * @overload
- * @param {Values['dict']} v
- * @param {(x: [Value, Value]) => [Value, Value]} fn
- * @returns {Values['dict']}
- */
+// ================ structural rebuild ================
 
 /**
- * @overload
- * @param {Values['list']} v
- * @param {(x: Value) => Value} fn
- * @returns {Values['list']}
- */
-
-/**
- * @overload
- * @param {Values['set']} v
- * @param {(x: Value) => Value} fn
- * @returns {Values['set']}
- */
-
-/**
- * @overload
- * @param {Values['record']} v
- * @param {(x: Value) => Value} fn
- * @returns {Values['record']}
- */
-
-/**
- * Rebuild a frame by applying fn over its constituents — dict constituents
- * are [key, value] pairs — preserving the mark. Atoms come back unchanged.
+ * Rebuild a frame by applying `fn` to each constituent — a dict's
+ * constituents are `[key, value]` pairs — keeping the mark. An atom is
+ * returned unchanged.
  * @param {Value} v
- * @param {((x: Value) => Value) | ((x: [Value, Value]) => [Value, Value])} fn
+ * @param {((x: Value) => Value) | ((e: [Value, Value]) => [Value, Value])} fn
  * @returns {Value}
  */
 export function map(v, fn) {
@@ -144,73 +108,317 @@ export function map(v, fn) {
   const eachEntry = /** @type {(e: [Value, Value]) => [Value, Value]} */ (fn)
   switch (v.kind) {
     case 'list':
-      return list(v.value.map(each), v.actionable)
+      return list(v.items.map(each), v.mark)
     case 'record':
-      return record(v.value.map(each), v.actionable)
+      return record(v.items.map(each), v.mark)
     case 'set':
-      return set(v.value.map(each), v.actionable)
+      return set([...v.values()].map(each), v.mark)
     case 'dict':
-      return dict(v.value.map(eachEntry), v.actionable)
+      return dict([...v.entries()].map(eachEntry), v.mark)
     default:
       return v
   }
 }
 
+// ================ dict / set access ================
+
 /**
- * The value under `key`, or undefined when the dict / set doesn't speak of it.
- * @param {Values[('dict' | 'set')]} v
+ * The value under `key` in a dict, or the stored member equal to `key` in a
+ * set; `undefined` when it isn't there.
+ * @param {BDict | BSet} v
  * @param {Value} key
- * @throws {TypeError} when v isn't a dict / set
+ * @returns {Value | undefined}
  */
 export function at(v, key) {
-  switch (v.kind) {
-    case 'dict':
-      for (const [k, value] of v.value) {
-        if (eq(k, key)) return value
+  if (v.kind === 'dict') return v.get(key)
+  if (v.kind === 'set') {
+    for (const m of v.values()) if (eq(m, key)) return m
+    return undefined
+  }
+  throw new TypeError('at requires a dictionary or set')
+}
+
+/**
+ * Whether a dict speaks of `key`, or a set contains it.
+ * @param {BDict | BSet} v
+ * @param {Value} key
+ */
+export function contains(v, key) {
+  if (v.kind === 'dict' || v.kind === 'set') return v.has(key)
+  throw new TypeError('contains requires a dictionary or set')
+}
+
+/**
+ * A dict with `key` bound to `val`, or a set with `val` added — the rest of
+ * the body shared. Overloads: `assoc(dict, key, val)` / `assoc(set, val)`.
+ * @param {BDict | BSet} v
+ * @param {[Value] | [Value, Value]} args
+ * @returns {Value}
+ */
+export function assoc(v, ...args) {
+  if (v.kind === 'dict') {
+    const [key, val] = args
+    const t = v.tree.clone()
+    t.set(key, val)
+    return new BDict(t, v.mark)
+  }
+  if (v.kind === 'set') {
+    const s = v.treeSet.clone()
+    s.add(args[0])
+    return new BSet(s, v.mark)
+  }
+  throw new TypeError('assoc requires a dictionary or set')
+}
+
+/**
+ * A dict without `key`, or a set without the member equal to it. Rebuilds the
+ * frame (the B+tree has no delete yet).
+ * @param {BDict | BSet} v
+ * @param {Value} key
+ * @returns {Value}
+ */
+export function dissoc(v, key) {
+  if (v.kind === 'dict') {
+    return dict(
+      [...v.entries()].filter(([k]) => !eq(k, key)),
+      v.mark
+    )
+  }
+  if (v.kind === 'set') {
+    return set(
+      [...v.values()].filter(m => !eq(m, key)),
+      v.mark
+    )
+  }
+  throw new TypeError('dissoc requires a dictionary or set')
+}
+
+// ================ similarity ================
+
+/**
+ * Whether `v` is shaped like `exemplar`: same kind and mark at every node
+ * `exemplar` reaches, and a frame in `exemplar` may be shorter than `v`'s
+ * (its head must match, for a record). Atoms match on kind and mark alone —
+ * `similar` does not look at their payloads.
+ * @param {Value} v
+ * @param {Value} exemplar
+ * @returns {boolean}
+ */
+export function similar(v, exemplar) {
+  assertValue(v)
+  assertValue(exemplar)
+  if (exemplar.kind !== v.kind || exemplar.mark !== v.mark) return false
+  // v.kind === exemplar.kind is now established; narrow v to match.
+  switch (exemplar.kind) {
+    case 'list': {
+      const a = /** @type {BList} */ (v)
+      if (exemplar.items.length > a.items.length) return false
+      for (let i = 0; i < exemplar.items.length; i++) {
+        if (!similar(a.items[i], exemplar.items[i])) return false
       }
-      return undefined
-    case 'set':
-      for (const value of v.value) {
-        if (eq(value, key)) return value
+      return true
+    }
+    case 'record': {
+      const a = /** @type {BRecord} */ (v)
+      if (exemplar.items.length > a.items.length) return false
+      if (!eq(exemplar.items[0], a.items[0])) return false
+      for (let i = 1; i < exemplar.items.length; i++) {
+        if (!similar(a.items[i], exemplar.items[i])) return false
       }
-      return undefined
+      return true
+    }
+    case 'dict': {
+      const a = /** @type {BDict} */ (v)
+      for (const [k, exVal] of exemplar.entries()) {
+        const actual = a.get(k)
+        if (actual === undefined || !similar(actual, exVal)) return false
+      }
+      return true
+    }
+    case 'set': {
+      const a = /** @type {BSet} */ (v)
+      for (const m of exemplar.values()) if (!a.has(m)) return false
+      return true
+    }
     default:
-      throw new TypeError('at requires a dictionary or set!')
+      return true // an atom: kind and mark already matched
+  }
+}
+
+// ================ prefixes ================
+
+/**
+ * Whether `a` is a prefix of `b`: what `b`'s canonical encoding yields when
+ * stopped early, with every frame the stop left open closed by END. Reflexive.
+ * Kind and mark must agree. Among scalars only equal values are prefixes. In a
+ * frame every member but the last must equal `b`'s, and the last is itself a
+ * prefix of `b`'s. Dicts and sets compare in canonical order, so a prefix is a
+ * leading run of the sorted members, not a subset.
+ * @param {Value} a
+ * @param {Value} b
+ * @returns {boolean}
+ */
+export function prefixes(a, b) {
+  assertValue(a)
+  assertValue(b)
+  if (a.kind !== b.kind || a.mark !== b.mark) return false
+  if (a.isAtom()) return a.equals(b)
+  // a frame, and b is the same kind: members() is the flat member sequence
+  // (key, value, key, value for a dict), so `a` is a prefix of `b` when every
+  // member but its last equals b's and the last is itself a prefix of b's.
+  const am = [...a.members()]
+  const bm = [.../** @type {Frame} */ (b).members()]
+  if (am.length > bm.length) return false
+  for (let i = 0; i < am.length; i++) {
+    const last = i + 1 === am.length
+    if (!(last ? prefixes(am[i], bm[i]) : am[i].equals(bm[i]))) return false
+  }
+  return true
+}
+
+// ================ shapes ================
+//
+// A shape is a value with holes. A hole is a marked atom, and the atom is its
+// name; `_!` binds nothing. `extract` recognises a value by a shape — literal
+// parts must match exactly — and binds the holes into a dict keyed by their
+// names. A hole seen twice must bind the same value. `inject` fills a shape's
+// holes from bindings, leaving unbound holes in place, so filling composes. A
+// hole in a dict key or set member has no single answer, so `extract` refuses
+// such shapes.
+
+const ANON = symbol('_', true)
+
+/**
+ * Whether `v` is a hole: a marked atom.
+ * @param {Value} v
+ */
+export const isHole = v => v.mark && isAtom(v)
+
+/**
+ * Whether `v` is the anonymous hole `_!`.
+ * @param {Value} v
+ */
+export const isAnon = v => v.equals(ANON)
+
+/**
+ * Whether a hole appears anywhere in `v`.
+ * @param {Value} v
+ */
+export function hasHoles(v) {
+  if (isHole(v)) return true
+  for (const c of items(v)) if (hasHoles(c)) return true
+  return false
+}
+
+/**
+ * @param {Value} shape
+ * @param {Value} value
+ * @param {BTree<Value, Value>} bindings
+ * @returns {boolean}
+ */
+function matchShape(shape, value, bindings) {
+  if (isHole(shape)) {
+    if (isAnon(shape)) return true
+    const name = shape.withMark(false)
+    const existing = bindings.get(name)
+    if (existing !== undefined) return existing.equals(value)
+    bindings.set(name, value)
+    return true
+  }
+  if (shape.kind !== value.kind || shape.mark !== value.mark) return false
+  switch (shape.kind) {
+    case 'list':
+    case 'record': {
+      const vv = /** @type {BList | BRecord} */ (value)
+      if (shape.items.length !== vv.items.length) return false
+      for (let i = 0; i < shape.items.length; i++) {
+        if (!matchShape(shape.items[i], vv.items[i], bindings)) return false
+      }
+      return true
+    }
+    case 'dict': {
+      const vv = /** @type {BDict} */ (value)
+      for (const [k, sv] of shape.entries()) {
+        if (hasHoles(k)) {
+          throw new Error('a hole in a dict key is not supported')
+        }
+        const av = vv.get(k)
+        if (av === undefined || !matchShape(sv, av, bindings)) return false
+      }
+      return true
+    }
+    case 'set': {
+      for (const m of shape.values()) {
+        if (hasHoles(m)) {
+          throw new Error('a hole in a set member is not supported')
+        }
+      }
+      return shape.equals(value)
+    }
+    default:
+      return shape.equals(value)
   }
 }
 
 /**
- * @overload
- * @param {Values['dict']} v
- * @param {Value} key
- * @param {Value} Value
- * @returns {Values['dict']}
- */
-
-/**
- * @overload
- * @param {Values['set']} v
+ * Recognise `value` by `shape` and bind its holes. Returns a dict keyed by
+ * the holes' names, or `undefined` when the shape does not match.
+ * @param {Value} shape
  * @param {Value} value
- * @returns {Values['set']}
+ * @returns {BDict | undefined}
  */
+export function extract(shape, value) {
+  assertValue(shape)
+  assertValue(value)
+  /** @type {BTree<Value, Value>} */
+  const bindings = new BTree(byValue)
+  if (!matchShape(shape, value, bindings)) return undefined
+  return new BDict(bindings, false)
+}
 
 /**
- * Associate value  `key`, or undefined when the dict / set doesn't speak of it.
- * @param {Values[('dict' | 'set')]} v
- * @param {[Value] | [Value, Value]} args
- * @throws {TypeError} when v isn't a dict / set
+ * `shape` with its holes filled from `bindings` (a dict keyed by hole name).
+ * A hole with no binding is left in place.
+ * @param {Value} shape
+ * @param {Value} bindings
+ * @returns {Value}
  */
-export function assoc(v, ...args) {
-  switch (v.kind) {
-    case 'dict': {
-      const [key, val] = args
-      return dict([...v.value, [key, val]])
+export function inject(shape, bindings) {
+  assertValue(shape)
+  assertValue(bindings)
+  if (isHole(shape)) {
+    if (isAnon(shape)) return shape
+    if (bindings.kind === 'dict') {
+      const bound = bindings.get(shape.withMark(false))
+      if (bound !== undefined) return bound
     }
-    case 'set': {
-      const [val] = args
-      return set([...v.value, val])
-    }
+    return shape
+  }
+  switch (shape.kind) {
+    case 'list':
+      return list(
+        [...shape.items].map(c => inject(c, bindings)),
+        shape.mark
+      )
+    case 'record':
+      return record(
+        [...shape.items].map(c => inject(c, bindings)),
+        shape.mark
+      )
+    case 'dict':
+      return dict(
+        [...shape.entries()].map(([k, v]) => [
+          inject(k, bindings),
+          inject(v, bindings),
+        ]),
+        shape.mark
+      )
+    case 'set':
+      return set(
+        [...shape.values()].map(m => inject(m, bindings)),
+        shape.mark
+      )
     default:
-      throw new TypeError('assoc requires a dictionary or set!')
+      return shape
   }
 }

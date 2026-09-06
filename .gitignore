@@ -23,3 +23,5 @@ target/
 
 bin/
 bench-data/
+# generated type declarations
+packages/*/types/

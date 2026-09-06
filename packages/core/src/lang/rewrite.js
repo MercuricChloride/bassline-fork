@@ -1,5 +1,7 @@
-/** @import { Value } from '../data.js' */
-import { assertValue, eq, map } from '../data.js'
+// @ts-check
+/** @import { Value } from '../value/value.js' */
+import { assertValue, eq } from '../value/value.js'
+import { map } from '../ops.js'
 
 /**
  * Rewrite a value tree with a rule, bottom-up. Children are rewritten first,
@@ -15,7 +17,7 @@ export function rewrite(v, rule, opts = {}) {
   /** @param {Value} aNode */
   function rebuild(aNode) {
     return aNode.kind === 'dict'
-      ? map(aNode, ([k, v]) => [go(k), go(v)])
+      ? map(aNode, ([k, v]) => /** @type {[Value, Value]} */ ([go(k), go(v)]))
       : map(aNode, go)
   }
   /** @param {Value} node */

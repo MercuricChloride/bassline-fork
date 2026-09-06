@@ -1,18 +1,23 @@
 import { describe, it, expect } from 'vitest'
 import {
   eq,
+  cmp,
   isData,
   encode,
   decode,
+  decodeAll,
   withMark,
+  marked,
+  hasMark,
   at,
+  contains,
+  assoc,
+  dissoc,
   nil,
   int,
-  string,
+  text,
   symbol,
-  bytes,
   list,
-  record,
   dict,
   set,
 } from '../src/data.js'
@@ -23,205 +28,132 @@ const hex = u8 =>
     .join(' ')
     .toUpperCase()
 
-const bytesOf = s =>
-  Uint8Array.from(
-    s
-      .trim()
-      .split(/\s+/)
-      .map(h => parseInt(h, 16))
-  )
 const act = v => withMark(v, true)
 
-// (label, value, canonical-encoding hex) — hand-computed from the doc's rules:
-// one header byte [tag:4 | mark:1 | len:3]; scalar payloads follow (integers
-// as decimal digits); frames hold their encoded children and close with END
-// (A0).
-const VECTORS = [
-  ['nil', nil(), '10'],
-  ['`nil', act(nil()), '18'],
-  ['0', int(0n), '21 30'],
-  ['1', int(1n), '21 31'],
-  ['-1', int(-1n), '22 2D 31'],
-  ['255', int(255n), '23 32 35 35'],
-  ['1234567 (two-byte length)', int(1234567n), '27 07 31 32 33 34 35 36 37'],
-  ['"hi" string', string('hi'), '32 68 69'],
-  ['foo symbol', symbol('foo'), '43 66 6F 6F'],
-  ['`x (actionable symbol)', act(symbol('x')), '49 78'],
-  ['#[FF]', bytes(Uint8Array.of(0xff)), '51 FF'],
-  ['[] (empty list)', list([]), '60 A0'],
-  ['[1]', list([int(1n)]), '60 21 31 A0'],
-  ['[1 2]', list([int(1n), int(2n)]), '60 21 31 21 32 A0'],
-  ['`[1] (actionable list)', act(list([int(1n)])), '68 21 31 A0'],
-  [
-    '[`1 2] (actionable element)',
-    list([act(int(1n)), int(2n)]),
-    '60 29 31 21 32 A0',
-  ],
-  ['(foo 1)', record([symbol('foo'), int(1n)]), '70 43 66 6F 6F 21 31 A0'],
-  ['(foo) (head only)', record([symbol('foo')]), '70 43 66 6F 6F A0'],
-  ['{a: 1}', dict([[symbol('a'), int(1n)]]), '80 41 61 21 31 A0'],
-  [
-    '{`a: 1} (actionable key)',
-    dict([[act(symbol('a')), int(1n)]]),
-    '80 49 61 21 31 A0',
-  ],
-  // built with keys out of order to exercise canonical sorting
-  [
-    '{b: 2, a: 1}',
-    dict([
-      [symbol('b'), int(2n)],
-      [symbol('a'), int(1n)],
-    ]),
-    '80 41 61 21 31 41 62 21 32 A0',
-  ],
-  ['#{2 1}', set([int(2n), int(1n)]), '90 21 31 21 32 A0'],
-  // a marked and an unmarked member of different types: `nil's header byte
-  // (18) sorts before the int's (21) — the mark rides inside the type byte.
-  ['#{1 `nil} (mixed mark/type)', set([int(1n), act(nil())]), '90 18 21 31 A0'],
-  // an A0 payload byte must not read as END
-  [
-    '#{#[A0]} (END byte as payload)',
-    set([bytes(Uint8Array.of(0xa0))]),
-    '90 51 A0 A0',
-  ],
-]
+// The wire format itself is covered exhaustively by test/corpus.test.js
+// against corpus/corpus.bl. These tests exercise the value API.
 
-// Each MUST be rejected by decode (the trust boundary for incoming bytes).
-const REJECTS = [
-  ['invalid tag 0x0', '00'],
-  ['invalid tag 0xb', 'B0'],
-  ['invalid tag 0xf', 'F0'],
-  ['END at the top level', 'A0'],
-  ['END with mark/length bits', 'A8'],
-  ['nil with a length', '11'],
-  ['frame header with length bits', '61 21 31 A0'],
-  ['unterminated frame', '60 21 31'],
-  ['record with no head', '70 A0'],
-  ['empty integer payload', '20'],
-  ['leading-zero integer', '22 30 31'],
-  ['negative-zero integer', '22 2D 30'],
-  ['plus-signed integer', '22 2B 35'],
-  ['non-digit integer', '21 41'],
-  ['non-minimal two-byte length', '27 05 31 32 33 34 35'],
-  ['non-minimal four-byte length', '37 FF 00 00 00 08'],
-  ['overlong UTF-8', '32 C0 80'],
-  ['surrogate code point', '33 ED A0 80'],
-  ['dict keys out of order', '80 41 62 21 32 41 61 21 31 A0'],
-  ['duplicate dict key', '80 41 61 21 31 41 61 21 32 A0'],
-  ['dict key missing value', '80 41 61 A0'],
-  ['set members out of order', '90 21 32 21 31 A0'],
-  ['duplicate set member', '90 21 31 21 31 A0'],
-  ['payload past end of input', '23 31 32'],
-  ['trailing garbage', '10 10'],
-]
-
-describe('canonical encoding', () => {
-  it.each(VECTORS)('encodes %s', (_label, value, want) => {
-    expect(hex(encode(value))).toBe(want)
+describe('the mark', () => {
+  it('withMark sets it; a matching call is a no-op that returns the same handle', () => {
+    const m = act(int(1n))
+    expect(marked(m)).toBe(true)
+    expect(withMark(m, true)).toBe(m)
+    expect(withMark(int(1n), false)).toEqual(int(1n))
   })
 
-  it.each(VECTORS)('round-trips %s', (_label, value) => {
-    expect(eq(decode(encode(value)), value)).toBe(true)
-  })
-
-  it.each(REJECTS)('rejects %s', (_label, byteStr) => {
-    expect(() => decode(bytesOf(byteStr))).toThrow()
-  })
-
-  it('uses the four-byte length form past 254', () => {
-    const v = string('a'.repeat(300))
-    const ce = encode(v)
-    expect(hex(ce.subarray(0, 6))).toBe('37 FF 00 00 01 2C')
-    expect(ce.length).toBe(306)
-    expect(eq(decode(ce), v)).toBe(true)
-  })
-
-  it('honors a local length limit', () => {
-    const ce = encode(string('a'.repeat(300)))
-    expect(() => decode(ce, { maxLength: 100 })).toThrow('length limit')
-    expect(() => decode(ce, { maxLength: 300 })).not.toThrow()
-  })
-
-  it('rejects nesting past the depth limit', () => {
-    const deep = bytesOf('60 '.repeat(5) + '10 ' + 'A0 '.repeat(5))
-    expect(() => decode(deep, { maxDepth: 3 })).toThrow('depth')
-    expect(() => decode(deep, { maxDepth: 10 })).not.toThrow()
-  })
-})
-
-describe('actionable', () => {
-  it('withMark is idempotent', () => {
-    expect(eq(act(act(int(1n))), act(int(1n)))).toBe(true)
-  })
-
-  it('withMark(v, false) inverts the mark (and is a no-op on a static value)', () => {
+  it('withMark(v, false) inverts it', () => {
     expect(eq(withMark(act(int(1n)), false), int(1n))).toBe(true)
     expect(eq(withMark(int(1n), false), int(1n))).toBe(true)
   })
 
-  it('changes the canonical encoding', () => {
-    expect(eq(act(int(1n)), int(1n))).toBe(false)
+  it('is idempotent', () => {
+    expect(eq(act(act(int(1n))), act(int(1n)))).toBe(true)
   })
 
-  it('makes data? false transitively', () => {
+  it('changes the canonical encoding and identity', () => {
+    expect(eq(act(int(1n)), int(1n))).toBe(false)
+    expect(hex(encode(act(int(1n))))).not.toBe(hex(encode(int(1n))))
+  })
+
+  it('hasMark / isData see the mark anywhere in the tree', () => {
+    expect(hasMark(list([act(int(1n))]))).toBe(true)
     expect(isData(list([act(int(1n))]))).toBe(false)
     expect(isData(list([int(1n)]))).toBe(true)
   })
+
+  it('a frame keeps its body when re-marked', () => {
+    const l = list([int(1n), int(2n)])
+    const m = withMark(l, true)
+    expect(eq(withMark(m, false), l)).toBe(true)
+    expect([...m].length).toBe(2)
+  })
 })
 
-describe('equality', () => {
-  it('eq is total and works on actionable values', () => {
+describe('equality and order', () => {
+  it('eq is total and honours the mark', () => {
     expect(eq(act(int(1n)), act(int(1n)))).toBe(true)
     expect(eq(act(int(1n)), int(1n))).toBe(false)
   })
 
-  it('distinguishes the int 1 from the string "1" (same payload bytes)', () => {
-    expect(eq(int(1n), string('1'))).toBe(false)
+  it('distinguishes the int 1 from the text "1" (same payload bytes)', () => {
+    expect(eq(int(1n), text('1'))).toBe(false)
+    expect(cmp(int(1n), text('1'))).toBeLessThan(0) // number tag < text tag
   })
 
-  it('distinguishes a symbol from a same-spelled string', () => {
-    expect(eq(symbol('x'), string('x'))).toBe(false)
+  it('distinguishes a symbol from a same-spelled text', () => {
+    expect(eq(symbol('x'), text('x'))).toBe(false)
   })
 
   it('distinguishes {k: nil} from {}', () => {
     expect(eq(dict([[symbol('k'), nil()]]), dict([]))).toBe(false)
   })
+
+  it('cmp is CE order (shortlex), not numeric order', () => {
+    // the decimal spellings sort by length first: "1" "2" before "-1" "10",
+    // and "-1" before "10" because '-' (0x2D) < '1' (0x31)
+    const sorted = [int(2n), int(10n), int(-1n), int(1n)].sort(cmp)
+    expect(sorted.map(v => Number(v.value))).toEqual([1, 2, -1, 10])
+  })
 })
 
-describe('strings', () => {
-  it('rejects lone surrogates at construction', () => {
-    expect(() => string('\uD800')).toThrow()
+describe('BInt representation', () => {
+  it('rounds a decoded integer through the smallest representation', () => {
+    expect(typeof decode(encode(int(5n))).value).toBe('number')
+    const big = 10n ** 40n
+    expect(typeof decode(encode(int(big))).value).toBe('bigint')
+    expect(decode(encode(int(big))).value).toBe(big)
+  })
+})
+
+describe('text & symbol', () => {
+  it('reject lone surrogates at construction', () => {
+    expect(() => text('\uD800')).toThrow()
     expect(() => symbol('\uDC00')).toThrow()
   })
 })
 
-describe('dictionaries', () => {
-  it('constructs faithfully', () => {
-    expect(() =>
-      dict([
-        [symbol('a'), int(1n)],
-        [symbol('a'), int(2n)],
-      ])
-    ).not.toThrow()
+describe('length tiers', () => {
+  it('uses the four-byte length form past 254', () => {
+    const v = text('a'.repeat(300))
+    const ce = encode(v)
+    expect(hex(ce.subarray(0, 6))).toBe('37 FF 00 00 01 2C')
+    expect(ce.length).toBe(306)
+    expect(eq(decode(ce), v)).toBe(true)
+  })
+})
+
+describe('decode limits', () => {
+  it('honours a per-call value-size limit', () => {
+    const ce = encode(text('a'.repeat(300)))
+    expect(() => decode(ce, { maxValueBytes: 100 })).toThrow(/value-size limit/)
+    expect(() => decode(ce, { maxValueBytes: 400 })).not.toThrow()
   })
 
-  it('deduplicates keys canonically', () => {
+  it('rejects nesting past the depth limit', () => {
+    const deep = Uint8Array.of(
+      ...new Array(5).fill(0x60),
+      0x10,
+      ...new Array(5).fill(0xa0)
+    )
+    expect(() => decode(deep, { maxDepth: 3 })).toThrow(/depth/)
+    expect(() => decode(deep, { maxDepth: 10 })).not.toThrow()
+  })
+
+  it('decode refuses trailing bytes; decodeAll takes them as more values', () => {
+    const two = Uint8Array.of(0x10, 0x10)
+    expect(() => decode(two)).toThrow()
+    expect(decodeAll(two).map(v => v.kind)).toEqual(['nil', 'nil'])
+  })
+})
+
+describe('dictionaries', () => {
+  it('deduplicates keys canonically, last write wins', () => {
     const d = dict([
       [symbol('a'), int(1n)],
       [symbol('a'), int(2n)],
     ])
-    expect(d.value.length).toBe(1)
-  })
-
-  it('allows an actionable key', () => {
-    const d = dict([[act(symbol('a')), int(1n)]])
-    expect(eq(decode(encode(d)), d)).toBe(true)
-  })
-
-  it('allows an actionable value, becoming non-Data', () => {
-    const d = dict([[symbol('a'), act(int(1n))]])
-    expect(isData(d)).toBe(false)
-    expect(eq(at(d, symbol('a')), act(int(1n)))).toBe(true)
+    expect(d.size).toBe(1)
+    expect(eq(at(d, symbol('a')), int(2n))).toBe(true)
   })
 
   it('sorts canonically regardless of construction order', () => {
@@ -236,46 +168,44 @@ describe('dictionaries', () => {
     expect(eq(a, b)).toBe(true)
   })
 
-  it('dictGet returns undefined for a missing key', () => {
-    expect(at(dict([[symbol('a'), int(1n)]]), symbol('z'))).toBe(undefined)
+  it('allows a marked key, and a marked value makes the dict non-data', () => {
+    const k = dict([[act(symbol('a')), int(1n)]])
+    expect(eq(decode(encode(k)), k)).toBe(true)
+    const v = dict([[symbol('a'), act(int(1n))]])
+    expect(isData(v)).toBe(false)
+    expect(eq(at(v, symbol('a')), act(int(1n)))).toBe(true)
+  })
+
+  it('at / contains / assoc / dissoc', () => {
+    const d = dict([[symbol('a'), int(1n)]])
+    expect(at(d, symbol('z'))).toBeUndefined()
+    expect(contains(d, symbol('a'))).toBe(true)
+    const d2 = assoc(d, symbol('b'), int(2n))
+    expect(d2.size).toBe(2)
+    expect(d.size).toBe(1) // unchanged
+    expect(eq(dissoc(d2, symbol('a')), dict([[symbol('b'), int(2n)]]))).toBe(
+      true
+    )
   })
 })
 
 describe('sets', () => {
-  it('constructs faithfully — a duplicate member is not rejected here', () => {
-    expect(() => set([int(1n), int(1n)])).not.toThrow()
-  })
-
-  it('deduplicates members canonically', () => {
-    const s = set([int(1n), int(1n)])
-    expect(s.value.length).toBe(1)
-  })
-
-  it('is order-insensitive', () => {
+  it('deduplicates members canonically and is order-insensitive', () => {
+    expect(set([int(1n), int(1n)]).size).toBe(1)
     expect(eq(set([int(1n), int(2n)]), set([int(2n), int(1n)]))).toBe(true)
   })
 
-  it('setHas checks membership by value', () => {
-    const a = int(1)
-    const b = int(2)
+  it('at returns the stored member; contains checks membership', () => {
+    const a = int(1n)
     const s = set([a])
-    expect(at(s, a)).toBe(a)
-    expect(at(s, b)).toBeUndefined()
-  })
-})
-
-describe('immutability', () => {
-  it('freezes frame internals so a cached CE cannot go stale', () => {
-    expect(Object.isFrozen(list([int(1n)]).value)).toBe(true)
-    expect(Object.isFrozen(record([symbol('r')]).value)).toBe(true)
-    expect(Object.isFrozen(set([int(1n)]).value)).toBe(true)
-    expect(Object.isFrozen(dict([]).value)).toBe(true)
+    expect(at(s, int(1n))).toBe(a)
+    expect(at(s, int(2n))).toBeUndefined()
+    expect(contains(s, int(1n))).toBe(true)
   })
 
-  it('values are frozen literals', () => {
-    expect(Object.isFrozen(int(1n))).toBe(true)
-    expect(Object.isFrozen(list([]))).toBe(true)
-    expect(Object.isFrozen(withMark(int(1n), true))).toBe(true)
-    expect(Object.isFrozen(decode(encode(record([symbol('r')]))))).toBe(true)
+  it('assoc / dissoc', () => {
+    const s = set([int(1n)])
+    expect(assoc(s, int(2n)).size).toBe(2)
+    expect(eq(dissoc(assoc(s, int(2n)), int(1n)), set([int(2n)]))).toBe(true)
   })
 })

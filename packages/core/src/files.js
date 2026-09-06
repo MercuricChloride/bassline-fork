@@ -1,13 +1,20 @@
-/** @import {Value} from "./data.js" */
+// @ts-check
+/** @import { Value } from './value/value.js' */
 import { readFileSync, writeFileSync } from 'node:fs'
-import { encode, decodeAll } from './data.js'
+import { encode } from './value/ce.js'
+import { decodeAll } from './value/view.js'
 import { read } from './text/reader.js'
 import { print } from './text/print.js'
 
-// The two on-disk spellings of the same values.
-export const BINARY_EXT = '.blt'
+// The two on-disk spellings of the same values: `.bl` is the textual syntax,
+// `.blb` a bare concatenation of canonical encodings.
+export const BINARY_EXT = '.blb'
 export const TEXT_EXT = '.bl'
 
+/**
+ * @param {Value | Value[]} values
+ * @returns {Value[]}
+ */
 const asList = values => (Array.isArray(values) ? values : [values])
 
 /**

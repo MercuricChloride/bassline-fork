@@ -1,4 +1,4 @@
-/** @import {Value, Values} from "../src/data.js" */
+/** @import { Value } from '../src/value/value.js' */
 import { describe, it, expect } from 'vitest'
 import { eq, int, list, symbol } from '../src/data.js'
 import { rewrite, rules } from '../src/lang/rewrite.js'
@@ -7,9 +7,8 @@ import { read } from '../src/text/reader.js'
 const v1 = src => read(src)[0]
 
 /**
- * @template {Value} T
- * @param {Values['symbol']} matches
- * @param {(v: Values['symbol']) => T} fn
+ * @param {(s: string) => boolean} matches
+ * @param {(v: Value) => Value} fn
  */
 function onSymbol(matches, fn) {
   /** @param {Value} v */
@@ -17,16 +16,13 @@ function onSymbol(matches, fn) {
 }
 
 /**
- * @template {Value} T
  * @param {string} headName
- * @param {(v: Values['record']) => T} fn
+ * @param {(v: Value) => Value} fn
  */
 function onHead(headName, fn) {
   /** @param {Value} v */
   return v =>
-    v.kind === 'record' &&
-    v.value[0].kind === 'symbol' &&
-    v.value[0].value === headName
+    v.kind === 'record' && v.head.kind === 'symbol' && v.head.value === headName
       ? fn(v)
       : v
 }
@@ -49,14 +45,14 @@ describe('rewrite', () => {
   })
 
   it('expands a record head structurally', () => {
-    const expand = onHead('def', r => list([...r.value]))
+    const expand = onHead('def', r => list([...r.items]))
     expect(eq(rewrite(v1('(def foo 123)'), expand), v1('[def foo 123]'))).toBe(
       true
     )
   })
 
   it('reduces nested redexes to a fixpoint', () => {
-    const succ = onHead('succ', r => int(r.value[1].value + 1n))
+    const succ = onHead('succ', r => int(Number(r.items[1].value) + 1))
     expect(eq(rewrite(v1('(succ (succ (succ 0)))'), succ), int(3n))).toBe(true)
   })
 

@@ -1,5 +1,15 @@
-/** @import {Value} from "../data.js" */
-import { assertValue } from '../data.js'
+// @ts-check
+// Pretty-printer for the Bassline textual syntax. `flat` renders any value on
+// one line; the Printer visitor lays frames out within a width, breaking a
+// frame across lines only when its flat form would not fit.
+
+/**
+ * @import {
+ *   Value, Atom, Frame, BList, BRecord, BDict, BSet,
+ * } from '../value/value.js'
+ */
+import { assertValue } from '../value/value.js'
+import { Visitor } from '../value/visitor.js'
 
 const DELIM = new Set([
   ' ',
@@ -19,21 +29,15 @@ const DELIM = new Set([
   '!',
 ])
 
+/** @param {string | undefined} c */
 const isDigit = c => c !== undefined && /[0-9]/.test(c)
 
-/** @type {(v: Value) => boolean} */
-const isFrame = v =>
-  v.kind === 'list' ||
-  v.kind === 'record' ||
-  v.kind === 'dict' ||
-  v.kind === 'set'
-
 /**
+ * Whether a symbol spelling lexes back unchanged with no quotes.
  * @param {string} s
  */
 function bareSafe(s) {
-  // nil is a reserved spelling
-  if (s.length === 0 || s === 'nil') return false
+  if (s.length === 0 || s === 'nil') return false // nil is a reserved spelling
   if (isDigit(s[0]) || (s[0] === '-' && isDigit(s[1]))) return false
   for (const ch of s) if (DELIM.has(ch)) return false
   return true
@@ -62,8 +66,7 @@ function hex(u8) {
 }
 
 /**
- * The bare one-line rendering of each value kind. Frames recurse through `flat`
- * (not `flatten`) so nested marked values keep their marks.
+ * The bare one-line rendering of a value's kind, mark aside.
  * @param {Value} v
  * @returns {string}
  */
@@ -71,25 +74,27 @@ function flatten(v) {
   switch (v.kind) {
     case 'nil':
       return 'nil'
-    case 'int':
-      return v.value.toString()
-    case 'string':
+    case 'number':
+      return String(v.value)
+    case 'text':
       return '"' + escapeBody(v.value, '"') + '"'
     case 'symbol':
       return bareSafe(v.value) ? v.value : "'" + escapeBody(v.value, "'") + "'"
     case 'bytes':
       return '0x' + hex(v.value)
     case 'list':
-      return '[' + v.value.map(flat).join(' ') + ']'
-    case 'set':
-      return '{' + v.value.map(flat).join(' ') + '}'
+      return '[' + v.items.map(flat).join(' ') + ']'
     case 'record':
-      return '(' + v.value.map(flat).join(' ') + ')'
+      return '(' + v.items.map(flat).join(' ') + ')'
+    case 'set':
+      return '{' + [...v.values()].map(flat).join(' ') + '}'
     case 'dict':
-      return v.value.length === 0
+      return v.size === 0
         ? '{:}'
         : '{' +
-            v.value.map(([k, val]) => flat(k) + ': ' + flat(val)).join(' ') +
+            [...v.entries()]
+              .map(([k, val]) => flat(k) + ': ' + flat(val))
+              .join(' ') +
             '}'
   }
 }
@@ -98,96 +103,141 @@ function flatten(v) {
  * One-line rendering of a value with its mark: a frame is marked in front
  * (`!(…)`), an atom behind (`x!`).
  * @param {Value} v
+ * @returns {string}
  */
 function flat(v) {
   const s = flatten(v)
-  if (!v.actionable) return s
-  return isFrame(v) ? '!' + s : s + '!'
+  if (!v.mark) return s
+  return v.isFrame() ? '!' + s : s + '!'
 }
 
 /**
- * Pretty-print a value to Bassline textual syntax
- * @param {Value} value
- * @param {number} width
- * @param {number} padding
+ * Lays a value out within a width. State — the output so far and the current
+ * indent — lives on the instance; each visit hook appends to it.
  */
-export function print(value, width = 72, padding = 2) {
-  assertValue(value, 'print expects a Bassline value')
-  let str = ''
-  let depth = 0
-
-  const column = () => str.length - (str.lastIndexOf('\n') + 1)
-  const write = s => (str += s)
-  const br = () => write('\n' + ' '.repeat(depth * padding))
-
-  /** @param {Value} v */
-  function visit(v) {
-    switch (v.kind) {
-      case 'list':
-        return compound(v, () => block('[', ']', v.value))
-      case 'set':
-        return compound(v, () => block('{', '}', v.value))
-      case 'dict':
-        return compound(v, () =>
-          block('{', '}', v.value, ([k, val]) => {
-            visit(k)
-            write(': ')
-            visit(val)
-          })
-        )
-      case 'record':
-        return compound(v, () => {
-          const [head, ...fields] = v.value
-          write('(' + flat(head))
-          depth++
-          for (const f of fields) {
-            br()
-            visit(f)
-          }
-          depth--
-          br()
-          write(')')
-        })
-      default:
-        return write(flat(v))
-    }
-  }
-
-  visit(value)
-  return str
+class Printer extends Visitor {
+  #out = ''
+  #depth = 0
+  #width
+  #padding
 
   /**
-   * Prints flat if it fits the remaining print width, else prints the mark
-   * and calls emitBroken to print the broken form. An empty frame always
-   * prints flat: broken `{}` would lose the set/dict distinction.
-   * @param {Value & {value: unknown[]}} node
+   * @param {number} width
+   * @param {number} padding
+   */
+  constructor(width, padding) {
+    super()
+    this.#width = width
+    this.#padding = padding
+  }
+
+  /** @param {Value} value */
+  run(value) {
+    value.accept(this)
+    return this.#out
+  }
+
+  #column() {
+    return this.#out.length - (this.#out.lastIndexOf('\n') + 1)
+  }
+  /** @param {string} s */
+  #write(s) {
+    this.#out += s
+  }
+  #br() {
+    this.#write('\n' + ' '.repeat(this.#depth * this.#padding))
+  }
+
+  /**
+   * Write `node` flat if it fits the remaining width, else write its mark then
+   * run `emitBroken`. An empty frame always prints flat — a broken `{}` would
+   * lose the set / dict distinction.
+   * @param {Frame} node
    * @param {() => void} emitBroken
    */
-  function compound(node, emitBroken) {
+  #compound(node, emitBroken) {
     const s = flat(node)
-    if (node.value.length === 0 || column() + s.length <= width) return write(s)
-    if (node.actionable) write('!')
+    if (node.size === 0 || this.#column() + s.length <= this.#width) {
+      return this.#write(s)
+    }
+    if (node.mark) this.#write('!')
     emitBroken()
   }
 
   /**
-   * Renders a block of values with the given opening and closing delimiters.
+   * A run of items between delimiters, one per line, indented.
    * @template T
    * @param {string} open
    * @param {string} close
    * @param {Iterable<T>} items
-   * @param {(item: T) => void} [renderItem]
+   * @param {(item: T) => void} render
    */
-  function block(open, close, items, renderItem) {
-    const render = renderItem ?? /** @type {(item: T) => void} */ (visit)
-    write(open)
-    depth++
+  #block(open, close, items, render) {
+    this.#write(open)
+    this.#depth++
     for (const item of items) {
-      br()
+      this.#br()
       render(item)
     }
-    depth--
-    br()
-    write(close)
+    this.#depth--
+    this.#br()
+    this.#write(close)
   }
+
+  /** @param {Atom} v */
+  visitAtom(v) {
+    this.#write(flat(v))
+  }
+
+  /** @param {BList} v */
+  visitList(v) {
+    this.#compound(v, () =>
+      this.#block('[', ']', v.items, item => item.accept(this))
+    )
+  }
+
+  /** @param {BSet} v */
+  visitSet(v) {
+    this.#compound(v, () =>
+      this.#block('{', '}', v.values(), item => item.accept(this))
+    )
+  }
+
+  /** @param {BDict} v */
+  visitDict(v) {
+    this.#compound(v, () =>
+      this.#block('{', '}', v.entries(), ([k, val]) => {
+        k.accept(this)
+        this.#write(': ')
+        val.accept(this)
+      })
+    )
+  }
+
+  /** @param {BRecord} v */
+  visitRecord(v) {
+    this.#compound(v, () => {
+      const [head, ...fields] = v.items
+      this.#write('(' + flat(head))
+      this.#depth++
+      for (const f of fields) {
+        this.#br()
+        f.accept(this)
+      }
+      this.#depth--
+      this.#br()
+      this.#write(')')
+    })
+  }
+}
+
+/**
+ * Pretty-print a value to Bassline textual syntax.
+ * @param {Value} value
+ * @param {number} [width]
+ * @param {number} [padding]
+ */
+export function print(value, width = 72, padding = 2) {
+  assertValue(value, 'print expects a Bassline value')
+  return new Printer(width, padding).run(value)
 }

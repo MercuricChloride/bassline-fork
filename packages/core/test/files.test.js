@@ -8,7 +8,7 @@ import {
   withMark,
   bytes,
   int,
-  string,
+  text,
   symbol,
   record,
   set,
@@ -22,22 +22,22 @@ const eqAll = (xs, ys) =>
 
 const sampleDoc = [
   int(1n),
-  string('two'),
+  text('two'),
   record([symbol('point'), int(3n), withMark(int(4n), true)]),
   set([bytes(Uint8Array.of(0xa0)), bytes(Uint8Array.of(0x80))]),
 ]
 
-describe('binary files (.blt)', () => {
+describe('binary files (.blb)', () => {
   it('round-trips a multi-value document', () => {
-    F.saveBinary(p('doc.blt'), sampleDoc)
-    expect(eqAll(F.loadBinary(p('doc.blt')), sampleDoc)).toBe(true)
+    F.saveBinary(p('doc.blb'), sampleDoc)
+    expect(eqAll(F.loadBinary(p('doc.blb')), sampleDoc)).toBe(true)
   })
 
   it('accepts a single value and an empty document', () => {
-    F.saveBinary(p('one.blt'), int(7n))
-    expect(eqAll(F.loadBinary(p('one.blt')), [int(7n)])).toBe(true)
-    F.saveBinary(p('empty.blt'), [])
-    expect(F.loadBinary(p('empty.blt'))).toEqual([])
+    F.saveBinary(p('one.blb'), int(7n))
+    expect(eqAll(F.loadBinary(p('one.blb')), [int(7n)])).toBe(true)
+    F.saveBinary(p('empty.blb'), [])
+    expect(F.loadBinary(p('empty.blb'))).toEqual([])
   })
 })
 
@@ -57,17 +57,17 @@ describe('extension-directed forms', () => {
   it('saveValues and loadValues pick the form from the suffix', () => {
     F.saveValues(p('by-ext.bl'), sampleDoc)
     expect(eqAll(F.loadValues(p('by-ext.bl')), sampleDoc)).toBe(true)
-    F.saveValues(p('by-ext.blt'), sampleDoc)
-    expect(eqAll(F.loadValues(p('by-ext.blt')), sampleDoc)).toBe(true)
+    F.saveValues(p('by-ext.blb'), sampleDoc)
+    expect(eqAll(F.loadValues(p('by-ext.blb')), sampleDoc)).toBe(true)
   })
 })
 
 describe('conversion', () => {
   it('text -> binary -> text preserves the document', () => {
     F.saveText(p('a.bl'), sampleDoc)
-    F.textToBinary(p('a.bl'), p('a.blt'))
-    expect(eqAll(F.loadBinary(p('a.blt')), sampleDoc)).toBe(true)
-    F.binaryToText(p('a.blt'), p('b.bl'))
+    F.textToBinary(p('a.bl'), p('a.blb'))
+    expect(eqAll(F.loadBinary(p('a.blb')), sampleDoc)).toBe(true)
+    F.binaryToText(p('a.blb'), p('b.bl'))
     expect(eqAll(F.loadText(p('b.bl')), sampleDoc)).toBe(true)
   })
 })

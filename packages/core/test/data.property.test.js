@@ -8,7 +8,7 @@ import {
   symbol,
   int,
   nil,
-  string,
+  text,
   bytes,
   list,
   set,
@@ -71,7 +71,7 @@ const { value } = fc.letrec(tie => ({
     { maxDepth: 3 },
     fc.constant(nil()),
     fc.bigInt().map(int),
-    spelling.map(string),
+    spelling.map(text),
     spelling.map(symbol),
     fc.uint8Array().map(bytes),
     tie('value').map(v => withMark(v, true)),
@@ -134,9 +134,9 @@ describe('round-trip', () => {
 })
 
 describe('encoding is total over depth', () => {
-  // The recursive encoder died near 3000 levels. Depth is capped here only
-  // because the per-node CE cache makes deep chains quadratic in time —
-  // this pins totality, not speed.
+  // The old recursive encoder blew the stack near 3000 levels; the iterative
+  // fold does not. Depth is capped here only because a deep chain still costs
+  // O(depth) per node to compare — this pins totality, not speed.
   it('encodes values far deeper than the call stack', () => {
     let v = int(1n)
     for (let i = 0; i < 10_000; i++) v = list([v])
@@ -183,7 +183,7 @@ describe('length tiers', () => {
   test.prop([fc.integer({ min: 0, max: 600 })])(
     'every payload length round-trips',
     n => {
-      const v = string('x'.repeat(n))
+      const v = text('x'.repeat(n))
       expect(eq(decode(encode(v)), v)).toBe(true)
     }
   )
@@ -200,7 +200,7 @@ describe('length tiers', () => {
 describe('mutation resistance', () => {
   test.prop([value])('encode() hands back a private copy', v => {
     encode(v).fill(0) // mutate the returned array
-    expect(eq(decode(encode(v)), v)).toBe(true) // value and its cache are untouched
+    expect(eq(decode(encode(v)), v)).toBe(true) // the returned array is a fresh copy each call
   })
 
   test.prop([fc.uint8Array({ minLength: 1 })])(
@@ -234,9 +234,9 @@ describe('independent CE corpus', () => {
       ]),
       '80510010518010A0',
     ],
-    ['unicode é', string('é'), '32C3A9'],
-    ['emoji', string('\u{1F600}'), '34F09F9880'],
-    ['actionable nested', withMark(list([int(1n)]), true), '682131A0'],
+    ['unicode é', text('é'), '32C3A9'],
+    ['emoji', text('\u{1F600}'), '34F09F9880'],
+    ['marked nested', withMark(list([int(1n)]), true), '682131A0'],
     ['record, head only', record([symbol('foo')]), '7043666F6FA0'],
   ]
 

@@ -4,10 +4,10 @@ import {
   encode,
   decode,
   eq,
-  isActionable,
+  marked,
   withMark,
   int,
-  string,
+  text,
   symbol,
   nil,
   list,
@@ -36,7 +36,7 @@ describe('documents', () => {
     const vs = read('42 "hi" foo')
     expect(vs).toHaveLength(3)
     expect(eq(vs[0], int(42n))).toBe(true)
-    expect(eq(vs[1], string('hi'))).toBe(true)
+    expect(eq(vs[1], text('hi'))).toBe(true)
     expect(eq(vs[2], symbol('foo'))).toBe(true)
   })
 
@@ -77,10 +77,10 @@ describe('atoms', () => {
   })
 
   it('strings', () => {
-    expect(eq(val('""'), string(''))).toBe(true)
-    expect(eq(val('"hi"'), string('hi'))).toBe(true)
-    expect(eq(val('"a\\n\\t\\r\\\\\\"b"'), string('a\n\t\r\\"b'))).toBe(true)
-    expect(eq(val('"a\nb"'), string('a\nb'))).toBe(true) // literal newline is legal
+    expect(eq(val('""'), text(''))).toBe(true)
+    expect(eq(val('"hi"'), text('hi'))).toBe(true)
+    expect(eq(val('"a\\n\\t\\r\\\\\\"b"'), text('a\n\t\r\\"b'))).toBe(true)
+    expect(eq(val('"a\nb"'), text('a\nb'))).toBe(true) // literal newline is legal
   })
 
   it('symbols', () => {
@@ -160,7 +160,7 @@ describe('frames', () => {
     expect(
       eq(
         val('[1 [2] {a: "x"}]'),
-        list([int(1n), list([int(2n)]), dict([[symbol('a'), string('x')]])])
+        list([int(1n), list([int(2n)]), dict([[symbol('a'), text('x')]])])
       )
     ).toBe(true)
   })
@@ -169,10 +169,10 @@ describe('frames', () => {
 describe('marks', () => {
   it('an atom is marked behind', () => {
     const v = val('go!')
-    expect(isActionable(v)).toBe(true)
+    expect(marked(v)).toBe(true)
     expect(eq(v, act(symbol('go')))).toBe(true)
     expect(eq(val('5!'), act(int(5n)))).toBe(true)
-    expect(eq(val('"hi"!'), act(string('hi')))).toBe(true)
+    expect(eq(val('"hi"!'), act(text('hi')))).toBe(true)
     expect(eq(val("'has space'!"), act(symbol('has space')))).toBe(true)
     expect(eq(val("''!"), act(symbol('')))).toBe(true)
     expect(eq(val('0xab!'), act(bs(0xab)))).toBe(true)
@@ -382,14 +382,14 @@ describe('readSpans', () => {
 
   it("includes an atom's trailing mark in the span", () => {
     const [s] = readSpans('go!')
-    expect(s.value.actionable).toBe(true)
+    expect(s.value.mark).toBe(true)
     expect(s.start).toBe(0)
     expect(s.end).toBe(3)
   })
 
   it("includes a frame's leading mark in the span", () => {
     const [s] = readSpans('![1]')
-    expect(s.value.actionable).toBe(true)
+    expect(s.value.mark).toBe(true)
     expect(s.start).toBe(0)
     expect(s.end).toBe(4)
   })
@@ -418,7 +418,7 @@ describe('readSpans', () => {
 
   it('spans a marked dict key including its mark', () => {
     const [s] = readSpans('{go!: 1}')
-    expect(s.children[0].value.actionable).toBe(true)
+    expect(s.children[0].value.mark).toBe(true)
     expect([s.children[0].start, s.children[0].end]).toEqual([1, 4])
   })
 })
@@ -428,7 +428,7 @@ describe('round-trip with canonical encoding', () => {
     const v = val('(entry "k" {1 2 3})')
     const want = record([
       symbol('entry'),
-      string('k'),
+      text('k'),
       set([int(1n), int(2n), int(3n)]),
     ])
     expect(eq(v, want)).toBe(true)
