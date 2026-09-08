@@ -10,29 +10,27 @@ refuseWith ValueError
 
 # ================ Walking & accessing ================
 
-iterator items*(v: Value): Value =
-  case v.kind
+iterator items*(self: Value): lent Value =
+  case self.kind
   of bList, bRec:
-    for val in v.items:
-      yield val
-  of bSet:
-    for val,_ in v.els:
+    for val in self.items:
       yield val
   of bDict:
-    for key, val in v.dict:
+    for key, val in self.dict:
       yield key
+      yield val
+  of bSet:
+    for val in self.els:
       yield val
   else: discard
 
-iterator walk*(v: Value): Value {.closure.} =
-  case v.kind
+proc forEach*(self: Value, fn: proc(v: Value)) =
+  fn(self)
+  case self.kind
   of bList, bRec, bSet, bDict:
-    yield v
-    for val in v:
-      for deep in walk(val):
-        yield deep
-  else:
-    yield v
+    for val in self:
+      val.forEach fn
+  else: discard
 
 func contains*(v, key: Value): bool =
   case v.kind
@@ -53,24 +51,56 @@ func `[]`*(v, key: Value): lent Value =
   else:
     refuse "[] requires a list, record, or dict"
 
+func `[]`*(v: Value, key: int): lent Value =
+  case v.kind
+  of bList, bRec:
+    return v.items.data[key]
+  else:
+    refuse "[] with an int requires a list or record"
+
+proc `[]=`*(self: var Value, key, val: Value) =
+  case self.kind
+  of bList, bRec:
+    guard key.kind == bNum, "[]= for a list requires an index"
+    self.items.data[key.num.toInt] = val
+  of bDict:
+    self.dict[key] = val
+  else:
+    refuse "[]= requires a list, record, or dict"
+
+proc `[]=`*(self: var Value, key: int, val: Value) =
+  case self.kind
+  of bList, bRec:
+    self.items.data[key] = val
+  else:
+    refuse "[]= with an int requires a list or record"
+
+proc incl*(self: var Value, val: Value) =
+  guard self.kind == bSet, "expected a set"
+  self.els.incl val
+
+func `/`*(self: Value, key: Value): lent Value =
+  self[key]
+
+func `/`*(self: Value, key: int): lent Value =
+  self[key]
+
 # ================ Similarity ================
 
 func similar*(v, examplar: Value): bool =
   if examplar.kind != v.kind: return
   if examplar.mark != v.mark: return
 
-  case examplar.kind
-  of bList:
+  let k = examplar.kind
+  case k
+  of bList, bRec:
     if examplar.items.len > v.items.len: return
-    for i in 0..<examplar.items.len:
-      if not similar(v.items[i], examplar.items[i]):
-        return
-  of bRec:
-    if examplar.items.len > v.items.len: return
-    if examplar.items[0] != v.items[0]: return
-    for i in 1..<examplar.items.len:
-      if not similar(v.items[i], examplar.items[i]): 
-        return
+    for i, a, b in lockstep(v.items, examplar.items):
+      if k == bRec and i == 0 and a != b:
+        return false
+      else:
+        if not similar(a, b):
+          return false
   of bDict:
     for key, val in examplar.dict:
       try:
@@ -79,8 +109,7 @@ func similar*(v, examplar: Value): bool =
       except KeyError:
         return
   of bSet:
-    for key, _ in examplar.els:
-      if key notin v.els: return
+    return examplar.els <= v.els
   else: discard
 
   return true
@@ -125,8 +154,8 @@ func prefixes*(a, b: Value): bool =
     var i = 0
     for ea, eb in lockstep(a.els, b.els):
       if i + 1 == n:
-        if not prefixes(ea.key, eb.key): return false
-      elif ea.key != eb.key:
+        if not prefixes(ea, eb): return false
+      elif ea != eb:
         return false
       inc i
   true
@@ -158,15 +187,15 @@ proc frameKey*(q: Value): seq[byte] =
 ================ Shapes ================
 
 A shape is a value with holes. A hole is a mark atom and the atom
-is its name, aside from `_!` which binds nothing. 
+is its name, aside from `_!` which binds nothing.
 
 `extract` recognises a value by a shape, where literal parts must match,
 and binds it's holes into a dictionary. When a hole is seen twice it
-also enforces that it must be the same value. The bindings are a dict 
-keyed by the holes' names. 
+also enforces that it must be the same value. The bindings are a dict
+keyed by the holes' names.
 
 `inject` fills a shape's holes from bindings, leaving holes without one
-as they are, so filling composes. A hole in a dict key or a set member 
+as they are, so filling composes. A hole in a dict key or a set member
 has no single answer, so extract refuses such shapes until I implement
 unification there.
 ]#
@@ -191,7 +220,7 @@ func hasHoles*(v: Value): bool =
     for k, val in v.dict:
       if hasHoles(k) or hasHoles(val): return true
   of bSet:
-    for m in v.els.keys:
+    for m in v.els:
       if hasHoles(m): return true
   else: discard
   false
@@ -206,7 +235,7 @@ proc extract*(shape, v: Value, bindings: var Value): bool =
     let name = holeName(shape)
     if name in bindings.dict:
       return bindings.dict[name] == v
-    bindings.dict[name] = v
+    bindings[name] = v
     return true
   if shape.kind != v.kind or shape.mark != v.mark:
     return false
@@ -221,12 +250,12 @@ proc extract*(shape, v: Value, bindings: var Value): bool =
     # not its concern
     for k, sv in shape.dict:
       guard not hasHoles k, "a hole in a dict key: " & $k
-      
+
       if k notin v.dict: return false
       if not extract(sv, v.dict[k], bindings): return false
     true
   of bSet:
-    for m in shape.els.keys:
+    for m in shape.els:
       guard not hasHoles m, "a hole in a set member: " & $m
     shape == v
   else:
@@ -253,7 +282,7 @@ proc inject*(shape, bindings: Value): Value =
       result.dict[inject(k, bindings)] = inject(val, bindings)
   of bSet:
     result = initSet(shape.mark)
-    for m in shape.els.keys:
-      result.els[inject(m, bindings)] = true
+    for m in shape.els:
+      result.els.incl inject(m, bindings)
   else:
     result = shape

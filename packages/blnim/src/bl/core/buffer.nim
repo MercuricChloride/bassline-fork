@@ -58,6 +58,10 @@ iterator chunks*[T](buf: Buffer[T], size: Natural): seq[T] =
   for c in buf.data.chunks(size):
     yield c
 
+iterator lockstep*[T](a, b: Buffer[T]): (int, lent T, lent T) =
+  for i in 0..<min(a.len, b.len):
+    yield (i, a.data[i], b.data[i])
+
 # ================ Cursor ================
 
 type

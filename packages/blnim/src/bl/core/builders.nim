@@ -1,4 +1,4 @@
-import std/strutils
+import std/[strutils, hashes]
 import ./buffer
 import btree, codec
 export btree, codec
@@ -56,7 +56,7 @@ type
     of bDict:
       dict*: BTree[Value, Value]
     of bSet:
-      els*: BTree[Value, bool]
+      els*: BTreeSet[Value]
 
 func null*(mark = false): Value =
   Value(kind: bNil, mark: mark)
@@ -89,7 +89,7 @@ func initDict*(mark = false): Value =
   Value(kind: bDict, dict: newBTree[Value, Value](), mark: mark)
 
 func initSet*(mark = false): Value =
-  Value(kind: bSet, els: newBTree[Value, bool](), mark: mark)
+  Value(kind: bSet, els: newBTreeSet[Value](), mark: mark)
 
 # ================ Comparators ================
 
@@ -159,7 +159,7 @@ func cmp*(a, b: Value): int =
     diff b.dict.len, a.dict.len
   of bSet:
     for ea, eb in lockstep(a.els, b.els):
-      diff ea.key, eb.key
+      diff ea, eb
     diff b.els.len, a.els.len
 
 func `==`*(a, b: Value): bool =
@@ -180,7 +180,7 @@ proc initRec*(items: sink seq[Value], mark = false): Value =
 proc initSet*(items: sink seq[Value], mark = false): Value =
   result = initSet(mark)
   for x in items:
-    result.els[x] = true
+    result.els.incl x
 
 proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
   result = initDict(mark)
@@ -223,7 +223,7 @@ proc write*(e: Encoder, v: Value) =
   template frame(body) =
     e.frame(v.kind, v.mark):
       body
-  
+
   case v.kind
   of bNil: 
     scalar []
@@ -244,7 +244,7 @@ proc write*(e: Encoder, v: Value) =
         e.write val
   of bSet:
     frame:
-      for val, _ in v.els:
+      for val in v.els:
         e.write val
 
 proc ce*(v: Value): seq[byte] =
@@ -252,6 +252,14 @@ proc ce*(v: Value): seq[byte] =
   let e = newEncoder()
   e.write v
   e.buf.data
+
+proc hash*(v: Value): Hash =
+  let b = v.ce
+  hashData(addr b[0], b.len)
+
+proc hash*(v: ValueView): Hash =
+  let b = @(v.ce)
+  hashData(addr b[0], b.len)
 
 proc toValue*(view: ValueView): Value =
   case view.kind

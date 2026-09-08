@@ -96,7 +96,7 @@ proc randPrefix*(v: Value): Value =
     let j = rand(0 .. v.els.len.int)
     result = initSet(v.mark)
     var i = 0
-    for m in v.els.keys:
+    for m in v.els:
       if i >= j: break
       result.els.incl(if i == j - 1 and rand(bool): randPrefix(m) else: m)
       inc i

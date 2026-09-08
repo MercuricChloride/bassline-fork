@@ -190,7 +190,7 @@ proc datum(s: string, pos: var int): Value =
       while true:
         if m in result.els:
           fail(s, pos, "duplicate set member")
-        result.els[m] = true
+        result.els.incl m
         skipWs(s, pos)
         if pos >= s.len:
           incomplete(s, pos, "unclosed {")
@@ -390,7 +390,7 @@ template eachMember(v: Value, m, body: untyped) =
   of bList, bRec:
     for m in v.items: body
   of bSet:
-    for m in v.els.keys: body
+    for m in v.els: body
   else: discard
 
 func flatLen(v: Value, room: int): int =

@@ -38,7 +38,7 @@ proc toJson*(self: Value): JsonNode =
     result["value"] = %* items
   of bSet:
     var items = newJArray()
-    for val, _ in self.els:
+    for val in self.els:
       items.add val.toJson
     result["value"] = %* items
 
