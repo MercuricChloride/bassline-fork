@@ -17,6 +17,12 @@ func newBufferOfCap*[T](cap: Natural): Buffer[T] =
 func len*(buf: Buffer): Natural =
   buf.data.len
 
+func low*(buf: Buffer): auto =
+  buf.data.low
+
+func high*(buf: Buffer): auto =
+  buf.data.high
+
 func `[]`*[Idx, T](buf: Buffer[T], i: Idx): lent T =
   buf.data[i]
 
@@ -61,6 +67,22 @@ iterator chunks*[T](buf: Buffer[T], size: Natural): seq[T] =
 iterator lockstep*[T](a, b: Buffer[T]): (int, lent T, lent T) =
   for i in 0..<min(a.len, b.len):
     yield (i, a.data[i], b.data[i])
+
+proc map*[K](self: Buffer, fn: proc(item: self.T): K): Buffer[K] =
+  result = newBufferOfCap[K](self.len)
+  for item in self:
+    result.add fn(item)
+
+proc filter*(self: Buffer, fn: proc(item: self.T): bool): Buffer[self.T] =
+  result = newBuffer()
+  for item in self:
+    if fn(item):
+      result.add item
+
+proc reduce*[A](self: Buffer, init: A, fn: proc(acc: A, curr: self.T): A): A =
+  result = init
+  for item in self:
+    result = fn(result, item)
 
 # ================ Cursor ================
 

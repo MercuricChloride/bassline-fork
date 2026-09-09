@@ -30,10 +30,6 @@ type
     entries: int
     root: Node[T, bool]
 
-  Map*[A,B] = proc(item: A): B {.closure.}
-  Filter*[A] = proc(item: A): bool {.closure.}
-  Reduce*[A,T] = proc(acc: A, curr: T): A {.closure.}
-
 # ================ Nodes ================
 
 func lowerIdx[K, V](entries: openArray[Entry[K, V]], key: K): int =
@@ -412,16 +408,23 @@ func high*[T](t: BTreeSet[T]): lent T =
     raise newException(KeyError, "high on an empty btree")
   return high(t.root)
 
-proc reduce*[A, T](t: BTreeSet[T], init: A, fn: Reduce[A, T]): A =
+proc reduce*[A, T](
+    t: BTreeSet[T], init: A,
+    fn: proc(acc: A, curr: T): A
+  ): A =
   for item in t:
     result = fn(result, item)
 
-proc map*[T, K](t: BTreeSet[T], fn: Map[T, K]): BTreeSet[K] =
+proc map*[T, K](
+    t: BTreeSet[T], fn: proc(item: T): K
+  ): BTreeSet[K] =
   result = newBTreeSet[K]()
   for item in t:
     result.incl fn(item)
 
-proc filter*[T](t: BTreeSet[T], fn: Filter[T]): BTreeSet[T] =
+proc filter*[T](
+    t: BTreeSet[T], fn: proc(item: T): bool
+  ): BTreeSet[T] =
   result = newBTreeSet[T]()
   for item in t:
     if fn(item):

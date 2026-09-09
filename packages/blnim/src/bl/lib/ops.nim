@@ -10,6 +10,11 @@ refuseWith ValueError
 
 # ================ Walking & accessing ================
 
+type Family* = tuple[kind: Kind, mark: bool]
+
+func family*(self: SomeValue): Family =
+  (self.kind, self.mark)
+
 iterator items*(self: Value): lent Value =
   case self.kind
   of bList, bRec:
@@ -88,31 +93,33 @@ func `/`*(self: Value, key: int): lent Value =
 # ================ Similarity ================
 
 func similar*(v, examplar: Value): bool =
-  if examplar.kind != v.kind: return
-  if examplar.mark != v.mark: return
+  template ok = return true
 
-  let k = examplar.kind
-  case k
-  of bList, bRec:
-    if examplar.items.len > v.items.len: return
+  ensure v.family == examplar.family
+
+  case examplar.kind
+  of bList:
+    ensure v.items.len >= examplar.items.len
+    for _, a, b in lockstep(v.items, examplar.items):
+      ensure similar(a, b)
+    ok
+  of bRec:
+    ensure v.items.len >= examplar.items.len
     for i, a, b in lockstep(v.items, examplar.items):
-      if k == bRec and i == 0 and a != b:
-        return false
+      if i == 0:
+        ensure a == b
       else:
-        if not similar(a, b):
-          return false
+        ensure similar(a,b)
+    ok
   of bDict:
     for key, val in examplar.dict:
       try:
-        if not similar(val, v.dict[key]):
-          return
-      except KeyError:
-        return
+        ensure similar(val, v[key])
+      except KeyError: return false
+    ok
   of bSet:
-    return examplar.els <= v.els
-  else: discard
-
-  return true
+    ensure examplar.els <= v.els
+  else: ok
 
 # ================ Prefix ================
 
@@ -125,40 +132,40 @@ func prefixes*(a, b: Value): bool =
   ## and the last is itself a prefix of `b`'s, since a truncation only
   ## drops a suffix. Dicts and sets compare in canonical order, so a
   ## prefix is a leading run of the sorted members, not a subset.
-  if a.kind != b.kind or a.mark != b.mark:
-    return false
+  ensure a.family == b.family
+
   case a.kind
   of bNil, bNum, bText, bSym, bBytes:
-    return a == b
+    ensure a == b
   of bList, bRec:
     let n = a.items.len
-    if n > b.items.len: return false
-    for i in 0 ..< n:
+    ensure n <= b.items.len
+    for i, x, y in lockstep(a.items, b.items):
       if i + 1 == n:
-        if not prefixes(a.items[i], b.items[i]): return false
-      elif a.items[i] != b.items[i]:
-        return false
+        ensure x.prefixes(y)
+      else:
+        ensure x == y
   of bDict:
     let n = a.dict.len
-    if n > b.dict.len: return false
+    ensure n <= b.dict.len
     var i = 0
-    for ea, eb in lockstep(a.dict, b.dict):
+    for x, y in lockstep(a.dict, b.dict):
       if i + 1 == n:
-        if ea.key != eb.key or not prefixes(ea.val, eb.val): return false
-      elif ea.key != eb.key or ea.val != eb.val:
-        return false
+        ensure x.key == y.key and x.val.prefixes(y.val)
+      else:
+        ensure x.key == y.key and x.val == y.val
       inc i
   of bSet:
     let n = a.els.len
-    if n > b.els.len: return false
+    ensure n <= b.els.len
     var i = 0
-    for ea, eb in lockstep(a.els, b.els):
+    for x, y in lockstep(a.els, b.els):
       if i + 1 == n:
-        if not prefixes(ea, eb): return false
-      elif ea != eb:
-        return false
+        ensure x.prefixes(y)
+      else:
+        ensure x == y
       inc i
-  true
+  return true
 
 proc frameKey*(q: ValueView): seq[byte] =
   ## The byte-prefix key that selects exactly the values `q` prefixes

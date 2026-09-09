@@ -41,6 +41,9 @@ func `$`*(n: Num): string =
   n.wide
 
 type
+  BSet* = BTreeSet[Value]
+  BDict* = BTree[Value, Value]
+  
   Value* = object
     mark*: bool
     case kind*: Kind
@@ -54,9 +57,15 @@ type
     of bList, bRec:
       items*: Buffer[Value]
     of bDict:
-      dict*: BTree[Value, Value]
+      dict*: BDict
     of bSet:
-      els*: BTreeSet[Value]
+      els*: BSet
+
+func newBSet*(): BSet =
+  newBTreeSet[Value]()
+
+func newBDict*(): BDict =
+  newBTree[Value, Value]()
 
 func null*(mark = false): Value =
   Value(kind: bNil, mark: mark)
@@ -186,6 +195,19 @@ proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
   result = initDict(mark)
   for (k, v) in entries:
     result.dict[k] = v
+
+proc initRec*(items: Buffer[Value], mark = false): Value =
+  guard items.len > 0, "record must have a head"
+  Value(kind: bRec, items: items, mark: mark)
+
+func initList*(items: Buffer[Value], mark = false): Value =
+  Value(kind: bList, items: items, mark: mark)
+
+func initDict*(dict: BDict, mark = false): Value =
+  Value(kind: bDict, dict: dict, mark: mark)
+
+func initSet*(els: BSet, mark = false): Value =
+  Value(kind: bSet, els: els, mark: mark)
 
 func head*(v: Value): lent Value =
   guard v.kind in {bList, bRec}, "head must be used with a list / record"
