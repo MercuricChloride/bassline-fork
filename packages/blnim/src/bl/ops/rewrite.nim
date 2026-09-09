@@ -175,6 +175,12 @@ proc inject*(self: Shape): auto =
   proc(bindings: Value): Value =
     self.inject(bindings)
 
+proc extract*(self, val: Value): auto =
+  extract toShape(self), val
+
+proc inject*(self, bindings: Value): auto =
+  inject toShape(self), bindings
+
 when isMainModule:
 
   var

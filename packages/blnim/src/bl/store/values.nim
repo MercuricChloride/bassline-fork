@@ -1,5 +1,5 @@
 import ../core
-from ../lib/ops import frameKey
+from ../ops import frameKey
 import ./store
 
 proc incl*[A](db: Db[A]; v: Value): bool {.discardable.} =

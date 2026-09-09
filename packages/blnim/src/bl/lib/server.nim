@@ -1,19 +1,15 @@
 ## A landing surface for bassline values
 ##
 ## A connection carries a bare concatenation of CE-encoded values.
-## The surface hands each landed value to a callback along with the
-## Conn it arrived on. Replies are paired unilateral sends,
-## not a request/response protocol.
-##
-## Malformed input is fatal to a connection: past one bad byte there
-## is no sound resync point, so the socket is closed.
+## The surface hands each landed value to a callback as a `Msg` whose
+## reply speaks CE back on the same socket.
 
 import std/[asyncnet, asyncdispatch, nativesockets, tables]
-import ../core
-import ./msg
+import ../[core, msg]
 export asyncnet, asyncdispatch, msg
 
-const RecvChunk = 16 * 1024
+const
+  RecvChunk = 16 * 1024
   ## how much to pull from the socket at once; the decoder buffers the
   ## rest, and refuses a value past `MaxValueBytes`
 
@@ -22,16 +18,15 @@ type
     socket: AsyncSocket
     address*: string
     decoder: Decoder
-    taskId: int
-    tasks: Table[int, Future[void]]   # replies still in flight
+    pool: TaskPool
 
-  Handler* = proc(conn: Conn, msg: Msg): Future[void]
+  Handler* = proc(msg: Msg): Future[void]
   ConnCallback* = proc(conn: Conn)
   ErrorCallback* = proc(conn: Conn, error: ref Exception) {.gcsafe.}
 
   Landing* = ref object
     socket: AsyncSocket
-    onValue: Handler
+    onMsg: Handler
     onOpen: ConnCallback
     onClose: ConnCallback
     onError: ErrorCallback
@@ -48,8 +43,7 @@ proc isClosed*(conn: Conn): bool =
   conn.socket.isClosed
 
 proc send*(conn: Conn, value: Value): Future[void] {.async.} =
-  ## Speak one value to the peer. The value is encoded in full before
-  ## anything is sent, so the wire never sees a partial emission.
+  ## Speak one value to the peer
   ## Concurrent sends on one Conn don't interleave bytes bc the
   ## dispatcher queues whole-buffer writes per socket.
   await conn.socket.send(value.ce.toString)
@@ -60,9 +54,9 @@ proc pump*(conn: Conn, onValue: proc(v: Value): Future[void]) {.async.} =
   ## 
   ## Malformed input raises a `CodecError` and closes the connection
   ##
-  ## The decoder is drained whole each turn with completed values copied out, 
+  ## The decoder is drained whole each turn with completed values copied out,
   ## then the buffer is compacted, so a long stream stays bounded.
-  while true:
+  while not conn.socket.isClosed:
     var data: string
     try:
       data = await conn.socket.recv(RecvChunk)
@@ -102,10 +96,6 @@ proc close*(l: Landing) =
 proc port*(l: Landing): Port =
   l.socket.getLocalAddr()[1]
 
-proc nextTaskId(conn: Conn): int =
-  inc conn.taskId
-  result = conn.taskId
-
 proc nextConnId(l: Landing): int =
   result = l.connId
   inc l.connId
@@ -124,47 +114,28 @@ proc handleClose(l: Landing, conn: Conn) =
   if l.onClose != nil:
     l.onClose(conn)
 
-proc replyTo(l: Landing, conn: Conn): Send =
-  ## creates a unilateral reply path for one connection
-  ## for creating messages
-  proc(m: Msg): bool =
-    if conn.socket.isClosed:
-      return false
-    let
-      id = conn.nextTaskId
-      fut = conn.send(m.value)
-    conn.tasks[id] = fut
-    fut.addCallback proc(f: Future[void]) =
-      conn.tasks.del id
-      # a failed background send can't unwind anywhere useful; just
-      # report it if the app asked to hear
-      if f.failed:
-        l.handleErr(conn, f.readError)
-    true
-
-proc drain(conn: Conn) {.async.} =
-  ## waits for the replies still in flight so none are lost to a close
-  var pending: seq[Future[void]]
-  for f in conn.tasks.values: pending.add f
-  for f in pending:
-    try: await f
-    except CatchableError: discard
+proc replyTo(conn: Conn): Send =
+  ## A unilateral reply path for one connection: whole-value CE sends,
+  ## their futures kept by the conn's pool so a close loses none and a
+  ## failed send is reported through the pool's `onFail`.
+  conn.pool.bridge(proc(m: Msg): Future[void] = conn.send(m.value))
 
 proc process(l: Landing, conn: Conn) {.async.} =
   ## Drives the logic for connection
   ## If the handler blows up it closes the
   ## connection, not the whole landing surface
-  let onReply = l.replyTo(conn)
+  conn.pool = newTaskPool(proc(e: ref Exception) = l.handleErr(conn, e))
+  let onReply = conn.replyTo
   try:
     l.handleOpen(conn)
     await conn.pump(proc(v: Value) {.async.} =
-      await l.onValue(conn, newMsg(v, onReply, -1)))
+      await l.onMsg(newMsg(v, onReply, -1)))
   except Exception as e:
     # Exception since a Defect in a handler (ie a bad index)
     # is still that connection's problem, not the landings
     l.handleErr(conn, e)
   finally:
-    await conn.drain()
+    await conn.pool.drain()
     try: conn.close()
     except: discard
     try: l.handleClose(conn)
@@ -196,18 +167,13 @@ proc serve*(l: Landing) {.async.} =
 
 proc newLanding*(
     port: Port,
-    onValue: Handler,
+    onMsg: Handler,
     onOpen: ConnCallback = nil,
     onClose: ConnCallback = nil,
     onError: ErrorCallback = nil,
     address = "",
 ): Landing =
   ## Binds a listening socket for values to land on.
-  ##
-  ## Sockets are unbuffered bc asyncnet's buffered recv loops until it
-  ## fills the full requested size, stalling on inputs smaller than
-  ## the chunk. Accepted sockets inherit the listener's flag, and the
-  ## stream decoder buffers for itself anyway.
   let socket = newAsyncSocket(buffered = false)
   try:
     socket.setSockOpt(OptReuseAddr, true)
@@ -218,7 +184,7 @@ proc newLanding*(
     raise
   Landing(
     socket: socket,
-    onValue: onValue,
+    onMsg: onMsg,
     onOpen: onOpen,
     onClose: onClose,
     onError: onError,
