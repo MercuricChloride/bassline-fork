@@ -199,6 +199,28 @@ proc `[]=`*[K, V](t: BTree[K, V], key: K, val: V) =
   if grew:
     inc t.entries
 
+proc map*[C,D](
+    t: BTree, fn: proc(k: t.K, v: t.V): Entry[C, D]
+    ): BTree[C,D] =
+  result = newBTree[C,D]()
+  for k,v in t:
+    let (key, val) = fn(k, v)
+    result[key] = val
+
+proc filter*(
+    t: BTree, fn: proc(k: t.K, v: t.V): bool
+  ): BTree[t.K,t.V] =
+  result = newBTree[t.K,t.V]()
+  for k,v in t:
+    if fn(k,v):
+      result[k] = v
+
+proc reduce*[A](
+    t: BTree, init: A, fn: proc(acc: A, k: t.K, v: t.V): A
+  ): A =
+  for k, v in t:
+    result = fn(result, k, v)
+
 proc union*[K, V](a, b: BTree[K, V]): BTree[K, V] =
   result = newBTree[K, V]()
   for k, v in a:
@@ -218,6 +240,9 @@ proc intersection*[K, V](a, b: BTree[K, V]): BTree[K, V] =
   for k, v in smaller:
     if k in b: result[k] = v
 
+proc select*(self: BTree, keys: BTreeSet[self.K]): auto =
+  self.filter(proc(k: self.K, v: self.V): bool = k in keys)
+
 proc `+`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
   ## alias for union
   union a, b
@@ -229,6 +254,10 @@ proc `-`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
 proc `*`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
   ## alias for intersection
   intersection a, b
+
+proc `/`*(self: BTree, keys: BTreeSet[self.K]): auto =
+  ## alias for select
+  select self, keys
 
 func low*[K, V](t: BTree[K, V]): lent K =
   ## The smallest key. Raises `KeyError` on an empty tree.
@@ -300,28 +329,6 @@ func disjoint*(a, b: BTree): bool =
   for item in a:
     if item in b: return false
   return true
-
-proc map*[C,D](
-    t: BTree, fn: proc(k: t.K, v: t.V): Entry[C, D]
-    ): BTree[C,D] =
-  result = newBTree[C,D]()
-  for k,v in t:
-    let (key, val) = fn(k, v)
-    result[key] = val
-
-proc filter*(
-    t: BTree, fn: proc(k: t.K, v: t.V): bool
-  ): BTree[t.K,t.V] =
-  result = newBTree[t.K,t.V]()
-  for k,v in t:
-    if fn(k,v):
-      result[k] = v
-
-proc reduce*[A](
-    t: BTree, init: A, fn: proc(acc: A, k: t.K, v: t.V): A
-  ): A =
-  for k, v in t:
-    result = fn(result, k, v)
 
 # ================ BTreeSet ================
 

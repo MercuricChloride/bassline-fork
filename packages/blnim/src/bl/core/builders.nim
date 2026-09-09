@@ -227,6 +227,15 @@ func toValue*(i: int64): Value =
 func toValue*(s: string): Value = 
   text(s)
 
+proc toValue*(self: BDict): Value =
+  initDict(self)
+
+proc toValue*(self: BSet): Value =
+  initSet(self)
+
+proc toValue*(self: Buffer[Value]): Value =
+  initList(self)
+
 func toValue*(b: openArray[byte]): Value = 
   bytes(b)
 
