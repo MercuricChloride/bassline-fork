@@ -37,6 +37,25 @@ proc forEach*(self: Value, fn: proc(v: Value)) =
       val.forEach fn
   else: discard
 
+proc map*(self: Value, fn: proc(v: Value): Value): Value =
+  case self.kind
+  of bList:
+    initList(self.items.map(fn), self.mark)
+  of bRec:
+    initRec(self.items.map(fn), self.mark)
+  of bDict:
+    initDict(self.dict.map(
+      proc(k,v: Value): Pair[Value] =
+        (fn(k), fn(v))))
+  of bSet:
+    initSet(self.els.map(fn), self.mark)
+  else:
+    refuse "cannot unary map over " & $(self.kind)
+
+proc map*(self: Value, fn: proc(k, v: Value): Pair[Value]): Value =
+  guard self.kind == bDict, "cannot binary map over" & $(self.kind)
+  initDict(self.dict.map(fn), self.mark)
+
 func contains*(v, key: Value): bool =
   case v.kind
   of bSet:
