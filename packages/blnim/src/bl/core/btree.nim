@@ -198,67 +198,6 @@ proc `[]=`*[K, V](t: BTree[K, V], key: K, val: V) =
     t.root = Node[K, V](kind: nkInternal, keys: @[sep], kids: @[t.root, right])
   if grew:
     inc t.entries
-
-proc map*[C,D](
-    t: BTree, fn: proc(k: t.K, v: t.V): Entry[C, D]
-    ): BTree[C,D] =
-  result = newBTree[C,D]()
-  for k,v in t:
-    let (key, val) = fn(k, v)
-    result[key] = val
-
-proc filter*(
-    t: BTree, fn: proc(k: t.K, v: t.V): bool
-  ): BTree[t.K,t.V] =
-  result = newBTree[t.K,t.V]()
-  for k,v in t:
-    if fn(k,v):
-      result[k] = v
-
-proc reduce*[A](
-    t: BTree, init: A, fn: proc(acc: A, k: t.K, v: t.V): A
-  ): A =
-  for k, v in t:
-    result = fn(result, k, v)
-
-proc union*[K, V](a, b: BTree[K, V]): BTree[K, V] =
-  result = newBTree[K, V]()
-  for k, v in a:
-    result[k] = v
-  for k, v in b:
-    result[k] = v
-
-proc difference*[K, V](a, b: BTree[K, V]): BTree[K, V] =
-  result = newBTree[K, V]()
-  for k, v in a:
-    if k notin b:
-      result[k] = v
-
-proc intersection*[K, V](a, b: BTree[K, V]): BTree[K, V] =
-  result = newBTree[K, V]()
-  let smaller = if a.len < b.len: a else: b
-  for k, v in smaller:
-    if k in b: result[k] = v
-
-proc select*(self: BTree, keys: BTreeSet[self.K]): auto =
-  self.filter(proc(k: self.K, v: self.V): bool = k in keys)
-
-proc `+`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
-  ## alias for union
-  union a, b
-
-proc `-`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
-  ## alias for difference
-  difference a, b
-
-proc `*`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
-  ## alias for intersection
-  intersection a, b
-
-proc `/`*(self: BTree, keys: BTreeSet[self.K]): auto =
-  ## alias for select
-  select self, keys
-
 func low*[K, V](t: BTree[K, V]): lent K =
   ## The smallest key. Raises `KeyError` on an empty tree.
   if t == nil or t.root == nil or t.entries == 0:
@@ -271,14 +210,14 @@ func high*[K, V](t: BTree[K, V]): lent K =
     raise newException(KeyError, "high on an empty btree")
   return high(t.root)
 
-iterator items*[K, V](t: BTree[K, V]): lent Entry[K, V] =
-  for e in t.root.pairs: yield e
+iterator items*[K, V](t: BTree[K, V]): lent V =
+  for _, v in pairs(t.root): yield v
 
 iterator pairs*[K, V](t: BTree[K, V]): lent Entry[K, V] =
-  for e in t.root.pairs: yield e
+  for e in pairs(t.root): yield e
 
 iterator keys*[K, V](t: BTree[K, V]): lent K =
-  for e in t.root.keys: yield e
+  for e in keys(t.root): yield e
 
 proc keys*[K, V](t: BTree[K, V]): BTreeSet[K] =
   result = newBTreeSet[K]()
@@ -304,30 +243,75 @@ iterator lockstep*[K, V](a, b: BTree[K, V]):
   for (x, y) in lockstep(a.root, b.root):
     yield (x, y)
 
-func `<=`*(a, b: BTree): bool =
-  ## Returns true if keyset of `a` is a subset of the keyset of `b`
-  if a.len > b.len: return
-  result = true
-  for k in a.keys:
+proc map*[C,D](
+    t: BTree, fn: proc(k: t.K, v: t.V): Entry[C, D]
+    ): BTree[C,D] =
+  result = newBTree[C,D]()
+  for k,v in t:
+    let (key, val) = fn(k, v)
+    result[key] = val
+
+proc filter*(
+    t: BTree, fn: proc(k: t.K, v: t.V): bool
+  ): BTree[t.K,t.V] =
+  result = newBTree[t.K,t.V]()
+  for k,v in t:
+    if fn(k,v):
+      result[k] = v
+
+proc reduce*[A](
+    t: BTree, init: A, fn: proc(acc: A, k: t.K, v: t.V): A
+  ): A =
+  result = init
+  for k, v in t:
+    result = fn(result, k, v)
+
+proc union*[K, V](a, b: BTree[K, V]): BTree[K, V] =
+  result = newBTree[K, V]()
+  for k, v in a:
+    result[k] = v
+  for k, v in b:
+    result[k] = v
+
+proc difference*[K, V](a, b: BTree[K, V]): BTree[K, V] =
+  result = newBTree[K, V]()
+  for k, v in a:
     if k notin b:
-      return false
+      result[k] = v
 
-func `<`*(a, b: BTree): bool =
-  ## Returns true if the keyset of `a` is a strict and proper subset of the keyset of `b`
-  (a.len != b.len) and a <= b
+proc intersection*[K, V](a, b: BTree[K, V]): BTree[K, V] =
+  result = newBTree[K, V]()
+  let
+    (smaller, larger) = if a.len < b.len: (a, b) else: (b, a)
+  for k in keys(smaller):
+    if k in larger: 
+      result[k] = b[k]
 
-func `==`*(a, b: BTree): bool =
-  ## Returns true if the keysets of `a` and `b` are equal
-  if not(a.isNil) and not(b.isNil):
-    a.len == b.len and a <= b  
-  elif a.isNil and b.isNil:
-    true
-  else:
-    false
+proc select*(self: BTree, keys: BTreeSet[self.K]): auto =
+  result = newBTree[self.K, self.V]()
+  for k in keys:
+    result[k] = self[k]
+
+proc `+`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
+  ## alias for union
+  union a, b
+
+proc `-`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
+  ## alias for difference
+  difference a, b
+
+proc `*`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
+  ## alias for intersection
+  intersection a, b
+
+proc `/`*(self: BTree, keys: BTreeSet[self.K]): auto =
+  ## alias for select
+  select self, keys
 
 func disjoint*(a, b: BTree): bool =
-  for item in a:
-    if item in b: return false
+  let (smaller, larger) = if a.len < b.len: (a, b) else: (b, a)
+  for k in smaller.keys:
+    if k in larger: return false
   return true
 
 # ================ BTreeSet ================
@@ -363,9 +347,10 @@ proc difference*[T](a, b: BTreeSet[T]): BTreeSet[T] =
 
 proc intersection*[T](a, b: BTreeSet[T]): BTreeSet[T] =
   result = newBTreeSet[T]()
-  let smaller = if a.len < b.len: a else: b
+  let
+    (smaller, larger) = if a.len < b.len: (a, b) else: (b, a)
   for v in smaller:
-    if v in b: incl(result, v)
+    if v in larger: incl(result, v)
 
 proc `+`*[T](a, b: BTreeSet[T]): BTreeSet[T] =
   ## alias for union
@@ -400,8 +385,9 @@ func `==`*(a, b: BTreeSet): bool =
     false
 
 func disjoint*(a, b: BTreeSet): bool =
-  for item in a:
-    if item in b: return false
+  let (smaller, larger) = if a.len < b.len: (a, b) else: (b, a)
+  for item in smaller:
+    if item in larger: return false
   return true
 
 func low*[T](t: BTreeSet[T]): lent T =
@@ -420,6 +406,7 @@ proc reduce*[A, T](
     t: BTreeSet[T], init: A,
     fn: proc(acc: A, curr: T): A
   ): A =
+  result = init
   for item in t:
     result = fn(result, item)
 
@@ -444,13 +431,13 @@ iterator items*[T](t: BTreeSet[T]): lent T =
 
 iterator itemsFrom*[T](t: BTreeSet[T], lo: T): lent T =
   ## entries with key >= lo
-  for v, _ in t.root.pairsFrom(lo):
+  for v, _ in pairsFrom(t.root, lo):
     yield v
 
 iterator itemsFrom*[T](t: BTreeSet[T], lo, hi: T): lent T =
   ## entries with hi >= key >= lo
-  for e in t.root.pairsFrom(lo, hi): 
-    yield e
+  for v, _ in pairsFrom(t.root, lo, hi): 
+    yield v
 
 iterator lockstep*[T](a, b: BTreeSet[T]):
     (lent T, lent T) =

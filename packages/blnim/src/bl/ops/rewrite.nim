@@ -67,6 +67,7 @@ proc bindValue*(self: var Match, shape, val: Value): bool =
   template ensureBind(a, b): untyped =
     if not self.bindValue(a, b):
       return
+
   if self.isWild shape:
     return true
   
@@ -82,16 +83,22 @@ proc bindValue*(self: var Match, shape, val: Value): bool =
     for _, a, b in lockstep(shape.items, val.items):
       ensureBind(a, b)
     true
-  of bSet:
-    for a, b in lockstep(shape.els, val.els):
-      guard a notin self.holes, "set holes aren't supported yet"
-      ensureBind(a, b)
-    true
   of bDict:
-    for a, b in lockstep(shape.dict, val.dict):
-      guard a.key notin self.holes, "set holes aren't supported yet"
-      ensureBind(a.key, b.key)
-      ensureBind(a.val, b.val)
+    for k in keys(shape.dict):
+      if k notin val.dict:
+        return
+      guard k notin self.holes, "dict holes aren't supported yet"
+      ensureBind(k, k)
+      ensureBind(shape[k], val[k])
+    let rest = val.dict - shape.dict
+    echo rest.toValue
+    true
+  of bSet:
+    for v in shape.els:
+      if v notin val.els:
+        return
+      guard v notin self.holes, "set holes aren't supported yet"
+      ensureBind(v, v)
     true
   else:
     shape == val
@@ -103,7 +110,7 @@ proc injectValue*(self: Match, v: Value): Value =
   ## replace instances of self.holes in v with their binding
   if v in self.holes:
     self.bindings[v]
-  elif v.kind in bList..bDict:
+  elif v.kind in bList..bSet:
     v.map(proc(v: Value): Value = self.injectValue(v))
   else:
     v
@@ -155,8 +162,7 @@ template withMatch*(self: Shape, body: untyped): untyped =
 
 proc extract*(self: Shape, val: Value): Value =
   self.withMatch:
-    match += val
-    if match.isFilled:
+    if bindValue(match, val) and isFilled(match):
       initDict(match.bindings)
     else:
       initDict()
@@ -182,7 +188,6 @@ proc inject*(self, bindings: Value): auto =
   inject toShape(self), bindings
 
 when isMainModule:
-
   var
     shape = toShape rv"(shape !(cmd arg) {cmd arg})"
     one = rv"!(listen-to-more jungle)"
