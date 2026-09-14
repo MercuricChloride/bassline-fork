@@ -1,4 +1,5 @@
-import ./[core, ops, lattice]
+import ../[core, ops]
+import ./lattice
 
 type
   Cell*[T: Lattice] = ref object
@@ -83,8 +84,6 @@ when isMainModule:
     a = cell Numeric
     b = same a
     c = a * b
-
-  mul(a,b,c)
 
   c.changed:
     echo "c: ", it

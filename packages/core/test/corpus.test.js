@@ -7,6 +7,7 @@ import {
   ReaderError,
   ReaderIncomplete,
 } from '../src/text/index.js'
+import { toValue, numberReviver } from '../src/json.js'
 
 // The shared corpus every implementation runs. corpus.bl is authored in the
 // textual syntax with spec-derived bytes; corpus.blb is the same records as a
@@ -16,6 +17,10 @@ import {
 const dir = new URL('../../../corpus/', import.meta.url)
 const cases = read(readFileSync(new URL('corpus.bl', dir), 'utf8'))
 const blb = new Uint8Array(readFileSync(new URL('corpus.blb', dir)))
+const json = JSON.parse(
+  readFileSync(new URL('corpus.json', dir), 'utf8'),
+  numberReviver
+)
 
 const byHead = head =>
   cases.filter(c => c.kind === 'record' && c.head.value === head)
@@ -60,6 +65,13 @@ describe('corpus is well-formed', () => {
     expect(fromBlb.length).toBe(cases.length)
     for (let i = 0; i < cases.length; i++) {
       expect(eq(fromBlb[i], cases[i])).toBe(true)
+    }
+  })
+
+  it('corpus.json reads (via the JSON dialect) as the same records', () => {
+    expect(json.length).toBe(cases.length)
+    for (let i = 0; i < cases.length; i++) {
+      expect(eq(toValue(json[i]), cases[i])).toBe(true)
     }
   })
 })

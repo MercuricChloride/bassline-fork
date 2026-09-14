@@ -16,6 +16,10 @@
       "types": "./types/src/files.d.ts",
       "default": "./src/files.js"
     },
+    "./json": {
+      "types": "./types/src/json.d.ts",
+      "default": "./src/json.js"
+    },
     "./lang": {
       "types": "./types/src/lang/index.d.ts",
       "default": "./src/lang/index.js"

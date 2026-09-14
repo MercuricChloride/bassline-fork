@@ -1,6 +1,6 @@
 import std/strformat
 import fusion/matching
-import ./[core, ops]
+import ../[core, ops]
 
 type
   Merged*[T] = tuple
@@ -53,8 +53,6 @@ type
       lo*, hi*: int
     of nkScalar:
       n*: int
-
-Numeric.refuseWith ValueError
 
 proc scalar*(n: int): Numeric =
   Numeric(kind: nkScalar, n: n)
@@ -122,7 +120,7 @@ proc merge*(prev, curr: Numeric): Merged[Numeric] =
     
     let changed = (lo1 != lo) or (hi1 != hi)
     return (interval(lo, hi), changed)
-  refuse Numeric, "should never get here"
+  raise newException(ValueError, "should never get here")
 
 func toValue*(self: Numeric): Value =
   case self
@@ -133,7 +131,7 @@ func toValue*(self: Numeric): Value =
   of Scalar(n: @n):
     return num(n)
 
-proc toNumeric(val: Value): Numeric =
+proc fromValue*(_: type Numeric, val: Value): Numeric =
   case val
   of Num(num.toInt: @i) |
       List(mark: false, [(mark: false, num.toInt: @i), (mark: false, num.toInt:(it == i))]):
@@ -142,9 +140,6 @@ proc toNumeric(val: Value): Numeric =
     interval lo, hi
   else:
     Numeric(kind: nkBottom)
-
-proc fromValue*(_: type Numeric, val: Value): Numeric =
-  toNumeric val
 
 template numericBinaryOp(op) =
   proc op*(l, r: Numeric): auto =
@@ -190,10 +185,8 @@ type
   Min* = distinct int
   Max* = distinct int
 
-converter toMin*(n: int): Min =
-  Min(n)
-converter toMax*(n: int): Max =
-  Max(n)
+converter toMin*(n: int): Min = Min(n)
+converter toMax*(n: int): Max = Max(n)
 
 func `==`*(a,b: Min): bool {.borrow.}
 func `==`*(a,b: Max): bool {.borrow.}
