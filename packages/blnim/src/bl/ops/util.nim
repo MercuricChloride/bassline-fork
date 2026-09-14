@@ -5,6 +5,7 @@
 ]##
 import ../core
 import ../lib/blmacro
+import fusion/matching
 
 refuseWith ValueError
 
@@ -14,6 +15,16 @@ type Family* = tuple[kind: Kind, mark: bool]
 
 func family*(self: SomeValue): Family =
   (self.kind, self.mark)
+
+func len*(self: Value): Natural =
+  case self
+  of List(items: @c) | Rec(items: @c):
+    c.len
+  of Dict(dict: @c):
+    c.len
+  of Set(els: @c):
+    c.len
+  else: 0
 
 iterator items*(self: Value): lent Value =
   case self.kind

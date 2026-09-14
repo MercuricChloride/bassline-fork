@@ -314,6 +314,27 @@ func disjoint*(a, b: BTree): bool =
     if k in larger: return false
   return true
 
+func `<=`*(a, b: BTree): bool =
+  ## Returns true if `a` is a sub(set?) of `b`
+  if a.len > b.len: return
+  result = true
+  let (smaller, larger) = if a.len < b.len: (a, b) else: (b, a)
+  for k, v in smaller:
+    if v notin larger or (v != larger[k]):
+      return false
+
+func `<`*(a, b: BTree): bool =
+  ## Returns true if `a` is a strict and proper subset of `b`
+  (a.len != b.len) and a <= b
+
+func `==`*(a, b: BTree): bool =
+  if not(a.isNil) and not(b.isNil):
+    a.len == b.len and a <= b
+  elif a.isNil and b.isNil:
+    true
+  else:
+    false
+
 # ================ BTreeSet ================
 
 func len*[T](t: BTreeSet[T]): int =
@@ -378,7 +399,7 @@ func `<`*(a, b: BTreeSet): bool =
 
 func `==`*(a, b: BTreeSet): bool =
   if not(a.isNil) and not(b.isNil):
-    a.len == b.len and a <= b  
+    a.len == b.len and a <= b
   elif a.isNil and b.isNil:
     true
   else:

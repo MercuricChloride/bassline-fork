@@ -27,6 +27,14 @@ template refuseWith*(err) {.dirty.} =
 
 refuseWith CodecError
 
+template refuseWith*(ty, err) {.dirty.} =
+  template refuse(_: type ty, msg: string) =
+    raise newException(err, msg)
+
+  template guard(T: type ty, cond: bool, msg: string) =
+    if not cond:
+      T.refuse(msg)
+
 template ensure*(cond: bool) =
   result = cond
   if not result: return

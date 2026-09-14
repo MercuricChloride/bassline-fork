@@ -8,7 +8,7 @@ type
 
 refuseWith JsonRefusal
 
-proc toJson*(self: Num): JsonNode =
+proc toJson*(self: BNum): JsonNode =
   if self.isWide:
     parseJson(self.wide)
   else:

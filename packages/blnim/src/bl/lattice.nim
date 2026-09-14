@@ -1,23 +1,28 @@
-from std/strformat import fmt
+import std/strformat
 import fusion/matching
 import ./[core, ops]
 
 type
-  Lattice = concept x, y, type T
+  Merged*[T] = tuple
+    value: T
+    changed: bool
+
+  Lattice* = concept x, y, type T
+    # TODO: I should add a better order operation here
+    # but I haven't found something that's ergonomic & performant
     T.bottom is T
-    merge(x, y) is T
-  Contradiction[T] = object of CatchableError
+    x == y is bool
+    merge(x, y) is Merged[T]
+  Contradiction*[T] = object of CatchableError
     ## raised when two values in a lattice are mutually exclusive
     prev*, curr*: T    
-  ValueLike = concept x, type T
+  ValueLike* = concept x, type T
     x.toValue() is Value
     T.fromValue(Value) is T
-  StringLike = concept x
-    $x is string
   ValueLattice* = ValueLike and Lattice
 
-proc contradiction*[T: Lattice](prev, curr: T, msg: string) {.noreturn.} =
-  when T is StringLike:
+proc contradiction*[T](prev, curr: T, msg: string) {.noreturn.} =
+  when compiles($prev):
     let m = fmt"contradiction! {msg} prev: {prev} curr: {curr}"
     var e = newException(Contradiction[T], m)
     e.prev = prev
@@ -29,9 +34,11 @@ proc contradiction*[T: Lattice](prev, curr: T, msg: string) {.noreturn.} =
     e.curr = curr
     raise e
 
-proc `+=`*[T: Lattice](prev: var T, curr: T) =
+proc `add`*[T: Lattice](prev: var T, curr: T) =
   mixin merge
-  prev = merge(prev, curr)
+  let (update, changed) = merge(prev, curr)
+  if changed:
+    prev = update
 
 ## ================ Numeric Refinement Lattice ================
 
@@ -53,7 +60,16 @@ proc scalar*(n: int): Numeric =
   Numeric(kind: nkScalar, n: n)
 
 proc interval*(lo, hi: int): Numeric =
-  Numeric(kind: nkInterval, lo: lo, hi: hi)
+  if lo <= hi:
+    Numeric(kind: nkInterval, lo: lo, hi: hi)
+  else:
+    Numeric(kind: nkInterval, lo: hi, hi: lo)
+
+converter toNumeric*(n: int): Numeric =
+  scalar n
+
+converter toNumeric*(n: Slice[int]): Numeric =
+  interval(n.a, n.b)
 
 func `$`*(self: Numeric): string =
   case self
@@ -67,20 +83,34 @@ func `$`*(self: Numeric): string =
 func bottom*(_: type Numeric): Numeric =
   Numeric(kind: nkBottom)
 
-proc merge*(prev, curr: Numeric): Numeric =
+proc `==`*(a,b: Numeric): bool =
+  case (a, b)
+  of (Scalar(), Scalar()):
+    a.n == b.n
+  of (Interval(), Interval()):
+    (a.lo == b.lo) and (a.hi == b.hi)
+  of (Bottom(), Bottom()):
+    true
+  else:
+    false
+
+proc merge*(prev, curr: Numeric): Merged[Numeric] =
+  if prev == curr: 
+    return (prev, false)
   case (prev, curr)
-  of (Bottom(), @other) |
-      (@other, Bottom()):
-    return other
+  of (_, Bottom()):
+    return (prev, false)
+  of (Bottom(), _):
+    return (curr, true)
   of (Scalar(n: @n), Interval(lo: @lo, hi: @hi)) |
       (Interval(lo: @lo, hi: @hi), Scalar(n: @n)):
     if n notin lo..hi:
       contradiction[Numeric](prev, curr, "scalar outside interval")
-    return scalar n
+    return (scalar n, true)
   of (Scalar(n: @x), Scalar(n: @y)):
     if x != y:
       contradiction[Numeric](prev, curr, "not equal")
-    return prev
+    return (prev, false)
   of (Interval(lo: @lo1, hi: @hi1), Interval(lo: @lo2, hi: @hi2)):
     let
       lo = max(lo1, lo2)
@@ -88,8 +118,10 @@ proc merge*(prev, curr: Numeric): Numeric =
     if lo > hi:
       contradiction[Numeric](prev, curr, "disjoint intervals")
     if lo == hi:
-      return scalar lo
-    return interval(lo, hi)
+      return (scalar lo, true)
+    
+    let changed = (lo1 != lo) or (hi1 != hi)
+    return (interval(lo, hi), changed)
   refuse Numeric, "should never get here"
 
 func toValue*(self: Numeric): Value =
@@ -114,6 +146,26 @@ proc toNumeric(val: Value): Numeric =
 proc fromValue*(_: type Numeric, val: Value): Numeric =
   toNumeric val
 
+template numericBinaryOp(op) =
+  proc op*(l, r: Numeric): auto =
+    case (l, r)
+    of (Scalar(n: @n), Interval(lo: @lo, hi: @hi)):
+      interval op(n, lo), op(n, hi)
+    of (Interval(lo: @lo, hi: @hi), Scalar(n: @n)):
+      interval op(lo, n), op(hi, n)
+    of (Scalar(n: @a), Scalar(n: @b)):
+      scalar op(a, b)
+    of (Interval(lo: @lo1, hi: @hi1), Interval(lo: @lo2, hi: @hi2)):
+      interval op(lo1, lo2), op(hi1, hi2)
+    else:
+      Numeric.bottom
+
+numericBinaryOp `+`
+numericBinaryOp `-`
+numericBinaryOp `*`
+numericBinaryOp `div`
+numericBinaryOp `mod`
+
 # ================ Set / BTree Union ================
 
 func bottom*(_: type BSet): BSet =
@@ -122,11 +174,15 @@ func bottom*(_: type BSet): BSet =
 func bottom*(_: type BDict): BDict =
   newBDict()
 
-proc merge*(prev, curr: BSet): BSet =
-  prev + curr
+proc merge*(prev, curr: BSet): Merged[BSet] =
+  if prev <= curr:
+    return (prev, false)
+  (prev + curr, true)
 
-proc merge*(prev, curr: BDict): BDict =
-  prev + curr
+proc merge*(prev, curr: BDict): Merged[BDict] =
+  if prev <= curr:
+    return (prev, false)
+  (prev + curr, true)
 
 # ================ Min / Max ================
 
@@ -134,17 +190,25 @@ type
   Min* = distinct int
   Max* = distinct int
 
+converter toMin*(n: int): Min =
+  Min(n)
+converter toMax*(n: int): Max =
+  Max(n)
+
+func `==`*(a,b: Min): bool {.borrow.}
+func `==`*(a,b: Max): bool {.borrow.}
+
 func bottom*(_: type Min): Min =
-  Min(int.high)
+  int.high
 
 func bottom*(_: type Max): Max =
-  Max(int.low)
-
-proc merge*(prev, curr: Max): Max =
-  Max max(prev.int, curr.int)
+  int.low
 
 proc merge*(prev, curr: Min): Min =
-  Min min(prev.int, curr.int)
+  min(prev.int, curr.int)
+
+proc merge*(prev, curr: Max): Max =
+  max(prev.int, curr.int)
 
 # ================ Versioned ================
 
@@ -162,36 +226,44 @@ proc bottom*[T](_: type Versioned[T]): Versioned[T] =
   else:
     initVersion(T.default, 0)
 
-proc merge*[T](prev, curr: Versioned[T]): Versioned[T] =
-  ((version: @p, value: @pv), (version: @c, value: @cv)) := (prev, curr)
-  if p < c:
-    return curr
-  if p > c:
-    return prev
+proc `==`[T](prev, curr: Versioned[T]): bool =
+  (prev.version == curr.version) and (prev.value == curr.value)
+
+proc merge*[T](prev, curr: Versioned[T]): Merged[Versioned[T]] =
+  if prev == curr or 
+      prev.version > curr.version:
+    return (prev, false)
+  if prev.version < curr.version:
+    return (curr, true)
   when T is Lattice:
-    Versioned[T](version: p, value: pv.merge(cv))
+    let (update, changed) = merge(prev.value, curr.value)
+    if not changed:
+      return (prev, false)
+    let v = max(prev.version, curr.version)
+    (initVersion(update, v + 1), true)
   else:
     contradiction(prev, curr, "version issue")
 
-let vals = rv"""[
-  "hello"
-  (10 20)
-  [10 20]
-  [15 69]
-  [8 15]
-  {1 2}
-  18
-]"""
+when isMainModule:
+  let vals = rv"""[
+    "hello"
+    (10 20)
+    [10 20]
+    [15 69]
+    [8 15]
+    {1 2}
+    18
+  ]"""
 
-var
-  foo: Numeric
-  vers: Versioned[Numeric]
+  var
+    foo: Numeric
+    vers: Versioned[Numeric]
 
-for v in vals.items:
-  try:
-    let n = Numeric.fromValue(v)
-    foo += n
-    vers += n.initVersion
-    echo foo
-  except Contradiction[Numeric] as e:
-    echo e.msg
+  for v in vals.items:
+    try:
+      let n = Numeric.fromValue(v)
+      foo &= n
+      vers &= n.initVersion
+      echo foo
+    except Contradiction[Numeric] as e:
+      echo e.msg

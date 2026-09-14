@@ -6,38 +6,43 @@ export btree, codec
 refuseWith ValueError
 
 type
-  Num* = object
-    case isWide*: bool
-    of true:
-      wideNum: string
-    of false:
-      intNum: int
+  BNumKind = enum
+    bnkWide, bnkInt
+  BNum* = object
+    case kind*: BNumKind
+    of bnkWide:
+      s: string
+    of bnkInt:
+      n: int
 
-converter toNum*(n: int): Num =
-  Num(isWide: false, intNum: n)
+converter toNum*(n: int): BNum =
+  BNum(kind: bnkInt, n: n)
 
-func initNum*(s: string): Num =
+func initNum*(s: string): BNum =
   ## s is a canonical spelling; past int64 it is held as it is spelled
   guard isValidInt(s.toBytes), "not a canonical number: " & s
   try:
-    Num(isWide: false, intNum: parseBiggestInt(s))
+    BNum(kind: bnkInt, n: parseBiggestInt(s))
   except ValueError:
-    Num(isWide: true, wideNum: s)
+    BNum(kind: bnkWide, s: s)
 
-func isInt*(n: Num): bool =
+func isWide*(n: BNum): bool =
+  n.kind == bnkWide
+
+func isInt*(n: BNum): bool =
   not n.isWide
 
-func toInt*(n: Num): int =
+func toInt*(n: BNum): int =
   guard n.isInt, "num is wide, not an int"
-  n.intNum
+  n.n # note: why does he look so happy!
 
-func wide*(n: Num): string =
+func wide*(n: BNum): string =
   if n.isWide:
-    n.wideNum
+    n.s
   else:
-    $(n.intNum)
+    $(n.n)
 
-func `$`*(n: Num): string =
+func `$`*(n: BNum): string =
   n.wide
 
 type
@@ -49,7 +54,7 @@ type
     case kind*: Kind
     of bNil: discard
     of bNum:
-      num*: Num
+      num*: BNum
     of bText, bSym:
       text*: string
     of bBytes:
@@ -121,7 +126,7 @@ func spellingLen*(x: int): int =
     m = m div 10
     inc result
 
-func spellingLen*(x: Num): int =
+func spellingLen*(x: BNum): int =
   if x.isWide:
     x.wide.len
   else:
@@ -137,7 +142,7 @@ func cmpNums*(x, y: int): int =
     return if nx: -1 else: 1
   diff magnitude(x), magnitude(y)
 
-func cmpNums*(x, y: Num): int =
+func cmpNums*(x, y: BNum): int =
   if x.isWide or y.isWide:
     cmpShortlex(x.wide.toBytes, y.wide.toBytes)
   else:
