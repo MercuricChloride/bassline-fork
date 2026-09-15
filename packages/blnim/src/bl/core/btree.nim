@@ -320,7 +320,7 @@ func `<=`*(a, b: BTree): bool =
   result = true
   let (smaller, larger) = if a.len < b.len: (a, b) else: (b, a)
   for k, v in smaller:
-    if v notin larger or (v != larger[k]):
+    if k notin larger or (v != larger[k]):
       return false
 
 func `<`*(a, b: BTree): bool =

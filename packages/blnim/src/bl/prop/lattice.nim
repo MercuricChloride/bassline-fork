@@ -34,20 +34,23 @@ proc contradiction*[T](prev, curr: T, msg: string) {.noreturn.} =
     e.curr = curr
     raise e
 
-proc `add`*[T: Lattice](prev: var T, curr: T) =
+proc add*[T: Lattice](prev: var T, curr: T) =
   mixin merge
   let (update, changed) = merge(prev, curr)
   if changed:
     prev = update
 
+proc add*[T: ValueLattice](prev: var T, curr: Value) =
+  prev &= T.fromValue(curr)
+
 ## ================ Numeric Refinement Lattice ================
 
 type
-  NumKind = enum
+  NumKind* = enum
     nkBottom, nkInterval, nkScalar
 
   Numeric* = object
-    case kind: NumKind
+    case kind*: NumKind
     of nkBottom: discard
     of nkInterval:
       lo*, hi*: int
@@ -81,8 +84,15 @@ func `$`*(self: Numeric): string =
 func bottom*(_: type Numeric): Numeric =
   Numeric(kind: nkBottom)
 
+func normalize*(self: Numeric): Numeric =
+  case self
+  of Interval(lo: @lo, hi: @hi):
+    if lo == hi:
+      return scalar lo
+  self
+
 proc `==`*(a,b: Numeric): bool =
-  case (a, b)
+  case (a.normalize, b.normalize)
   of (Scalar(), Scalar()):
     a.n == b.n
   of (Interval(), Interval()):
@@ -131,7 +141,7 @@ func toValue*(self: Numeric): Value =
   of Scalar(n: @n):
     return num(n)
 
-proc fromValue*(_: type Numeric, val: Value): Numeric =
+proc toNumeric(val: Value): Numeric =
   case val
   of Num(num.toInt: @i) |
       List(mark: false, [(mark: false, num.toInt: @i), (mark: false, num.toInt:(it == i))]):
@@ -139,7 +149,10 @@ proc fromValue*(_: type Numeric, val: Value): Numeric =
   of List(mark: false, [(mark: false, num.toInt: @lo), (mark: false, num.toInt: @hi(it >= lo))]):
     interval lo, hi
   else:
-    Numeric(kind: nkBottom)
+    Numeric.bottom
+
+proc fromValue*(_: type Numeric, val: Value): Numeric =
+  toNumeric(val)
 
 template numericBinaryOp(op) =
   proc op*(l, r: Numeric): auto =
@@ -170,14 +183,34 @@ func bottom*(_: type BDict): BDict =
   newBDict()
 
 proc merge*(prev, curr: BSet): Merged[BSet] =
-  if prev <= curr:
+  if curr <= prev:
     return (prev, false)
   (prev + curr, true)
 
 proc merge*(prev, curr: BDict): Merged[BDict] =
-  if prev <= curr:
+  if curr <= prev:
     return (prev, false)
   (prev + curr, true)
+
+func toBSet(val: Value): BSet =
+  case val
+  of Set(els: @els):
+    els
+  else:
+    BSet.bottom
+
+func toBDict(val: Value): BDict =
+  case val
+  of (dict: @dict):
+    dict
+  else:
+    BDict.bottom
+
+func fromValue*(_: type BSet, val: Value): BSet =
+  toBSet val
+
+func fromValue*(_: type BDict, val: Value): BDict =
+  toBDict val
 
 # ================ Min / Max ================
 
@@ -197,11 +230,15 @@ func bottom*(_: type Min): Min =
 func bottom*(_: type Max): Max =
   int.low
 
-proc merge*(prev, curr: Min): Min =
-  min(prev.int, curr.int)
+proc merge*(prev, curr: Min): Merged[Min] =
+  if prev.int <= curr.int:
+    return (prev, false)
+  return (curr.int, true)
 
-proc merge*(prev, curr: Max): Max =
-  max(prev.int, curr.int)
+proc merge*(prev, curr: Max): Merged[Max] =
+  if prev.int >= curr.int:
+    return (prev, false)
+  return (curr.int, true)
 
 # ================ Versioned ================
 
