@@ -110,6 +110,15 @@ proc `[]=`*(self: var Value, key: int, val: Value) =
   else:
     refuse "[]= with an int requires a list or record"
 
+proc `[]`*(self: Value, key: string): auto =
+  self[readValue(key)]
+
+proc `[]=`*(self: var Value, key: string, val: Value) =
+  self[readValue(key)] = val
+
+proc `[]=`*(self: var Value, key, val: string) =
+  self[readValue(key)] = readValue(val)
+
 proc incl*(self: var Value, val: Value) =
   guard self.kind == bSet, "expected a set"
   self.els.incl val
@@ -119,6 +128,12 @@ func `/`*(self: Value, key: Value): lent Value =
 
 func `/`*(self: Value, key: int): lent Value =
   self[key]
+
+proc `/`*(self: Value, key: string): auto =
+  self / readValue(key)
+
+proc contains*(self: Value, key: string): bool =
+  readValue(key) in self
 
 # ================ Similarity ================
 

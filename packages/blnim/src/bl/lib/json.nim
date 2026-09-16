@@ -3,8 +3,7 @@ import std/strutils
 import ../core
 export json
 
-type
-  JsonRefusal* = object of CatchableError
+type JsonRefusal* = object of CatchableError
 
 refuseWith JsonRefusal
 

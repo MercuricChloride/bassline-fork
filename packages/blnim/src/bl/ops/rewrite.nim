@@ -106,6 +106,10 @@ proc bindValue*(self: var Match, shape, val: Value): bool =
 proc bindValue*(self: var Match, val: Value): auto =
   self.bindValue(self.shape.shape, val)
 
+proc add*(self: var Match, val: Value): bool {.discardable.} =
+  ## alias for `bindValue`
+  self.bindValue(val)
+
 proc injectValue*(self: Match, v: Value): Value =
   ## replace instances of self.holes in v with their binding
   if v in self.holes:
@@ -124,10 +128,6 @@ proc maybeInject*(self: Match, v: Value): Value =
 
 proc `@`*(self: Shape): Match =
   initMatch(self)
-
-proc `+=`*(self: var Match, val: Value): bool {.discardable.} =
-  ## alias for `bindValue`
-  self.bindValue(val)
 
 proc `//`*(self: Match, val: Value): Value =
   ## alias for `injectValue`
