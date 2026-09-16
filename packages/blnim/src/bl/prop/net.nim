@@ -1,4 +1,4 @@
-import std/[strformat, deques, sets]
+import std/[strformat, sequtils, deques, sets]
 import ../core
 import ./lattice
 
@@ -7,7 +7,7 @@ type
   ValueMerge* = proc(prev, curr: Value): Merged[Value] {.nimcall.}
 
   NetworkEventKind* = enum
-    nekRun, nekMerge, nekExcl
+    nekRun, nekMerge
 
   NetworkEvent* = object
     case kind*: NetworkEventKind
@@ -16,8 +16,6 @@ type
       value*: Value
     of nekRun:
       prop*: Prop
-    of nekExcl:
-      element*: Element
 
   Net* = ref object of RootObj
     cells*: HashSet[Cell]
@@ -29,6 +27,7 @@ type
 
   Element* = ref object of RootObj
     net*: Net
+    active* = true
 
   Cell* = ref object of Element
     inputs*, outputs*: HashSet[Prop]
@@ -43,7 +42,6 @@ type
 
   Group* = ref object of Element
     elements*: HashSet[Element]
-    active*: bool
 
 refuseWith NetworkError
 
@@ -58,9 +56,7 @@ proc `$`*(self: Net): string =
 proc `$`*(self: NetworkEvent): string =
   case self.kind
   of nekRun:
-    fmt"Run"
-  of nekExcl:
-    fmt"Excl"
+    "Run"
   of nekMerge:
     fmt"Merge[{self.cell.current} {self.value}]"
 
@@ -85,26 +81,52 @@ iterator secondary*(self: Net): NetworkEvent =
 proc runEvent(prop: Prop): NetworkEvent =
   NetworkEvent(kind: nekRun, prop: prop)
 
-proc exclEvent(element: Element): NetworkEvent =
-  NetworkEvent(kind: nekExcl, element: element)
-
 proc mergeEvent(cell: Cell, value: Value): NetworkEvent =
   NetworkEvent(kind: nekMerge, cell: cell, value: value)
 
+proc runnable(self: Prop): bool =
+  self.active and self.inputs.allIt(it.active)
+
 proc scheduleRun(self: Net, prop: Prop) =
-  if prop in self.props:
+  if prop in self.props and prop.runnable:
     self.schedule runEvent(prop)
 
-proc scheduleExcl(self: Net, element: Element) =
-  self.schedule exclEvent(element)
-
 proc scheduleMerge(self: Net, cell: Cell, value: Value) =
-  if cell in self.cells:
+  if cell in self.cells and cell.active:
     self.schedule mergeEvent(cell, value)
 
-proc excl*(els: varargs[Element]) =
+proc notify*(self: Cell)
+proc run*(self: Prop)
+
+method doEnable*(self: Element) {.base.} =
+  self.active = true
+
+method doEnable*(self: Cell) =
+  self.active = true
+  for prop in self.outputs:
+    doEnable prop
+  self.notify
+
+method doEnable*(self: Group) =
+  self.active = true
+  for el in self.elements:
+    doEnable el
+
+method doDisable*(self: Element) {.base.} =
+  self.active = false
+
+method doDisable*(self: Group) =
+  self.active = false
+  for el in self.elements:
+    doDisable el
+
+proc enable*(els: varargs[Element]) =
   for el in els:
-    el.net.scheduleExcl(el)
+    doEnable(el)
+
+proc disable*(els: varargs[Element]) =
+  for el in els:
+    doDisable(el)
 
 # ================ Event Handling ================
 
@@ -112,7 +134,7 @@ proc add*(self: Cell, val: Value)
 proc doMerge(self: Cell, val: Value)
 
 proc doRun(self: Prop) =
-  if self notin self.net.props:
+  if self notin self.net.props or not self.runnable:
     return
   var values = newSeq[Value](self.inputs.len)
   for i, cell in self.inputs:
@@ -122,41 +144,10 @@ proc doRun(self: Prop) =
     for cell in self.outputs:
       cell.add res
 
-method doExcl(self: Element, net: Net) {.base.} =
-  discard
-
-method doExcl(self: Cell, net: Net) =
-  if self in net.cells:
-    net.cells.excl self
-    for prop in self.inputs:
-      prop.outputs.excl self
-    for prop in self.outputs:
-      #[
-      Note: I may change this, but with how propagators
-      are, removing a propagators input will break
-      the propagator, so i think removing all downstream
-      propagators here is correct
-      ]#
-      prop.excl
-
-method doExcl(self: Prop, net: Net) =
-  if self in net.props:
-    net.props.excl self
-    for cell in self.inputs:
-      cell.outputs.excl self
-    for cell in self.outputs:
-      cell.inputs.excl self
-
-method doExcl(self: Group, net: Net) =
-  for e in self.elements:
-    e.doExcl(net)
-
 proc handleEvent(self: Net, event: NetworkEvent) =
   case event.kind
   of nekRun:
     doRun(event.prop)
-  of nekExcl:
-    doExcl(event.element, self)
   of nekMerge:
     doMerge(event.cell, event.value)
 
@@ -174,8 +165,10 @@ proc stepMain*(self: Net): bool =
   true
 
 proc run*(self: Net) =
-  while not self.stepMain:
-    continue
+  while true:
+    if self.stepMain: break
+  doAssert self.primaryEvents.len == 0
+  doAssert self.secondaryEvents.len == 0
 
 # ================ Connections ================
 
@@ -222,7 +215,7 @@ template pbinary*(fn): Prop.runProc =
 
 template pternary*(fn): Prop.runProc =
   proc(values: varargs[Value]): Value =
-    guard values.len == 3, "ternary requires 2 arguments"
+    guard values.len == 3, "ternary requires 3 arguments"
     fn(values[0], values[1], values[2])
 
 proc noneNull*(values: varargs[Value]): bool =
@@ -275,16 +268,6 @@ iterator groups*(self: Group): Group =
   for e in self.elements:
     if e of Group: yield Group(e)
 
-proc activate*(groups: varargs[Group]) =
-  for group in groups:
-    if group.active: continue
-    let net = group.net
-    for prop in group.props:
-      net.props.incl prop
-      for cell in prop.inputs:
-        cell.outputs.incl prop
-      prop.run
-
 # ================ Constructors ================
 
 proc newNetwork*(gas = 1_000_000): Net =
@@ -292,7 +275,7 @@ proc newNetwork*(gas = 1_000_000): Net =
 
 proc newCell*(
     self: Net, merge: ValueMerge, current: Value = null()): Cell =
-  result = Cell(net: self, mergeProc: merge, current: current)
+  result = Cell(net: self, mergeProc: merge, current: current, active: true)
   self.cells.incl result
 
 proc newCell*[T: ValueLattice](self: Net, _: type T): Cell =
@@ -309,10 +292,12 @@ proc newProp*(
     runProc: Prop.runProc, 
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
-  Prop(
+  result = Prop(
     net: self, 
-    runProc: runProc, 
-    shouldRunProc: shouldRunProc)
+    runProc: runProc,
+    shouldRunProc: shouldRunProc,
+    active: true)
+  self.props.incl result
 
 proc newProp*(
     self: Net,
@@ -332,20 +317,23 @@ proc prop*(
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
   result = self.net.newProp(runProc, shouldRunProc)
+  if not self.active: disable result
   self.elements.incl result
 
 proc cell*(self: Group, merge: ValueMerge, current: Value = null()): Cell =
   result = self.net.newCell(merge, current)
+  if not self.active: disable result
   self.elements.incl result
 
 proc cell*[T: ValueLattice](self: Group, _: type T): Cell =
   result = self.net.newCell(T)
+  if not self.active: disable result
   self.elements.incl result
 
-proc newGroup*(self: Net): Group =
-  Group(net: self)
+proc newGroup*(self: Net, active = false): Group =
+  Group(net: self, active: active)
 
-# ================ Groups ================
+# ================ Utility Groups ================
 
 template withGroup*(g: Group, body: untyped): untyped {.dirty.} =
   ##[
@@ -397,30 +385,23 @@ proc multiply*(self: Net): tuple[group: Group, a, b, c: Cell] =
     g.multiply(a, b, c)
     (g, a, b, c)
 
-proc difference*(self: Group, all, nogood, good: Cell) =
-  ## all - nogood = good
+type
+  Tms = ref object
+    all: BSet
+    nogood: BSet
 
-  proc computeGood(a, b: Value): Value =
-    let
-      (x, y) = (BSet, Versioned[BSet]).fromValue(a, b)
-    toValue Versioned[BSet](version: y.version, value: x - y.value)
+proc newTms*(): Tms =
+  Tms(all: newBSet(), nogood: newBSet())
 
-  proc getValue(a: Value): Value =
-    toValue Versioned[BSet].fromValue(a).value
+proc incl*(self: Tms, val: Value) =
+  self.all.incl val
 
-  withGroup self:
-    [all, nogood] -> binary(computeGood) -> good
-    good -> unary(getValue) -> all
-    nogood -> unary(getValue) -> all
+proc excl*(self: Tms, val: Value) =
+  self.all.incl val
+  self.nogood.incl val
 
-proc difference*(self: Net): tuple[group: Group, all, nogood, good: Cell] =
-  self.withGroup g:
-    let
-      all = g.cell BSet
-      nogood = g.cell Versioned[BSet]
-      good = g.cell Versioned[BSet]
-    difference(g, all, nogood, good)
-    (g, all, nogood, good)
+proc good*(self: Tms): BSet =
+  self.all - self.nogood
 
 when isMainModule:
 
@@ -440,6 +421,8 @@ when isMainModule:
       c = cell Numeric
       d = cell Numeric
 
+  enable numbers
+  
   numbers.adder(a, b, c)
   numbers.multiply(b, c, d)
 
@@ -459,42 +442,11 @@ when isMainModule:
     printNumbers
 
   section "activating numbers":
-    activate numbers
+    enable numbers
     run net
     printNumbers
 
   section "updating d":
-    d &= "[0 1008]"
+    d &= "[98 102]"
     run net
     printNumbers
-
-  let tms = net.difference()
-  activate tms.group
-
-  template printTms =
-    echo "\nall: ", tms.all
-    echo "\nnogood: ", tms.nogood
-    echo "\ngood: ", tms.good
-
-  section "tms init":
-    printTms
-
-  section "updating all":
-    tms.all &= "{foo bar (from goose)}"
-    run net
-    printTms
-
-  section "updating nogood":
-    tms.nogood &= "(version 2 {(from goose)})"
-    run net
-    printTms
-
-  section "updating nogood again":
-    tms.nogood &= "(version 3 {foo bar})"
-    run net
-    printTms
-
-  section "removing tms":
-    excl tms.group
-    run net
-    echo net

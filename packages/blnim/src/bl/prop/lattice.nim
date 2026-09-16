@@ -12,10 +12,11 @@ type
     prev*, curr*: T
 
   Lattice* = concept x, y, type T
-    # TODO: I should add a better order operation here
-    # but I haven't found something that's ergonomic & performant
+    ## `x <= y` is the information order: `y` knows at least what `x`
+    ## knows, so `merge(x, y)` is `y` and `merge(y, x)` reports no change.
     T.bottom is T
     x == y is bool
+    x <= y is bool
     merge(x, y) is Merged[T]
   
   ValueLike* = concept x, type T
@@ -175,6 +176,17 @@ func bounds*(self: Numeric): (int, int) =
   else:
     raise newException(ValueError, "bottom has no bounds")
 
+proc `<=`*(a, b: Numeric): bool =
+  ## `b` refines `a`: bottom is below everything, a range is below
+  ## every range inside it, a scalar is below only itself
+  let (x, y) = (a.normalize, b.normalize)
+  if x.kind == nkBottom: return true
+  if y.kind == nkBottom: return false
+  let
+    (lo1, hi1) = x.bounds
+    (lo2, hi2) = y.bounds
+  lo1 <= lo2 and hi2 <= hi1
+
 func hull(a, b: Numeric): Numeric =
   ## the narrowest range holding both; bottom holds nothing
   if a.kind == nkBottom: return b
@@ -295,6 +307,14 @@ converter toMax*(n: int): Max = Max(n)
 func `==`*(a,b: Min): bool {.borrow.}
 func `==`*(a,b: Max): bool {.borrow.}
 
+func `<=`*(a, b: Min): bool =
+  ## a smaller bound knows more
+  b.int <= a.int
+
+func `<=`*(a, b: Max): bool =
+  ## a larger bound knows more
+  a.int <= b.int
+
 func bottom*(_: type Min): Min =
   int.high
 
@@ -330,20 +350,22 @@ proc bottom*[T](_: type Versioned[T]): Versioned[T] =
 proc `==`[T](prev, curr: Versioned[T]): bool =
   (prev.version == curr.version) and (prev.value == curr.value)
 
+proc `<=`*[T](a, b: Versioned[T]): bool =
+  ## a later version knows more; within one version the values decide
+  if a.version != b.version:
+    return a.version < b.version
+  when T is Lattice:
+    a.value <= b.value
+  else:
+    a.value == b.value
+
 proc merge*[T](prev, curr: Versioned[T]): Merged[Versioned[T]] =
   if prev == curr or 
       prev.version > curr.version:
     return (prev, false)
   if prev.version < curr.version:
     return (curr, true)
-  when T is Lattice:
-    let (update, changed) = merge(prev.value, curr.value)
-    if not changed:
-      return (prev, false)
-    let v = max(prev.version, curr.version)
-    (initVersion(update, v + 1), true)
-  else:
-    contradiction(prev, curr, "version issue")
+  contradiction(prev, curr, "version issue")
 
 let versionShape = rv"(shape (version v value) {v value})"
 
