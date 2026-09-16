@@ -43,9 +43,8 @@ type
 
   Group* = ref object of Element
     props*: HashSet[Prop]
+    cells*: HashSet[Cell]
     active*: bool
-
-
 
 refuseWith NetworkError
 
@@ -152,6 +151,8 @@ method doExcl(self: Prop, net: Net) =
 method doExcl(self: Group, net: Net) =
   for prop in self.props:
     prop.doExcl(net)
+  for cell in self.cells:
+    cell.doExcl(net)
 
 proc handleEvent(self: Net, event: NetworkEvent) =
   case event.kind
@@ -321,9 +322,16 @@ proc prop*(
     runProc: Prop.runProc, 
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
-  let p = self.net.newProp(runProc, shouldRunProc)
-  self.props.incl p
-  p
+  result = self.net.newProp(runProc, shouldRunProc)
+  self.props.incl result
+
+proc cell*(self: Group, merge: ValueMerge, current: Value = null()): Cell =
+  result = self.net.newCell(merge, current)
+  self.cells.incl result
+
+proc cell*[T: ValueLattice](self: Group, _: type T): Cell =
+  result = self.net.newCell(T)
+  self.cells.incl result
 
 proc newGroup*(self: Net): Group =
   Group(net: self)
@@ -346,9 +354,8 @@ proc multiply*(self: Net, a, b, c: Cell): Group =
   [c, a] -> g.prop(pbinary divNumeric) -> b
   g
 
-proc difference*(self: Net, all, nogood, good: Cell): Group =
+proc difference*(self: Group, all, nogood, good: Cell) =
   ## all - nogood = good
-  let g = self.newGroup()
   proc computeGood(a, b: Value): Value =
     let
       (x, y) = (BSet, Versioned[BSet]).fromValue(a, b)
@@ -357,10 +364,18 @@ proc difference*(self: Net, all, nogood, good: Cell): Group =
   proc getValue(a: Value): Value =
     toValue value Versioned[BSet].fromValue(a)
 
-  [all, nogood] -> g.prop(pbinary computeGood) -> good
-  good -> g.prop(punary getValue) -> all
-  nogood -> g.prop(punary getValue) -> all
-  g
+  [all, nogood] -> self.prop(pbinary computeGood) -> good
+  good -> self.prop(punary getValue) -> all
+  nogood -> self.prop(punary getValue) -> all
+
+proc difference*(self: Net): tuple[group: Group, all, nogood, good: Cell] =
+  let 
+    g = self.newGroup()
+    all = g.cell BSet
+    nogood = g.cell Versioned[BSet]
+    good = g.cell Versioned[BSet]
+  difference(g, all, nogood, good)
+  (g, all, nogood, good)
 
 when isMainModule:
 
@@ -391,27 +406,25 @@ when isMainModule:
 
   echo a, " ", b, " ", c, " ", d
 
-  let
-    all = net.newCell BSet
-    nogood = net.newCell Versioned[BSet]
-    good = net.newCell Versioned[BSet]
+  let tms = net.difference()
 
-    tmsThing = net.difference(all, nogood, good)
+  activate tms.group
 
-  activate tmsThing
-
-  all &= "{foo bar (from goose)}"
+  tms.all &= "{foo bar (from goose)}"
 
   run net
+  echo tms
 
-  echo "all: ", all
-  echo "nogood: ", nogood
-  echo "good: ", good
-
-  nogood &= "(version 2 {(from goose)})"
+  tms.nogood &= "(version 2 {(from goose)})"
 
   run net
+  echo tms
 
-  echo "all: ", all
-  echo "nogood: ", nogood
-  echo "good: ", good
+  tms.nogood &= "(version 3 {foo bar})"
+
+  run net
+  echo tms
+
+  excl tms.group
+  run net
+  echo net
