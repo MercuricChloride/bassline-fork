@@ -42,14 +42,13 @@ type
     runProc*: proc(values: varargs[Value]): Value
 
   Group* = ref object of Element
-    props*: HashSet[Prop]
-    cells*: HashSet[Cell]
+    elements*: HashSet[Element]
     active*: bool
 
 refuseWith NetworkError
 
 proc `$`*(self: Cell): string =
-  fmt"Cell({$self.current})"
+  $(self.current)
 
 proc `$`*(self: Net): string =
   result &= "cells:\n"
@@ -149,10 +148,8 @@ method doExcl(self: Prop, net: Net) =
       cell.inputs.excl self
 
 method doExcl(self: Group, net: Net) =
-  for prop in self.props:
-    prop.doExcl(net)
-  for cell in self.cells:
-    cell.doExcl(net)
+  for e in self.elements:
+    e.doExcl(net)
 
 proc handleEvent(self: Net, event: NetworkEvent) =
   case event.kind
@@ -266,6 +263,18 @@ proc add*(self: Cell, val: string) =
 
 # ================ Groups ================
 
+iterator props*(self: Group): Prop =
+  for e in self.elements:
+    if e of Prop: yield Prop(e)
+
+iterator cells*(self: Group): Cell =
+  for e in self.elements:
+    if e of Cell: yield Cell(e)
+
+iterator groups*(self: Group): Group =
+  for e in self.elements:
+    if e of Group: yield Group(e)
+
 proc activate*(groups: varargs[Group]) =
   for group in groups:
     if group.active: continue
@@ -323,108 +332,169 @@ proc prop*(
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
   result = self.net.newProp(runProc, shouldRunProc)
-  self.props.incl result
+  self.elements.incl result
 
 proc cell*(self: Group, merge: ValueMerge, current: Value = null()): Cell =
   result = self.net.newCell(merge, current)
-  self.cells.incl result
+  self.elements.incl result
 
 proc cell*[T: ValueLattice](self: Group, _: type T): Cell =
   result = self.net.newCell(T)
-  self.cells.incl result
+  self.elements.incl result
 
 proc newGroup*(self: Net): Group =
   Group(net: self)
 
 # ================ Groups ================
 
-proc adder*(self: Net, a, b, c: Cell): Group =
-  ## a + b = c
-  let g = self.newGroup()
-  [a, b] -> g.prop(pbinary addNumeric) -> c
-  [c, b] -> g.prop(pbinary subNumeric) -> a
-  [c, a] -> g.prop(pbinary subNumeric) -> b
-  g
+template withGroup*(g: Group, body: untyped): untyped {.dirty.} =
+  ##[
+  A helper template that allows for easier definition of groups.
+  ]##
+  template cell(a): untyped = g.cell(a)
+  template cell(a, b): untyped = g.cell(a, b)
+  template cell(a, b, c): untyped = g.cell(a, b, c)
+  template prop(a): untyped = g.prop(a)
+  template unary(f): untyped = prop(punary f)
+  template binary(f): untyped = prop(pbinary f)
+  template ternary(f): untyped = prop(pternary f)
+  body
 
-proc multiply*(self: Net, a, b, c: Cell): Group =
+template withGroup*(net: Net, name, body: untyped): untyped =
+  let name = net.newGroup()
+  withGroup name:
+    body
+
+proc adder*(self: Group, a, b, c: Cell) =
+  ## a + b = c
+  withGroup self:
+    [a, b] -> binary(addNumeric) -> c
+    [c, b] -> binary(subNumeric) -> a
+    [c, a] -> binary(subNumeric) -> b
+
+proc adder*(self: Net): tuple[group: Group, a, b, c: Cell] =
+  self.withGroup g:
+    let
+      a = cell Numeric
+      b = cell Numeric
+      c = cell Numeric
+    g.adder(a, b, c)
+    (g, a, b, c)
+
+proc multiply*(self: Group, a, b, c: Cell) =
   ## a * b = c
-  let g = self.newGroup()
-  [a, b] -> g.prop(pbinary mulNumeric) -> c
-  [c, b] -> g.prop(pbinary divNumeric) -> a
-  [c, a] -> g.prop(pbinary divNumeric) -> b
-  g
+  withGroup self:
+    [a, b] -> binary(mulNumeric) -> c
+    [c, b] -> binary(divNumeric) -> a
+    [c, a] -> binary(divNumeric) -> b
+
+proc multiply*(self: Net): tuple[group: Group, a, b, c: Cell] =
+  self.withGroup g:
+    let
+      a = cell Numeric
+      b = cell Numeric
+      c = cell Numeric
+    g.multiply(a, b, c)
+    (g, a, b, c)
 
 proc difference*(self: Group, all, nogood, good: Cell) =
   ## all - nogood = good
+
   proc computeGood(a, b: Value): Value =
     let
       (x, y) = (BSet, Versioned[BSet]).fromValue(a, b)
     toValue Versioned[BSet](version: y.version, value: x - y.value)
 
   proc getValue(a: Value): Value =
-    toValue value Versioned[BSet].fromValue(a)
+    toValue Versioned[BSet].fromValue(a).value
 
-  [all, nogood] -> self.prop(pbinary computeGood) -> good
-  good -> self.prop(punary getValue) -> all
-  nogood -> self.prop(punary getValue) -> all
+  withGroup self:
+    [all, nogood] -> binary(computeGood) -> good
+    good -> unary(getValue) -> all
+    nogood -> unary(getValue) -> all
 
 proc difference*(self: Net): tuple[group: Group, all, nogood, good: Cell] =
-  let 
-    g = self.newGroup()
-    all = g.cell BSet
-    nogood = g.cell Versioned[BSet]
-    good = g.cell Versioned[BSet]
-  difference(g, all, nogood, good)
-  (g, all, nogood, good)
+  self.withGroup g:
+    let
+      all = g.cell BSet
+      nogood = g.cell Versioned[BSet]
+      good = g.cell Versioned[BSet]
+    difference(g, all, nogood, good)
+    (g, all, nogood, good)
 
 when isMainModule:
 
+  template section(msg, body) =
+    echo "\n================================"
+    echo msg
+    echo "================================\n"
+    body
+
   assert Numeric is ValueLattice
 
-  let
-    net = newNetwork()
-    a = net.newCell Numeric
-    b = net.newCell Numeric
-    c = net.newCell Numeric
-    d = net.newCell Numeric
-  
-    ad = net.adder(a, b, c)
-    mul = net.multiply(b, c, d)
+  let net = newNetwork()
+  net.withGroup numbers:
+    let
+      a = cell Numeric
+      b = cell Numeric
+      c = cell Numeric
+      d = cell Numeric
 
-  a &= "[1 10]"
-  b &= "7"
+  numbers.adder(a, b, c)
+  numbers.multiply(b, c, d)
 
-  run net
+  template printNumbers =
+    echo "a: ", a
+    echo "b: ", b
+    echo "c: ", c
+    echo "d: ", d
 
-  activate ad, mul
+  section "init":
+    printNumbers
 
-  echo a, " ", b, " ", c, " ", d
+  section "first run":
+    a &= "[1 10]"
+    b &= "7"
+    run net
+    printNumbers
 
-  d &= "[98 108]"
+  section "activating numbers":
+    activate numbers
+    run net
+    printNumbers
 
-  run net
-
-  echo a, " ", b, " ", c, " ", d
+  section "updating d":
+    d &= "[0 1008]"
+    run net
+    printNumbers
 
   let tms = net.difference()
-
   activate tms.group
 
-  tms.all &= "{foo bar (from goose)}"
+  template printTms =
+    echo "\nall: ", tms.all
+    echo "\nnogood: ", tms.nogood
+    echo "\ngood: ", tms.good
 
-  run net
-  echo tms
+  section "tms init":
+    printTms
 
-  tms.nogood &= "(version 2 {(from goose)})"
+  section "updating all":
+    tms.all &= "{foo bar (from goose)}"
+    run net
+    printTms
 
-  run net
-  echo tms
+  section "updating nogood":
+    tms.nogood &= "(version 2 {(from goose)})"
+    run net
+    printTms
 
-  tms.nogood &= "(version 3 {foo bar})"
+  section "updating nogood again":
+    tms.nogood &= "(version 3 {foo bar})"
+    run net
+    printTms
 
-  run net
-  echo tms
-
-  excl tms.group
-  run net
-  echo net
+  section "removing tms":
+    excl tms.group
+    run net
+    echo net
