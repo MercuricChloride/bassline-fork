@@ -46,8 +46,11 @@ proc add*[T: Lattice](prev: var T, curr: T) =
 proc add*[T: ValueLattice](prev: var T, curr: Value) =
   prev &= T.fromValue(curr)
 
+proc fromValue*[A, B: ValueLattice](_: type (A, B), a, b: Value): (A, B) =
+  (A.fromValue(a), B.fromValue(b))
+
 proc fromValue*[T: ValueLattice](a, b: Value): (T, T) =
-  (T.fromValue(a), T.fromValue(b))
+  (T, T).fromValue(a, b)
 
 ## ================ Numeric Refinement Lattice ================
 
@@ -341,6 +344,33 @@ proc merge*[T](prev, curr: Versioned[T]): Merged[Versioned[T]] =
     (initVersion(update, v + 1), true)
   else:
     contradiction(prev, curr, "version issue")
+
+let versionShape = rv"(shape (version v value) {v value})"
+
+proc value*(self: Versioned): self.T =
+  self.value
+
+proc version*(self: Versioned): Natural =
+  self.version
+
+proc fromValue*[T: ValueLike](
+    _: type Versioned[T], val: Value): Versioned[T] =
+  var bindings = extract(versionShape, val)
+
+  if bindings.len == 0 or
+      bindings["v"].kind != bNum:
+    return bottom(Versioned[T])
+  let
+    version = bindings["v"].num.toInt
+    value = T.fromValue(bindings["value"])
+  Versioned[T](version: version, value: value)
+
+proc toValue*(self: Versioned): Value =
+  mixin toValue
+  var bindings = initDict()
+  bindings["v"] = num self.version
+  bindings["value"] = toValue(self.value)
+  inject(versionShape, bindings)
 
 when isMainModule:
   let vals = rv"""[

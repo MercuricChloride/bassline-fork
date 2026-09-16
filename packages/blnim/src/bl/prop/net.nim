@@ -45,14 +45,7 @@ type
     props*: HashSet[Prop]
     active*: bool
 
-proc `[]`*[T](self: BTree[Value, T], key: string): auto =
-  self[readValue(key)]
 
-proc `[]=`*[T](self: BTree[Value, T], key: string, val: T) =
-  self[readValue(key)] = val
-
-proc contains*[T](self: BTree[Value, T], key: string): bool =
-  readValue(key) in self
 
 refuseWith NetworkError
 
@@ -287,8 +280,9 @@ proc activate*(groups: varargs[Group]) =
 proc newNetwork*(gas = 1_000_000): Net =
   Net(gas: gas)
 
-proc newCell*(self: Net, merge: ValueMerge): Cell =
-  result = Cell(net: self, mergeProc: merge)
+proc newCell*(
+    self: Net, merge: ValueMerge, current: Value = null()): Cell =
+  result = Cell(net: self, mergeProc: merge, current: current)
   self.cells.incl result
 
 proc newCell*[T: ValueLattice](self: Net, _: type T): Cell =
@@ -298,7 +292,7 @@ proc newCell*[T: ValueLattice](self: Net, _: type T): Cell =
         curr = T.fromValue(c)
         (value, didChange) = prev.merge(curr)
       (value.toValue, didChange)
-  self.newCell(doMerge)
+  self.newCell(doMerge, toValue(T.bottom()))
 
 proc newProp*(
     self: Net,
@@ -334,7 +328,10 @@ proc prop*(
 proc newGroup*(self: Net): Group =
   Group(net: self)
 
+# ================ Groups ================
+
 proc adder*(self: Net, a, b, c: Cell): Group =
+  ## a + b = c
   let g = self.newGroup()
   [a, b] -> g.prop(pbinary addNumeric) -> c
   [c, b] -> g.prop(pbinary subNumeric) -> a
@@ -342,10 +339,27 @@ proc adder*(self: Net, a, b, c: Cell): Group =
   g
 
 proc multiply*(self: Net, a, b, c: Cell): Group =
+  ## a * b = c
   let g = self.newGroup()
   [a, b] -> g.prop(pbinary mulNumeric) -> c
   [c, b] -> g.prop(pbinary divNumeric) -> a
   [c, a] -> g.prop(pbinary divNumeric) -> b
+  g
+
+proc difference*(self: Net, all, nogood, good: Cell): Group =
+  ## all - nogood = good
+  let g = self.newGroup()
+  proc computeGood(a, b: Value): Value =
+    let
+      (x, y) = (BSet, Versioned[BSet]).fromValue(a, b)
+    toValue Versioned[BSet](version: y.version, value: x - y.value)
+
+  proc getValue(a: Value): Value =
+    toValue value Versioned[BSet].fromValue(a)
+
+  [all, nogood] -> g.prop(pbinary computeGood) -> good
+  good -> g.prop(punary getValue) -> all
+  nogood -> g.prop(punary getValue) -> all
   g
 
 when isMainModule:
@@ -371,8 +385,33 @@ when isMainModule:
 
   echo a, " ", b, " ", c, " ", d
 
-  d &= "98"
+  d &= "[98 108]"
 
   run net
 
   echo a, " ", b, " ", c, " ", d
+
+  let
+    all = net.newCell BSet
+    nogood = net.newCell Versioned[BSet]
+    good = net.newCell Versioned[BSet]
+
+    tmsThing = net.difference(all, nogood, good)
+
+  activate tmsThing
+
+  all &= "{foo bar (from goose)}"
+
+  run net
+
+  echo "all: ", all
+  echo "nogood: ", nogood
+  echo "good: ", good
+
+  nogood &= "(version 2 {(from goose)})"
+
+  run net
+
+  echo "all: ", all
+  echo "nogood: ", nogood
+  echo "good: ", good
