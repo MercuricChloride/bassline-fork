@@ -6,6 +6,10 @@ type
   Merged*[T] = tuple
     value: T
     changed: bool
+  
+  Contradiction*[T] = object of CatchableError
+    ## raised when two values in a lattice are mutually exclusive
+    prev*, curr*: T
 
   Lattice* = concept x, y, type T
     # TODO: I should add a better order operation here
@@ -13,12 +17,11 @@ type
     T.bottom is T
     x == y is bool
     merge(x, y) is Merged[T]
-  Contradiction*[T] = object of CatchableError
-    ## raised when two values in a lattice are mutually exclusive
-    prev*, curr*: T    
+  
   ValueLike* = concept x, type T
     x.toValue() is Value
     T.fromValue(Value) is T
+
   ValueLattice* = ValueLike and Lattice
 
 proc contradiction*[T](prev, curr: T, msg: string) {.noreturn.} =
@@ -42,6 +45,9 @@ proc add*[T: Lattice](prev: var T, curr: T) =
 
 proc add*[T: ValueLattice](prev: var T, curr: Value) =
   prev &= T.fromValue(curr)
+
+proc fromValue*[T: ValueLattice](a, b: Value): (T, T) =
+  (T.fromValue(a), T.fromValue(b))
 
 ## ================ Numeric Refinement Lattice ================
 
@@ -102,8 +108,11 @@ proc `==`*(a,b: Numeric): bool =
   else:
     false
 
-proc merge*(prev, curr: Numeric): Merged[Numeric] =
-  if prev == curr: 
+proc merge*(previous, current: Numeric): Merged[Numeric] =
+  let
+    prev = previous.normalize
+    curr = current.normalize
+  if prev == curr:
     return (prev, false)
   case (prev, curr)
   of (_, Bottom()):
@@ -114,7 +123,7 @@ proc merge*(prev, curr: Numeric): Merged[Numeric] =
       (Interval(lo: @lo, hi: @hi), Scalar(n: @n)):
     if n notin lo..hi:
       contradiction[Numeric](prev, curr, "scalar outside interval")
-    return (scalar n, true)
+    return (scalar n, prev.kind != nkScalar)
   of (Scalar(n: @x), Scalar(n: @y)):
     if x != y:
       contradiction[Numeric](prev, curr, "not equal")
@@ -127,7 +136,6 @@ proc merge*(prev, curr: Numeric): Merged[Numeric] =
       contradiction[Numeric](prev, curr, "disjoint intervals")
     if lo == hi:
       return (scalar lo, true)
-    
     let changed = (lo1 != lo) or (hi1 != hi)
     return (interval(lo, hi), changed)
   raise newException(ValueError, "should never get here")
@@ -154,25 +162,85 @@ proc toNumeric(val: Value): Numeric =
 proc fromValue*(_: type Numeric, val: Value): Numeric =
   toNumeric(val)
 
+func bounds*(self: Numeric): (int, int) =
+  ## a scalar is the range holding only it
+  case self
+  of Scalar(n: @n):
+    return (n, n)
+  of Interval(lo: @lo, hi: @hi):
+    return (lo, hi)
+  else:
+    raise newException(ValueError, "bottom has no bounds")
+
+func hull(a, b: Numeric): Numeric =
+  ## the narrowest range holding both; bottom holds nothing
+  if a.kind == nkBottom: return b
+  if b.kind == nkBottom: return a
+  let
+    (lo1, hi1) = a.bounds
+    (lo2, hi2) = b.bounds
+  interval(min(lo1, lo2), max(hi1, hi2)).normalize
+
+template corners(a, b, c, d: int, op): Numeric =
+  ## the range of `op` over `a..b` and `c..d` where `op` is monotone in
+  ## each argument: its bounds are among the four corners
+  let xs = [op(a, c), op(a, d), op(b, c), op(b, d)]
+  interval(min(xs), max(xs)).normalize
+
 template numericBinaryOp(op) =
-  proc op*(l, r: Numeric): auto =
-    case (l, r)
-    of (Scalar(n: @n), Interval(lo: @lo, hi: @hi)):
-      interval op(n, lo), op(n, hi)
-    of (Interval(lo: @lo, hi: @hi), Scalar(n: @n)):
-      interval op(lo, n), op(hi, n)
-    of (Scalar(n: @a), Scalar(n: @b)):
-      scalar op(a, b)
-    of (Interval(lo: @lo1, hi: @hi1), Interval(lo: @lo2, hi: @hi2)):
-      interval op(lo1, lo2), op(hi1, hi2)
-    else:
-      Numeric.bottom
+  proc op*(l, r: Numeric): Numeric =
+    ## `+`, `-` and `*` are monotone in each argument everywhere
+    if l.kind == nkBottom or r.kind == nkBottom:
+      return Numeric.bottom
+    let
+      (a, b) = l.bounds
+      (c, d) = r.bounds
+    corners(a, b, c, d, op)
 
 numericBinaryOp `+`
 numericBinaryOp `-`
 numericBinaryOp `*`
-numericBinaryOp `div`
-numericBinaryOp `mod`
+
+proc `div`*(l, r: Numeric): Numeric =
+  ## Truncating division over ranges. `div` is monotone in each argument
+  ## on either side of zero, so the divisor range is split there and each
+  ## side takes its corners. Zero divides nothing, so a divisor range
+  ## that is only zero yields bottom.
+  if l.kind == nkBottom or r.kind == nkBottom:
+    return Numeric.bottom
+  let
+    (a, b) = l.bounds
+    (c, d) = r.bounds
+  result = Numeric.bottom
+  if d >= 1:
+    result = hull(result, corners(a, b, max(c, 1), d, `div`))
+  if c <= -1:
+    result = hull(result, corners(a, b, c, min(d, -1), `div`))
+
+proc `mod`*(l, r: Numeric): Numeric =
+  ## Remainder over ranges. A remainder takes the dividend's sign and a
+  ## magnitude below both the dividend's and the divisor's, so the result
+  ## lies within the dividend's range clamped by the largest divisor
+  ## magnitude. When every dividend is smaller than every divisor, the
+  ## dividend passes through unchanged.
+  if l.kind == nkBottom or r.kind == nkBottom:
+    return Numeric.bottom
+  let
+    (a, b) = l.bounds
+    (c, d) = r.bounds
+  if c == 0 and d == 0:
+    return Numeric.bottom
+  let
+    most = max(abs c, abs d)
+    least = if c <= 0 and d >= 0: 1 else: min(abs c, abs d)
+  if a >= 0:
+    if b < least: l.normalize
+    else: interval(0, min(b, most - 1)).normalize
+  elif b <= 0:
+    if -a < least: l.normalize
+    else: interval(max(a, 1 - most), 0).normalize
+  else:
+    interval(max(a, 1 - most), min(b, most - 1)).normalize
 
 # ================ Set / BTree Union ================
 
