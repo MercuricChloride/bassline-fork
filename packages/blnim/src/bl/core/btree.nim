@@ -373,6 +373,12 @@ proc intersection*[T](a, b: BTreeSet[T]): BTreeSet[T] =
   for v in smaller:
     if v in larger: incl(result, v)
 
+proc symmetricDifference*(a, b: BTreeSet): BTreeSet =
+  result = newBTreeSet[a.T]()
+  for v in union(a,b):
+    if v notin a and v notin b: 
+      incl(result, v)
+    
 proc `+`*[T](a, b: BTreeSet[T]): BTreeSet[T] =
   ## alias for union
   union a, b
@@ -384,6 +390,10 @@ proc `-`*[T](a, b: BTreeSet[T]): BTreeSet[T] =
 proc `*`*[T](a, b: BTreeSet[T]): BTreeSet[T] =
   ## alias for intersection
   intersection a, b
+
+proc `-+-`*[T](a, b: BTreeSet[T]): BTreeSet[T] =
+  ## symmetric difference
+  symmetricDifference(a,b)
 
 func `<=`*(a, b: BTreeSet): bool =
   ## Returns true if `a` is a subset of `b`

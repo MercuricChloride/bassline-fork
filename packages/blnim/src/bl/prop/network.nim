@@ -4,7 +4,7 @@ import ./lattice
 
 type
   NetworkError = object of CatchableError
-  ValueMerge* = proc(prev, curr: Value): Merged[Value] {.nimcall.}
+  ValueMerge* = proc(prev, curr: Value): Merge[Value] {.nimcall.}
 
   NetworkEventKind* = enum
     nekRun, nekMerge
@@ -159,6 +159,8 @@ proc stepMain*(self: Net): bool =
   for em in self.primary:
     self.handleEvent(em)
     for es in self.secondary:
+      guard self.gas > 0, "out of gas"
+      dec self.gas
       self.handleEvent(es)
     guard self.secondaryEvents.len == 0, "not finished"
     return false
@@ -183,6 +185,7 @@ proc connectTo*(self: Cell, prop: Prop): Prop =
 proc connectTo*(self: Prop, cell: Cell): Cell =
   self.outputs.incl cell
   cell.inputs.incl self
+  self.run
   cell
 
 proc connectTo*(
@@ -242,10 +245,9 @@ proc notify*(self: Cell) =
     self.net.scheduleRun p
 
 proc doMerge(self: Cell, val: Value) =
-  let
-    (value, didChange) = self.mergeProc(self.current, val)
-  if didChange:
-    self.current = value
+  let m = self.mergeProc(self.current, val)
+  if m.didGain:
+    self.current = m.value
     self.notify
 
 proc add*(self: Cell, val: Value) =
@@ -268,6 +270,10 @@ iterator groups*(self: Group): Group =
   for e in self.elements:
     if e of Group: yield Group(e)
 
+proc install*(self: Group, el: Element) =
+  if not self.active: disable el
+  self.elements.incl el
+
 # ================ Constructors ================
 
 proc newNetwork*(gas = 1_000_000): Net =
@@ -279,12 +285,12 @@ proc newCell*(
   self.cells.incl result
 
 proc newCell*[T: ValueLattice](self: Net, _: type T): Cell =
-  proc doMerge(p, c: Value): Merged[Value] =
+  proc doMerge(p, c: Value): Merge[Value] =
       let
         prev = T.fromValue(p)
         curr = T.fromValue(c)
-        (value, didChange) = prev.merge(curr)
-      (value.toValue, didChange)
+        m = prev.merge(curr)
+      Merge[Value](value: m.value.toValue, kind: m.kind)
   self.newCell(doMerge, toValue(T.bottom()))
 
 proc newProp*(
@@ -311,27 +317,24 @@ proc newProp*(
   inputs -> result -> outputs
   run result
 
+proc newGroup*(self: Net, active = false): Group =
+  Group(net: self, active: active)
+
 proc prop*(
     self: Group,
-    runProc: Prop.runProc, 
+    runProc: Prop.runProc,
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
   result = self.net.newProp(runProc, shouldRunProc)
-  if not self.active: disable result
-  self.elements.incl result
+  self.install result
 
 proc cell*(self: Group, merge: ValueMerge, current: Value = null()): Cell =
   result = self.net.newCell(merge, current)
-  if not self.active: disable result
-  self.elements.incl result
+  self.install result
 
 proc cell*[T: ValueLattice](self: Group, _: type T): Cell =
   result = self.net.newCell(T)
-  if not self.active: disable result
-  self.elements.incl result
-
-proc newGroup*(self: Net, active = false): Group =
-  Group(net: self, active: active)
+  self.install result
 
 # ================ Utility Groups ================
 
@@ -384,24 +387,6 @@ proc multiply*(self: Net): tuple[group: Group, a, b, c: Cell] =
       c = cell Numeric
     g.multiply(a, b, c)
     (g, a, b, c)
-
-type
-  Tms = ref object
-    all: BSet
-    nogood: BSet
-
-proc newTms*(): Tms =
-  Tms(all: newBSet(), nogood: newBSet())
-
-proc incl*(self: Tms, val: Value) =
-  self.all.incl val
-
-proc excl*(self: Tms, val: Value) =
-  self.all.incl val
-  self.nogood.incl val
-
-proc good*(self: Tms): BSet =
-  self.all - self.nogood
 
 when isMainModule:
 

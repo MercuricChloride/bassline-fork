@@ -3,27 +3,90 @@ import fusion/matching
 import ../[core, ops]
 
 type
-  Merged*[T] = tuple
-    value: T
-    changed: bool
-  
+  MergeResultKind* = enum
+    ## Describes the 4 possible outcomes of a semi-lattice merge
+    ## Let c = merge(a, b) we can describe the outcomes
+    ## Same:
+    ## c == a
+    ## c == b
+    ## Absorbed:
+    ## c == a
+    ## c != b
+    ## Replaced:
+    ## c != a
+    ## c == b
+    ## Joined:
+    ## c != a
+    ## c != b
+    moAbsorbed, moSame, moReplaced, moJoined
+
+  Merge*[T] = object
+    value*: T
+    kind*: MergeResultKind
+
   Contradiction*[T] = object of CatchableError
     ## raised when two values in a lattice are mutually exclusive
     prev*, curr*: T
 
   Lattice* = concept x, y, type T
-    ## `x <= y` is the information order: `y` knows at least what `x`
-    ## knows, so `merge(x, y)` is `y` and `merge(y, x)` reports no change.
     T.bottom is T
-    x == y is bool
-    x <= y is bool
-    merge(x, y) is Merged[T]
-  
+    merge(x, y) is Merge[T]
+
   ValueLike* = concept x, type T
     x.toValue() is Value
     T.fromValue(Value) is T
 
   ValueLattice* = ValueLike and Lattice
+
+func didGain*(self: MergeResultKind): bool =
+  self in {moReplaced, moJoined}
+
+func kept*(self: MergeResultKind): bool =
+  not self.didGain
+
+func didGain*(self: Merge): bool =
+  self.kind.didGain
+
+func kept*(self: Merge): bool =
+  self.kind.kept
+
+func `or`*(a, b: Merge): Merge =
+  if a.didGain: a else: b
+
+func apply*(self: Merge, prev: var self.T): bool =
+  if self.didGain:
+    prev = self.value
+    return true
+
+template settle*(prev, curr, body) {.dirty.} =
+  template same =
+    return Merge[typeof prev](value: prev, kind: moSame)
+  template absorbed =
+    return Merge[typeof prev](value: prev, kind: moAbsorbed)
+  template replaced =
+    return Merge[typeof curr](value: curr, kind: moReplaced)
+  template joined(joinBody) =
+    let built = block:
+      joinBody
+    return Merge[typeof built](value: built, kind: moJoined)
+  template contradiction(msg: string) =
+    contradiction(prev, curr, msg)
+  body
+
+template productMerge*(T: typedesc) =
+  func bottom*(_: type T): T =
+    for f in fields(result):
+      f = typeof(f).bottom
+  proc merge*(prev, curr: T): Merge[T] =
+    mixin merge
+    var
+      value = prev
+      outcome = moSame
+    for a, b in fields(value, curr):
+      let m = merge(a, b)
+      outcome = max(outcome, m.kind)
+      a = m.value
+    Merge[T](value: value, kind: outcome)
 
 proc contradiction*[T](prev, curr: T, msg: string) {.noreturn.} =
   when compiles($prev):
@@ -33,19 +96,28 @@ proc contradiction*[T](prev, curr: T, msg: string) {.noreturn.} =
     e.curr = curr
     raise e
   else:
-    var e = newException(Contradicion[T], "contradiction! " & msg)
+    var e = newException(Contradiction[T], "contradiction! " & msg)
     e.prev = prev
     e.curr = curr
     raise e
 
+proc compare*[T](prev, curr: T): MergeResultKind =
+  mixin merge
+  merge(prev, curr).outcome
+
+proc `<=`*[T: Lattice](a, b: T): bool =
+  mixin merge
+  merge(a, b).didGain
+
 proc add*[T: Lattice](prev: var T, curr: T) =
   mixin merge
-  let (update, changed) = merge(prev, curr)
-  if changed:
-    prev = update
+  let outcome = merge(prev, curr)
+  if outcome.didGain:
+    prev = outcome.value
 
 proc add*[T: ValueLattice](prev: var T, curr: Value) =
-  prev &= T.fromValue(curr)
+  mixin fromValue
+  prev &= fromValue(T, curr)
 
 proc fromValue*[A, B: ValueLattice](_: type (A, B), a, b: Value): (A, B) =
   (A.fromValue(a), B.fromValue(b))
@@ -53,12 +125,35 @@ proc fromValue*[A, B: ValueLattice](_: type (A, B), a, b: Value): (A, B) =
 proc fromValue*[T: ValueLattice](a, b: Value): (T, T) =
   (T, T).fromValue(a, b)
 
+# ================ Min / Max ================
+
+type
+  Min* = distinct int
+  Max* = distinct int
+
+converter toMin*(n: int): Min = Min(n)
+converter toMax*(n: int): Max = Max(n)
+
+func bottom*(_: type Min): Min = int.high
+func bottom*(_: type Max): Max = int.low
+
+proc merge*(prev, curr: Min): Merge[Min] =
+  settle(prev, curr):
+    if prev.int <= curr.int:
+      absorbed
+    replaced
+
+proc merge*(prev, curr: Max): Merge[Max] =
+  settle(prev, curr):
+    if prev.int >= curr.int:
+      absorbed
+    replaced
+
 ## ================ Numeric Refinement Lattice ================
 
 type
-  NumKind* = enum
+  NumKind = enum
     nkBottom, nkInterval, nkScalar
-
   Numeric* = object
     case kind*: NumKind
     of nkBottom: discard
@@ -101,48 +196,52 @@ func normalize*(self: Numeric): Numeric =
       return scalar lo
   self
 
-proc `==`*(a,b: Numeric): bool =
-  case (a.normalize, b.normalize)
-  of (Scalar(), Scalar()):
-    a.n == b.n
-  of (Interval(), Interval()):
-    (a.lo == b.lo) and (a.hi == b.hi)
+func `==`*(a, b: Numeric): bool =
+  case (a, b)
   of (Bottom(), Bottom()):
-    true
-  else:
-    false
+    return true
+  of (Interval(), Interval()):
+    return a.lo == b.lo and a.hi == b.hi
+  of (Scalar(), Scalar()):
+    return a.n == b.n
 
-proc merge*(previous, current: Numeric): Merged[Numeric] =
+proc merge*(previous, current: Numeric): Merge[Numeric] =
   let
     prev = previous.normalize
     curr = current.normalize
-  if prev == curr:
-    return (prev, false)
-  case (prev, curr)
-  of (_, Bottom()):
-    return (prev, false)
-  of (Bottom(), _):
-    return (curr, true)
-  of (Scalar(n: @n), Interval(lo: @lo, hi: @hi)) |
-      (Interval(lo: @lo, hi: @hi), Scalar(n: @n)):
-    if n notin lo..hi:
-      contradiction[Numeric](prev, curr, "scalar outside interval")
-    return (scalar n, prev.kind != nkScalar)
-  of (Scalar(n: @x), Scalar(n: @y)):
-    if x != y:
-      contradiction[Numeric](prev, curr, "not equal")
-    return (prev, false)
-  of (Interval(lo: @lo1, hi: @hi1), Interval(lo: @lo2, hi: @hi2)):
-    let
-      lo = max(lo1, lo2)
-      hi = min(hi1, hi2)
-    if lo > hi:
-      contradiction[Numeric](prev, curr, "disjoint intervals")
-    if lo == hi:
-      return (scalar lo, true)
-    let changed = (lo1 != lo) or (hi1 != hi)
-    return (interval(lo, hi), changed)
-  raise newException(ValueError, "should never get here")
+  settle(prev, curr):
+    if prev == curr:
+      same
+    case (prev, curr)
+    of (_, Bottom()):
+      absorbed
+    of (Bottom(), _):
+      replaced
+    of (Interval(lo: @lo, hi: @hi), Scalar(n: @n)):
+      if n notin lo..hi:
+        contradiction "scalar outside interval"
+      replaced
+    of (Scalar(n: @n), Interval(lo: @lo, hi: @hi)):
+      if n notin lo..hi:
+        contradiction "scalar outside interval"
+      absorbed
+    of (Scalar(n: @x), Scalar(n: @y)):
+      if x != y:
+        contradiction "not equal"
+      absorbed
+    of (Interval(lo: @lo1, hi: @hi1), Interval(lo: @lo2, hi: @hi2)):
+      let
+        lo = max(lo1, lo2)
+        hi = min(hi1, hi2)
+        changed = (lo1 != lo) or (hi1 != hi)
+      if lo > hi:
+        contradiction "disjoint intervals"
+      if changed:
+        joined:
+          interval(lo, hi).normalize
+      else:
+        absorbed
+    raise newException(ValueError, "should never get here")
 
 func toValue*(self: Numeric): Value =
   case self
@@ -257,6 +356,35 @@ proc `mod`*(l, r: Numeric): Numeric =
   else:
     interval(max(a, 1 - most), min(b, most - 1)).normalize
 
+# ================ Exact ================
+
+type
+  Exact* = object
+    value*: Value
+
+func bottom*(_: type Exact): Exact =
+  Exact(value: null())
+
+proc merge*(prev, curr: Exact): Merge[Exact] =
+  settle(prev, curr):
+    if curr.value == null():
+      absorbed
+    elif prev.value == null():
+      replaced
+    elif prev.value == curr.value:
+      same
+    else:
+      contradiction "not equal"
+
+func toValue*(self: Exact): Value =
+  self.value
+
+func fromValue*(_: type Exact, val: Value): Exact =
+  Exact(value: val)
+
+proc `$`*(self: Exact): string =
+  $self.value
+
 # ================ Set / BTree Union ================
 
 func bottom*(_: type BSet): BSet =
@@ -265,15 +393,21 @@ func bottom*(_: type BSet): BSet =
 func bottom*(_: type BDict): BDict =
   newBDict()
 
-proc merge*(prev, curr: BSet): Merged[BSet] =
-  if curr <= prev:
-    return (prev, false)
-  (prev + curr, true)
+proc merge*(prev, curr: BSet): Merge[BSet] =
+  settle(prev, curr):
+    if curr <= prev:
+      absorbed
+    joined:
+      prev + curr
 
-proc merge*(prev, curr: BDict): Merged[BDict] =
-  if curr <= prev:
-    return (prev, false)
-  (prev + curr, true)
+proc merge*(prev, curr: BDict): Merge[BDict] =
+  settle(prev, curr):
+    if curr <= prev:
+      absorbed
+    elif prev.disjoint(curr):
+      joined prev + curr
+    else:
+      contradiction "conflicting dictionaries"
 
 func toBSet(val: Value): BSet =
   case val
@@ -295,42 +429,6 @@ func fromValue*(_: type BSet, val: Value): BSet =
 func fromValue*(_: type BDict, val: Value): BDict =
   toBDict val
 
-# ================ Min / Max ================
-
-type
-  Min* = distinct int
-  Max* = distinct int
-
-converter toMin*(n: int): Min = Min(n)
-converter toMax*(n: int): Max = Max(n)
-
-func `==`*(a,b: Min): bool {.borrow.}
-func `==`*(a,b: Max): bool {.borrow.}
-
-func `<=`*(a, b: Min): bool =
-  ## a smaller bound knows more
-  b.int <= a.int
-
-func `<=`*(a, b: Max): bool =
-  ## a larger bound knows more
-  a.int <= b.int
-
-func bottom*(_: type Min): Min =
-  int.high
-
-func bottom*(_: type Max): Max =
-  int.low
-
-proc merge*(prev, curr: Min): Merged[Min] =
-  if prev.int <= curr.int:
-    return (prev, false)
-  return (curr.int, true)
-
-proc merge*(prev, curr: Max): Merged[Max] =
-  if prev.int >= curr.int:
-    return (prev, false)
-  return (curr.int, true)
-
 # ================ Versioned ================
 
 type
@@ -347,25 +445,14 @@ proc bottom*[T](_: type Versioned[T]): Versioned[T] =
   else:
     initVersion(T.default, 0)
 
-proc `==`[T](prev, curr: Versioned[T]): bool =
-  (prev.version == curr.version) and (prev.value == curr.value)
-
-proc `<=`*[T](a, b: Versioned[T]): bool =
-  ## a later version knows more; within one version the values decide
-  if a.version != b.version:
-    return a.version < b.version
-  when T is Lattice:
-    a.value <= b.value
-  else:
-    a.value == b.value
-
-proc merge*[T](prev, curr: Versioned[T]): Merged[Versioned[T]] =
-  if prev == curr or 
-      prev.version > curr.version:
-    return (prev, false)
+proc merge*[T](prev, curr: Versioned[T]): Merge[Versioned[T]] =
+  settle(prev, curr):
+    if prev == curr or
+        prev.version > curr.version:
+      absorbed
   if prev.version < curr.version:
-    return (curr, true)
-  contradiction(prev, curr, "version issue")
+    replaced
+  contradiction "version issue"
 
 let versionShape = rv"(shape (version v value) {v value})"
 
@@ -409,11 +496,41 @@ when isMainModule:
     foo: Numeric
     vers: Versioned[Numeric]
 
-  for v in vals.items:
+  for i, v in vals.items:
     try:
       let n = Numeric.fromValue(v)
       foo &= n
-      vers &= n.initVersion
+      vers &= n.initVersion(i)
       echo foo
     except Contradiction[Numeric] as e:
       echo e.msg
+
+  var exact: Exact
+
+  exact &= rv"foo"
+
+  echo exact
+
+  type
+    Something = object
+      a: Max
+      b: Min
+
+  proc `$`*(self: Something): string =
+    let s = (self.a.int)..(self.b.int)
+    $s
+
+  productMerge Something
+
+  var
+    a = Something(a: 10, b: 18)
+    b = Something(a: 15, b: 25)
+    c = merge(a, b)
+  
+  echo a
+  echo b
+  echo c
+
+  echo c.apply(a)
+
+  echo a
