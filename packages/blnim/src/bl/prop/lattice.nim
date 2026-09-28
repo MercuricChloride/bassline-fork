@@ -149,6 +149,7 @@ proc merge*(prev, curr: Max): Merge[Max] =
       absorbed
     replaced
 
+
 ## ================ Numeric Refinement Lattice ================
 
 type
@@ -526,7 +527,7 @@ when isMainModule:
     a = Something(a: 10, b: 18)
     b = Something(a: 15, b: 25)
     c = merge(a, b)
-  
+
   echo a
   echo b
   echo c

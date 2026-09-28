@@ -9,8 +9,8 @@
 ]##
 
 import nimcrypto/[blake2, sha2]
-import ../../core
-import ../[blmacro, ops]
+import ../../[core, ops]
+import ../blmacro
 
 refuseWith ValueError
 
@@ -57,11 +57,11 @@ proc verifies*(d: Digest, v: Value): bool =
   d.verifies(ce(v))
 
 func shape*(_: typedesc[Digest]): Value =
-  bl digest(!algo, !hash)
+  bl shape(digest(algo, hash), {algo, hash})
 
 proc fromValue*(T: typedesc[Digest], v: Value): Digest =
   var bindings: Value
-  guard T.shape.extract(v, bindings), "invalid digest shape"
+  guard extract(T.shape.toShape, v, bindings), "invalid digest shape"
   let
     algo = bindings[bl algo]
     hash = bindings[bl hash]

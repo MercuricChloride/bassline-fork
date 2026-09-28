@@ -14,7 +14,7 @@ type
     case kind*: RuleKind
     of rkWild:
       wild*: Value
-    else: discard
+    of rkLit: discard
 
   Match* = object
     shape*: Shape
@@ -22,19 +22,17 @@ type
 
 refuseWith RuleError
 
-proc toBSet*(self: openArray[Value]): BSet =
-  result = newBSet()
-  for item in self:
-    result.incl item
-
-proc toBSet*(self: BSet): BSet =
-  self
-
 proc initShape*[H](shape: Value, holes: H, wild: Value): Shape =
-  Shape(kind: rkWild, shape: shape, wild: wild, holes: toBSet(holes))
+  when H is BSet:
+    Shape(kind: rkWild, shape: shape, wild: wild, holes: holes)
+  else:
+    Shape(kind: rkWild, shape: shape, wild: wild, holes: newBSet(holes))
 
 proc initShape*[H](shape: Value, holes: H): Shape =
-  Shape(kind: rkLit, shape: shape, holes: toBSet(holes))
+  when H is BSet:
+    Shape(kind: rkLit, shape: shape, holes: holes)
+  else:
+    Shape(kind: rkLit, shape: shape, holes: newBSet(holes))
 
 proc initMatch*(self: Shape): Match =
   Match(shape: self, bindings: newBDict())
@@ -160,12 +158,16 @@ template withMatch*(self: Shape, body: untyped): untyped =
   withMatch(self, match):
     body
 
-proc extract*(self: Shape, val: Value): Value =
+proc extract*(self: Shape, val: Value, bindings: var Value): bool =
   self.withMatch:
     if bindValue(match, val) and isFilled(match):
-      initDict(match.bindings)
+      bindings = match.bindings.toValue
+      true
     else:
-      initDict()
+      false
+
+proc extract*(self: Shape, val: Value): Value =
+  guard self.extract(val, result), "failed to bind"
 
 proc extract*(self: Shape): auto =
   proc(val: Value): Value =

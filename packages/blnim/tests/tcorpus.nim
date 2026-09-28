@@ -9,7 +9,7 @@ import bl/lib/[json, blmacro]
 import ./corpus
 
 suite "ce":
-  filter ce, c:
+  filter "ce", c:
     let
       name = c.items[1].text
       value = c.items[2]
@@ -24,7 +24,7 @@ suite "ce":
         check l.values[0].toValue == value
 
 suite "reject":
-  filter reject, c:
+  filter "reject", c:
     let
       name = c.items[1].text
       bytes = c.items[2].bytes
@@ -33,7 +33,7 @@ suite "reject":
       check l.refused
 
 suite "starved":
-  filter starved, c:
+  filter "starved", c:
     let
       name = c.items[1].text
       bytes = c.items[2].bytes
@@ -44,7 +44,7 @@ suite "starved":
       check l.pending
 
 suite "reads":
-  filter reads, c:
+  filter "reads", c:
     let
       src = c.items[1].text
       value = c.items[2]
@@ -52,19 +52,19 @@ suite "reads":
       check readValue(src) == value
 
 suite "refuses":
-  filter refuses, c:
+  filter "refuses", c:
     let src = c.items[1].text
     test src.escape:
       refuses src
 
 suite "incomplete":
-  filter incomplete, c:
+  filter "incomplete", c:
     let src = c.items[1].text
     test src.escape:
       incomplete src
 
 suite "document":
-  filter document, c:
+  filter "document", c:
     let
       src = c.items[1].text
       values = c.items[2]

@@ -1,4 +1,4 @@
-import std/[strformat, sequtils, deques, sets]
+import std/[sequtils, strformat, deques, sets]
 import ../core
 import ./lattice
 
@@ -172,6 +172,10 @@ proc run*(self: Net) =
   doAssert self.primaryEvents.len == 0
   doAssert self.secondaryEvents.len == 0
 
+template run*(self: Net, body: untyped) =
+  body
+  run(self)
+
 # ================ Connections ================
 
 proc `->`*[A, B](a: A, b: B): auto {.discardable.} =
@@ -189,14 +193,14 @@ proc connectTo*(self: Prop, cell: Cell): Cell =
   cell
 
 proc connectTo*(
-    cells: openArray[Cell], 
+    cells: openArray[Cell],
     prop: Prop): Prop =
   for cell in cells:
     cell -> prop
   prop
 
 proc connectTo*(
-    prop: Prop, 
+    prop: Prop,
     cells: openArray[Cell]) =
   for cell in cells:
     prop -> cell
@@ -295,11 +299,11 @@ proc newCell*[T: ValueLattice](self: Net, _: type T): Cell =
 
 proc newProp*(
     self: Net,
-    runProc: Prop.runProc, 
+    runProc: Prop.runProc,
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
   result = Prop(
-    net: self, 
+    net: self,
     runProc: runProc,
     shouldRunProc: shouldRunProc,
     active: true)
@@ -309,7 +313,7 @@ proc newProp*(
     self: Net,
     inputs: openArray[Cell],
     outputs: openArray[Cell],
-    runProc: Prop.runProc, 
+    runProc: Prop.runProc,
     shouldRunProc: Prop.shouldRunProc = noneNull
   ): Prop =
   result = self.newProp(runProc, shouldRunProc)
@@ -407,7 +411,7 @@ when isMainModule:
       d = cell Numeric
 
   enable numbers
-  
+
   numbers.adder(a, b, c)
   numbers.multiply(b, c, d)
 
@@ -421,17 +425,17 @@ when isMainModule:
     printNumbers
 
   section "first run":
-    a &= "[1 10]"
-    b &= "7"
-    run net
+    net.run:
+      a &= "[1 10]"
+      b &= "7"
     printNumbers
 
   section "activating numbers":
-    enable numbers
-    run net
+    net.run:
+      enable numbers
     printNumbers
 
   section "updating d":
-    d &= "[98 102]"
-    run net
+    net.run:
+      d &= "[98 102]"
     printNumbers

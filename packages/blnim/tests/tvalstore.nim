@@ -5,9 +5,8 @@
 ## an insert with no transaction open, so there are no per-value txns.
 
 import std/[algorithm, sequtils, unittest]
-import bl/core
-import bl/store
-import bl/lib/[ops, blah, blmacro]
+import bl/[core, store, ops]
+import bl/lib/[blah, blmacro]
 import ./corpus
 
 # the elements: every corpus value, plus random ones

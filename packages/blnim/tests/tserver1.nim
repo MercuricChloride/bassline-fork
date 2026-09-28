@@ -23,7 +23,7 @@ proc drip(sock: AsyncSocket, bytes: seq[byte], step: int) {.async.} =
 suite "landing surface":
   test "values land in order across awkward chunk splits":
     var landed: seq[Value]
-    proc onValue(conn: Conn, m: Msg): Future[void] {.async.} =
+    proc onValue(m: Msg): Future[void] {.async.} =
       landed.add m.value
     let l = newLanding(Port(0), onValue)
     asyncCheck l.serve()
@@ -42,7 +42,7 @@ suite "landing surface":
 
   test "a value larger than one recv chunk":
     var landed: seq[Value]
-    proc onValue(conn: Conn, m: Msg): Future[void] {.async.} =
+    proc onValue(m: Msg): Future[void] {.async.} =
       landed.add m.value
     let l = newLanding(Port(0), onValue)
     asyncCheck l.serve()
@@ -58,7 +58,7 @@ suite "landing surface":
     l.close()
 
   test "a handler sends a reply back on the same connection":
-    proc onValue(conn: Conn, m: Msg): Future[void] {.async.} =
+    proc onValue(m: Msg): Future[void] {.async.} =
       discard m.reply(bl(landed(%m.value)))
     let l = newLanding(Port(0), onValue)
     asyncCheck l.serve()
@@ -80,7 +80,7 @@ suite "landing surface":
   test "malformed input closes that connection":
     var closed = false
     var codecErr = false
-    proc onValue(conn: Conn, m: Msg): Future[void] {.async.} = discard
+    proc onValue(m: Msg): Future[void] {.async.} = discard
     proc onClose(conn: Conn) = closed = true
     proc onError(conn: Conn, e: ref Exception) = codecErr = e of CodecError
     let l = newLanding(Port(0), onValue, onClose = onClose, onError = onError)
@@ -101,7 +101,7 @@ suite "landing surface":
   test "a handler bug closes only its own connection":
     var landed: seq[Value]
     var bugs = 0
-    proc onValue(conn: Conn, m: Msg): Future[void] {.async.} =
+    proc onValue(m: Msg): Future[void] {.async.} =
       if m.value == bl(boom):
         var xs: seq[int]
         discard xs[3]                    # IndexDefect from app code

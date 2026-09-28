@@ -11,7 +11,7 @@ import ./corpus
 # the elements: every corpus value, and random ones
 
 var values: seq[Value]
-filter ce, c:
+filter "ce", c:
   values.add c.items[2]
 for val in blah(500, 3):
   values.add val

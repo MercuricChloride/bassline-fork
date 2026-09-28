@@ -1,4 +1,4 @@
-## Value: cmp is CE order, and Num holds every integer
+## Value: cmp is CE order, and BNum holds every integer
 
 import std/[math, unittest]
 import bl/core

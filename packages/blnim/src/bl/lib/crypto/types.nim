@@ -1,5 +1,5 @@
-import ../../core
-import ../[blmacro, ops]
+import ../../[core, ops]
+import ../blmacro
 
 refuseWith ValueError
 
@@ -26,14 +26,14 @@ type
     sig*: Signature
 
 func shape*(_: typedesc[Signature]): Value =
-  bl signature(!scheme, !sig, !pubkey)
+  bl shape(signature(scheme, sig, pubkey), {scheme, sig, pubkey})
 
 func shape*(_: typedesc[Signed]): Value =
-  bl signed(!value, !sig)
+  bl shape(signed(value, sig), {value, sig})
 
 proc fromValue*(T: typedesc[Signature], v: Value): Signature =
   var bindings: Value
-  guard T.shape.extract(v, bindings), "invalid signature shape"
+  guard extract(T.shape.toShape, v, bindings), "invalid signature shape"
   let 
     scheme = bindings[bl scheme]
     sig = bindings[bl sig]
@@ -47,7 +47,7 @@ proc fromValue*(T: typedesc[Signature], v: Value): Signature =
 
 proc fromValue*(T: typedesc[Signed], v: Value): Signed =
   var bindings: Value
-  guard T.shape.extract(v, bindings), "invalid signed shape"
+  guard extract(T.shape.toShape, v, bindings), "invalid signed shape"
   let
     value = bindings[bl value]
     sig = Signature.fromValue bindings[bl sig]
@@ -60,11 +60,11 @@ func toValue*(self: Signed): Value =
   bl signed(%self.value, %self.sig)
 
 func shape*(_: typedesc[Keypair]): Value =
-  bl keypair(!scheme, !seed, !pubkey)
+  bl shape(keypair(scheme, seed, pubkey), {scheme, seed, pubkey})
 
 proc fromValue*(T: typedesc[Keypair], v: Value): Keypair =
   var bindings: Value
-  guard T.shape.extract(v, bindings), "invalid keypair shape"
+  guard extract(T.shape.toShape, v, bindings), "invalid keypair shape"
   let
     scheme = bindings[bl scheme]
     seed = bindings[bl seed]

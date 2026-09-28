@@ -1,2 +1,2 @@
-import ./prop/[lattice, net]
-export lattice, net
+import ./prop/[lattice, network]
+export lattice, network

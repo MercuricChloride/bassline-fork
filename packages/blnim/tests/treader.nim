@@ -37,7 +37,7 @@ proc prefixesRead(t: string): int =
       check false
 
 suite "printer":
-  filter ce, c:
+  filter "ce", c:
     let
       name = c.items[1].text
       value = c.items[2]

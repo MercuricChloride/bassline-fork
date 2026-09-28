@@ -10,7 +10,7 @@ import bl/lib/blah
 import ./corpus
 
 suite "one byte at a time":
-  filter ce, c:
+  filter "ce", c:
     let
       name = c.items[1].text
       value = c.items[2]
@@ -30,7 +30,7 @@ suite "one byte at a time":
         check landed[0] == value
       check not d.pending
 
-  filter reject, c:
+  filter "reject", c:
     let
       name = c.items[1].text
       bytes = c.items[2].bytes

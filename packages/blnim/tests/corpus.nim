@@ -10,8 +10,9 @@ let
 
 template filter*(name, val, body) =
   bind cases
+  let h = readValue(name)
   for val in cases:
-    if head(val) == bl(name):
+    if head(val) == h:
       body
 
 type Landed* = object
@@ -46,6 +47,7 @@ proc land*(bytes: openArray[byte]): Landed =
     result.refused = true
     result.why = e.msg
   result.pending = d.pending
+
 
 when isMainModule:
   let

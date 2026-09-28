@@ -1,7 +1,7 @@
 ## digests and signatures over a value's CE bytes
 
 import std/unittest
-import bl/core
+import bl/[core, ops]
 import bl/lib/[blmacro, blah]
 import bl/lib/crypto/[digest, clave]
 
@@ -15,7 +15,7 @@ let
 
 template refuses(call: untyped) =
   ## the door raises rather than returning a wrong reading
-  expect ValueError:
+  expect ValueError, RuleError:
     discard call
 
 suite "digest":

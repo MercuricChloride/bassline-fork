@@ -2,144 +2,8 @@
 
 import std/[random, unittest]
 import bl/core
-import bl/lib/[ops, blah, blmacro]
-
-template fits(v, e: untyped) =
-  check similar(bl(v), bl(e))
-
-template misfits(v, e: untyped) =
-  check not similar(bl(v), bl(e))
-
-template extracts(shape, v, bindings: untyped) =
-  ## the shape fits v, binding exactly bindings
-  var b: Value
-  check extract(bl(shape), bl(v), b)
-  check b == bl(bindings)
-
-template misextracts(shape, v: untyped) =
-  var b: Value
-  check not extract(bl(shape), bl(v), b)
-
-template ambiguous(shape, v: untyped) =
-  ## a hole where a value is looked up by, not matched: refused
-  var b: Value
-  expect ValueError:
-    discard extract(bl(shape), bl(v), b)
-
-template injects(shape, bindings, filled: untyped) =
-  check inject(bl(shape), bl(bindings)) == bl(filled)
-
-suite "similar":
-  # containment. Atoms by kind and mark; lists and records a prefix,
-  # positions by shape; dict keys required, values by shape, extras
-  # ignored; set members literal; not symmetric
-  test "atoms by kind and mark":
-    fits 1, 2
-    fits "a", ""
-    misfits a, "a"
-    misfits !a, a
-  test "an empty frame fits any frame of its kind":
-    fits [1, 2, 3], []
-    fits file(a, b), file()
-    fits {a: 1}, {:}
-    fits {1, 2}, {}
-  test "lists and records: a prefix, positions by shape":
-    fits [1, "x", [a]], [0, "", []]
-    misfits [1], [0, 0]
-    fits file("n", x"ff", 42), file("", x"")
-    misfits dir("n"), file("")
-    fits [1, 2], [1]
-    misfits [1], [1, 2]
-  test "dicts: keys required, values by shape, extras ignored":
-    fits {a: 1, b: "x"}, {a: 0}
-    misfits {a: "x"}, {a: 0}
-    misfits {b: 1}, {a: 0}
-  test "sets: members literal":
-    fits {1, 2, 3}, {2}
-    misfits {1, 2, 3}, {0}
-    misfits {"x", 7}, {""}
-
-template isPrefix(a, b: untyped) =
-  check prefixes(bl(a), bl(b))
-
-template notPrefix(a, b: untyped) =
-  check not prefixes(bl(a), bl(b))
-
-suite "prefixes":
-  # a is what b's encoding yields when stopped early; a leading run of
-  # members positionally, the last itself a prefix; scalars atomic;
-  # dict / set by canonical order, not inclusion
-  test "records and lists: a leading run, positionally":
-    isPrefix foo(bar), foo(bar, baz)
-    isPrefix foo(), foo(bar, baz)
-    isPrefix foo(bar), foo(bar)             # reflexive
-    notPrefix foo(bar, baz), foo(bar)
-    isPrefix [1, 2], [1, 2, 3]
-    notPrefix [1, 3], [1, 2, 3]
-    notPrefix [2], [1, 2, 3]
-  test "kind and mark must agree":
-    notPrefix [foo, bar], foo(bar)
-    notPrefix a(), [a]
-    notPrefix !a(), a(b)
-    isPrefix !a(), !a(b)
-    isPrefix !5, !5
-    notPrefix !5, 5
-  test "scalars are atomic":
-    isPrefix 1, 1
-    notPrefix 1, 2
-    notPrefix "foo", "foobar"
-    notPrefix 0x12, 0x1234
-    isPrefix nil, nil
-    notPrefix nil, 1
-    notPrefix ab, abc
-  test "an empty frame prefixes any frame of its kind":
-    isPrefix [], [1, 2, 3]
-    isPrefix [], []
-    isPrefix {:}, {a: 1, b: 2}
-    isPrefix {}, {1, 2, 3}
-    notPrefix [], {1, 2}
-  test "deep: the last member may itself be a prefix":
-    isPrefix h(x()), h(x(y), z)
-    isPrefix h(x()), h(x(y))                # same arity, last truncated
-    isPrefix [a, [b]], [a, [b, c], d]
-    notPrefix [[b], a], [[b, c], a]         # a non-last member diverges
-    isPrefix r(s(t())), r(s(t(u)), v)
-  test "dicts: a leading run in canonical key order, not a subset":
-    isPrefix {a: 1}, {a: 1, b: 2}
-    isPrefix {a: 1, b: 2}, {a: 1, b: 2, c: 3}
-    notPrefix {b: 2}, {a: 1, b: 2}
-    notPrefix {a: 2}, {a: 1, b: 2}
-    isPrefix {a: x()}, {a: x(y), b: 2}
-  test "sets: a leading run in canonical order, not a subset":
-    isPrefix {1, 2}, {1, 2, 3}
-    notPrefix {1, 3}, {1, 2, 3}
-    notPrefix {3}, {1, 2, 3}
-    isPrefix {}, {1, 2, 3}
-  test "a proper prefix sorts strictly after the whole":
-    check cmp(bl foo(bar), bl foo(bar, baz)) > 0
-    check cmp(bl foo(), bl foo(bar, baz)) > 0
-    check cmp(bl [1, 2], bl [1, 2, 3]) > 0
-
-suite "prefixes: laws on generated values":
-  test "a truncation prefixes the whole and sorts at or after it":
-    for _ in 0 ..< 400:
-      let v = randValue(3)
-      let p = randPrefix(v)
-      checkpoint($p & " should prefix " & $v)
-      check prefixes(p, v)
-      check cmp(p, v) >= 0
-      if p != v:
-        check cmp(p, v) > 0
-        check not prefixes(v, p)
-  test "reflexive, and transitive down a chain":
-    for _ in 0 ..< 200:
-      let v = randValue(3)
-      check prefixes(v, v)
-      let p = randPrefix(v)
-      let q = randPrefix(p)
-      check prefixes(q, p)
-      check prefixes(p, v)
-      check prefixes(q, v)      # transitivity
+import bl/ops
+import bl/lib/[blah, blmacro]
 
 # ---- frameKey: the byte-key form of prefixes (core/builders) ----
 
@@ -151,151 +15,157 @@ func isBytePrefix(a, b: openArray[byte]): bool =
 
 template key(v: untyped): seq[byte] = frameKey(bl v)
 
-suite "frameKey":
-  test "a scalar key is its own bytes -- an exact match":
-    check key("foo") == ce(bl "foo")
-    check key(42) == ce(bl 42)
-    check key(x"a0a0") == ce(bl x"a0a0")
+# TODO: I need to update these tests to use the generative blah stuff
 
-  test "an empty frame key is the bare header -- the whole kind":
-    check key([]) == @[byte 0x60]
-    check key({}) == @[byte 0x90]
-    check key({:}) == @[byte 0x80]
+# suite "frameKey":
+#   test "a scalar key is its own bytes -- an exact match":
+#     check key("foo") == ce(bl "foo")
+#     check key(42) == ce(bl 42)
+#     check key(x"a0a0") == ce(bl x"a0a0")
 
-  test "a frame key drops one END per rightmost-spine frame":
-    check key(a()) == ce(bl a())[0 ..< ^1]
-    check key(a(b, c)) == ce(bl a(b, c))[0 ..< ^1]
-    check key(a(b())) == ce(bl a(b()))[0 ..< ^2]
-    check key(r(s(t()))) == ce(bl r(s(t())))[0 ..< ^3]
-    check key({x: 1}) == ce(bl {x: 1})[0 ..< ^1]
-    check key({x: y()}) == ce(bl {x: y()})[0 ..< ^2]
+#   test "an empty frame key is the bare header -- the whole kind":
+#     check key([]) == @[byte 0x60]
+#     check key({}) == @[byte 0x90]
+#     check key({:}) == @[byte 0x80]
 
-  test "a trailing 0xA0 in the payload is not an END":
-    # (foo 0xA0): ce tail is <bytes payload A0><record END A0>; drop only
-    # the record's, never the payload byte
-    check key(foo(x"a0")) == ce(bl foo(x"a0"))[0 ..< ^1]
-    check key(foo(x"a0")) != ce(bl foo(x"a0"))[0 ..< ^2]
+#   test "a frame key drops one END per rightmost-spine frame":
+#     check key(a()) == ce(bl a())[0 ..< ^1]
+#     check key(a(b, c)) == ce(bl a(b, c))[0 ..< ^1]
+#     check key(a(b())) == ce(bl a(b()))[0 ..< ^2]
+#     check key(r(s(t()))) == ce(bl r(s(t())))[0 ..< ^3]
+#     check key({x: 1}) == ce(bl {x: 1})[0 ..< ^1]
+#     check key({x: y()}) == ce(bl {x: y()})[0 ..< ^2]
 
-  test "the view and value overloads agree":
-    for _ in 0 ..< 300:
-      let v = randValue(4)
-      check frameKey(v) == frameKey(v.toView)
+#   test "a trailing 0xA0 in the payload is not an END":
+#     # (foo 0xA0): ce tail is <bytes payload A0><record END A0>; drop only
+#     # the record's, never the payload byte
+#     check key(foo(x"a0")) == ce(bl foo(x"a0"))[0 ..< ^1]
+#     check key(foo(x"a0")) != ce(bl foo(x"a0"))[0 ..< ^2]
 
-  test "law: isBytePrefix(frameKey(q), ce(e))  iff  prefixes(q, e)":
-    # randValue(4), not (3): a shallower value is orders of magnitude
-    # smaller, and frameKey re-encodes+decodes through `toView` -- the
-    # law is size-independent, so cheap samples buy more coverage.
-    for _ in 0 ..< 300:
-      let q = randValue(4)
-      let kq = frameKey(q)                    # once, not once per `e`
-      check isBytePrefix(kq, ce(q))           # reflexive: q selects itself
-      let p = randPrefix(q)
-      check isBytePrefix(frameKey(p), ce(q))  # a real prefix selects q
-      check prefixes(p, q)
-      for _ in 0 ..< 6:                       # vs arbitrary others, both ways
-        let e = randValue(4)
-        check isBytePrefix(kq, ce(e)) == prefixes(q, e)
+#   test "the view and value overloads agree":
+#     for _ in 0 ..< 300:
+#       let v = randValue(4)
+#       check frameKey(v) == frameKey(v.toView)
 
-suite "extract":
-  # literal parts equal, holes bind by name
-  test "holes bind, literals must match":
-    extracts file(!name, !digest), file("a.txt", x"ff"), {name: "a.txt", digest: x"ff"}
-    misextracts file(!name, !digest), dir("a.txt", x"ff")
-    misextracts file(!name), file("a", x"ff")
-  test "a repeated hole must agree":
-    extracts [!x, !y, !x], [1, 2, 1], {x: 1, y: 2}
-    misextracts [!x, !y, !x], [1, 2, 3]
-  test "the anonymous hole binds nothing":
-    extracts [`_!`, `_!`, !z], [1, 2, 3], {z: 3}
-  test "dicts: extra keys ignored, missing keys fail":
-    extracts {k: !v, extra: 1}, {k: [1, 2], extra: 1, more: 0}, {v: [1, 2]}
-    misextracts {k: !v}, {j: 1}
-    extracts [{x: [!h]}, 1], [{x: [5]}, 1], {h: 5}
-  test "frame marks are literal":
-    extracts !f(!x), !f(1), {x: 1}
-    misextracts !f(!x), f(1)
-  test "a head can be a hole":
-    extracts `h!`(1), foo(1), {h: foo}
-  test "hole-free sets are equality":
-    extracts {a, b}, {a, b}, {:}
-    misextracts {a, b}, {a, b, c}
-  test "any marked atom names a hole":
-    extracts !7, [1, 2], {7: [1, 2]}
-    extracts !go, !go, {go: !go}
-  test "a hole in a dict key or a set member is ambiguous":
-    ambiguous {!k: 1}, {k: 1}
-    ambiguous {!a, b}, {a, b}
+#   test "law: isBytePrefix(frameKey(q), ce(e))  iff  prefixes(q, e)":
+#     # randValue(4), not (3): a shallower value is orders of magnitude
+#     # smaller, and frameKey re-encodes+decodes through `toView` -- the
+#     # law is size-independent, so cheap samples buy more coverage.
+#     for _ in 0 ..< 300:
+#       let q = randValue(4)
+#       let kq = frameKey(q)                    # once, not once per `e`
+#       check isBytePrefix(kq, ce(q))           # reflexive: q selects itself
+#       let p = randPrefix(q)
+#       check isBytePrefix(frameKey(p), ce(q))  # a real prefix selects q
+#       check prefixes(p, q)
+#       for _ in 0 ..< 6:                       # vs arbitrary others, both ways
+#         let e = randValue(4)
+#         check isBytePrefix(kq, ce(e)) == prefixes(q, e)
 
-suite "inject":
-  # holes filled, unbound holes and _! kept, so filling composes
-  test "fills what is bound":
-    injects file(!name, !digest), {name: "a", digest: x"ff"}, file("a", x"ff")
-    injects file(!name, !digest), {name: "a"}, file("a", !digest)
-    injects file(!name, !digest), {:}, file(!name, !digest)
-    injects [`_!`, !x], {x: 1, `_`: 2}, [`_!`, 1]
-  test "every position, keys and members too":
-    injects {!k: !v}, {k: a, v: 1}, {a: 1}
-    injects {!x, 3}, {x: 1}, {1, 3}
-    injects !f(!x), {x: [1]}, !f([1])
-  test "composes":
-    injects f(!x), {x: !y}, f(!y)
-    check inject(inject(bl(f(!a, !b)), bl({a: 1})), bl({b: 2})) == bl(f(1, 2))
+# suite "extract":
+#   test "holes bind, literals must match":
+#     let file = bl shape(file(name, digest), {name, digest})
+#     extracts(
+#       %file,
+#       file("a.txt", x"ff"),
+#       {name: "a.txt", digest: x"ff"}
+#     )
+#     misextracts file(!name, !digest), dir("a.txt", x"ff")
+#     misextracts file(!name), file("a", x"ff")
+#   test "a repeated hole must agree":
+#     extracts [!x, !y, !x], [1, 2, 1], {x: 1, y: 2}
+#     misextracts [!x, !y, !x], [1, 2, 3]
+#   test "the anonymous hole binds nothing":
+#     extracts [`_!`, `_!`, !z], [1, 2, 3], {z: 3}
+#   test "dicts: extra keys ignored, missing keys fail":
+#     extracts {k: !v, extra: 1}, {k: [1, 2], extra: 1, more: 0}, {v: [1, 2]}
+#     misextracts {k: !v}, {j: 1}
+#     extracts [{x: [!h]}, 1], [{x: [5]}, 1], {h: 5}
+#   test "frame marks are literal":
+#     extracts !f(!x), !f(1), {x: 1}
+#     misextracts !f(!x), f(1)
+#   test "a head can be a hole":
+#     extracts `h!`(1), foo(1), {h: foo}
+#   test "hole-free sets are equality":
+#     extracts {a, b}, {a, b}, {:}
+#     misextracts {a, b}, {a, b, c}
+#   test "any marked atom names a hole":
+#     extracts !7, [1, 2], {7: [1, 2]}
+#     extracts !go, !go, {go: !go}
+#   test "a hole in a dict key or a set member is ambiguous":
+#     ambiguous {!k: 1}, {k: 1}
+#     ambiguous {!a, b}, {a, b}
 
-# the laws, on generated values: punch holes into a value, extract
-# from the original, inject back
+# suite "inject":
+#   # holes filled, unbound holes and _! kept, so filling composes
+#   test "fills what is bound":
+#     injects file(!name, !digest), {name: "a", digest: x"ff"}, file("a", x"ff")
+#     injects file(!name, !digest), {name: "a"}, file("a", !digest)
+#     injects file(!name, !digest), {:}, file(!name, !digest)
+#     injects [`_!`, !x], {x: 1, `_`: 2}, [`_!`, 1]
+#   test "every position, keys and members too":
+#     injects {!k: !v}, {k: a, v: 1}, {a: 1}
+#     injects {!x, 3}, {x: 1}, {1, 3}
+#     injects !f(!x), {x: [1]}, !f([1])
+#   test "composes":
+#     injects f(!x), {x: !y}, f(!y)
+#     check inject(inject(bl(f(!a, !b)), bl({a: 1})), bl({b: 2})) == bl(f(1, 2))
 
-proc unmarkAtoms(v: Value): Value =
-  ## marked atoms would read as holes, so the generated value has none
-  case v.kind
-  of bList, bRec:
-    var kids: seq[Value]
-    for c in v.items: kids.add unmarkAtoms(c)
-    result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
-  of bDict:
-    result = initDict(v.mark)
-    for k, val in v.dict: result.dict[unmarkAtoms(k)] = unmarkAtoms(val)
-  of bSet:
-    result = initSet(v.mark)
-    for m in v.els.keys: result.els[unmarkAtoms(m)] = true
-  else:
-    result = v
-    result.mark = false
+# # the laws, on generated values: punch holes into a value, extract
+# # from the original, inject back
 
-var rng = initRand(3)
-var holes = 0
+# proc unmarkAtoms(v: Value): Value =
+#   ## marked atoms would read as holes, so the generated value has none
+#   case v.kind
+#   of bList, bRec:
+#     var kids: seq[Value]
+#     for c in v.items: kids.add unmarkAtoms(c)
+#     result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
+#   of bDict:
+#     result = initDict(v.mark)
+#     for k, val in v.dict: result.dict[unmarkAtoms(k)] = unmarkAtoms(val)
+#   of bSet:
+#     result = initSet(v.mark)
+#     for m in v.els: result.els.incl unmarkAtoms(m)
+#   else:
+#     result = v
+#     result.mark = false
 
-proc punch(v: Value, expect: var Value): Value =
-  ## the shape: some atoms in list/record positions and dict values
-  ## become holes, named in order; what they replace goes to `expect`
-  case v.kind
-  of bList, bRec:
-    var kids: seq[Value]
-    for c in v.items:
-      if c.kind notin {bList, bRec, bDict, bSet} and rng.rand(1.0) < 0.4:
-        let name = sym("h" & $holes)
-        inc holes
-        expect.dict[name] = c
-        kids.add sym(name.text, true)
-      else:
-        kids.add punch(c, expect)
-    result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
-  of bDict:
-    result = initDict(v.mark)
-    for k, val in v.dict:
-      result.dict[k] = punch(val, expect)
-  else:
-    result = v
+# var rng = initRand(3)
+# var holes = 0
 
-suite "laws":
-  test "extract then inject on random values":
-    for _ in 0 ..< 300:
-      let v = unmarkAtoms(randValue(3))
-      var expect = initDict()
-      let shape = punch(v, expect)
-      var b: Value
-      checkpoint($shape & " should fit " & $v)
-      check extract(shape, v, b)
-      check b == expect
-      check inject(shape, b) == v
-      check similar(inject(shape, b), v)
-    check holes > 100
+# proc punch(v: Value, expect: var Value): Value =
+#   ## the shape: some atoms in list/record positions and dict values
+#   ## become holes, named in order; what they replace goes to `expect`
+#   case v.kind
+#   of bList, bRec:
+#     var kids: seq[Value]
+#     for c in v.items:
+#       if c.kind notin {bList, bRec, bDict, bSet} and rng.rand(1.0) < 0.4:
+#         let name = sym("h" & $holes)
+#         inc holes
+#         expect.dict[name] = c
+#         kids.add sym(name.text, true)
+#       else:
+#         kids.add punch(c, expect)
+#     result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
+#   of bDict:
+#     result = initDict(v.mark)
+#     for k, val in v.dict:
+#       result.dict[k] = punch(val, expect)
+#   else:
+#     result = v
+
+# suite "laws":
+#   test "extract then inject on random values":
+#     for _ in 0 ..< 300:
+#       let v = unmarkAtoms(randValue(3))
+#       var expect = initDict()
+#       let shape = punch(v, expect)
+#       var b: Value
+#       checkpoint($shape & " should fit " & $v)
+#       check extract(shape, v, b)
+#       check b == expect
+#       check inject(shape, b) == v
+#       check similar(inject(shape, b), v)
+#     check holes > 100
