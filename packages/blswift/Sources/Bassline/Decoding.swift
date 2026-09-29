@@ -11,11 +11,15 @@
 // early as the bytes allow, and the first fault in stream order is the one
 // reported.
 
-public struct DecodingLimits: Sendable, Hashable {
+/// The line drawn at a boundary. The decoder refuses values past it, the
+/// encoder refuses to produce them, and the text reader refuses text nested
+/// past `maxDepth`, so peers that agree on limits never produce what the
+/// other refuses.
+public struct Limits: Sendable, Hashable {
     /// Frames open at once. The spec asks every decoder to have one.
     public var maxDepth: Int
-    /// Largest encoded value accepted. CE can express scalars up to ~4 GiB;
-    /// a receiver draws its own line at its boundary.
+    /// Largest encoded value. CE can express scalars up to ~4 GiB; a
+    /// receiver draws its own line at its boundary.
     public var maxValueBytes: Int
 
     public init(maxDepth: Int = 64, maxValueBytes: Int = 100 * 1024 * 1024) {
@@ -23,10 +27,10 @@ public struct DecodingLimits: Sendable, Hashable {
         self.maxValueBytes = maxValueBytes
     }
 
-    public static var `default`: DecodingLimits { DecodingLimits() }
+    public static var `default`: Limits { Limits() }
 
     /// One-shot decoding already holds all of its input in memory.
-    func admitting(_ byteCount: Int) -> DecodingLimits {
+    func admitting(_ byteCount: Int) -> Limits {
         var limits = self
         limits.maxValueBytes = max(maxValueBytes, byteCount)
         return limits
@@ -81,7 +85,7 @@ public struct DecodeError: Error, Hashable, Sendable, CustomStringConvertible {
 /// Once it throws, the decoder stays failed and rethrows the same error: the
 /// encoding has no framing to resynchronise on.
 public struct StreamDecoder: Sendable {
-    public let limits: DecodingLimits
+    public let limits: Limits
 
     private var buffer: [UInt8] = []
     /// Index in `buffer` of the first byte not yet part of a landed value or open frame.
@@ -91,7 +95,7 @@ public struct StreamDecoder: Sendable {
     private var stack: [OpenFrame] = []
     private var failure: DecodeError?
 
-    public init(limits: DecodingLimits = .default) {
+    public init(limits: Limits = .default) {
         self.limits = limits
     }
 
@@ -318,7 +322,7 @@ public struct StreamDecoder: Sendable {
 
 extension Value {
     /// Decodes exactly one value from `bytes`.
-    public init(decoding bytes: some Collection<UInt8>, limits: DecodingLimits = .default) throws(DecodeError) {
+    public init(decoding bytes: some Collection<UInt8>, limits: Limits = .default) throws(DecodeError) {
         var decoder = StreamDecoder(limits: limits.admitting(bytes.count))
         decoder.append(contentsOf: bytes)
         guard let value = try decoder.next() else {
@@ -335,7 +339,7 @@ extension Value {
     }
 
     /// Decodes every value in `bytes`, which must end on a value boundary.
-    public static func decodeAll(_ bytes: some Collection<UInt8>, limits: DecodingLimits = .default) throws(DecodeError) -> [Value] {
+    public static func decodeAll(_ bytes: some Collection<UInt8>, limits: Limits = .default) throws(DecodeError) -> [Value] {
         var decoder = StreamDecoder(limits: limits.admitting(bytes.count))
         decoder.append(contentsOf: bytes)
         var values: [Value] = []

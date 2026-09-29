@@ -28,7 +28,7 @@ struct CorpusFileTests {
 
     @Test func reencodingTheRecordsGivesTheFileBack() throws {
         var out: [UInt8] = []
-        for record in try Corpus.records() { record.encode(into: &out) }
+        for record in try Corpus.records() { try record.encode(into: &out) }
         let file = try Array(Data(contentsOf: Corpus.directory.appending(path: "corpus.blb")))
         #expect(out == file)
     }
@@ -38,7 +38,7 @@ struct CorpusFileTests {
 struct BinaryCorpusTests {
     @Test(arguments: try Corpus.ce())
     func ce(_ c: CECase) throws {
-        #expect(c.value.encoded() == c.bytes)
+        #expect(try c.value.encoded() == c.bytes)
         #expect(try Value(decoding: c.bytes) == c.value)
 
         // one byte at a time: nothing lands until the last byte, then exactly one value

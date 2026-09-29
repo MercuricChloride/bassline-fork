@@ -5,23 +5,23 @@ import Testing
 struct ValueTests {
     // MARK: Identity
 
-    @Test func unicodeNormalizationFormsAreDistinctValues() {
+    @Test func unicodeNormalizationFormsAreDistinctValues() throws {
         let nfc = "\u{e9}", nfd = "e\u{301}"
         #expect(nfc == nfd, "Swift's String equality treats these as the same")
 
         #expect(Value.text(nfc) != Value.text(nfd))
-        #expect(Value.text(nfc).encoded() != Value.text(nfd).encoded())
+        #expect(try Value.text(nfc).encoded() != Value.text(nfd).encoded())
         #expect(Symbol(nfc) != Symbol(nfd))
         let set = Value.Set([.text(nfc), .text(nfd)])
         #expect(set.count == 2)
         #expect(Swift.Set([Value.text(nfc), Value.text(nfd)]).count == 2)
     }
 
-    @Test func markIsOneBitAndNeverEqualToUnmarked() {
+    @Test func markIsOneBitAndNeverEqualToUnmarked() throws {
         let go = Value.symbol("go")
         #expect(go != go.marked)
         #expect(go.marked.unmarked == go)
-        let (a, b) = (go.encoded(), go.marked.encoded())
+        let (a, b) = (try go.encoded(), try go.marked.encoded())
         #expect(a[0] ^ b[0] == 0x08)
         #expect(a.dropFirst() == b.dropFirst())
     }
@@ -49,7 +49,7 @@ struct ValueTests {
         #expect(Int8(exactly: Value.Integer.int(128)) == nil)
         #expect(UInt8(exactly: Value.Integer.int(-1)) == nil)
         #expect(UInt64(exactly: Value.Integer(UInt64.max)) == .max)
-        #expect(try Value(decoding: Value.integer(Int128.min).encoded()).integer == Value.Integer(Int128.min))
+        #expect(try Value(decoding: try Value.integer(Int128.min).encoded()).integer == Value.Integer(Int128.min))
     }
 
     @Test(arguments: ["+5", "-0", "007", "0_0", "", "-", " 5", "5 ", "1.5", "\u{661}", "-01"])
@@ -108,12 +108,12 @@ struct ValueTests {
         #expect(dict.description == "{\"b\": nil}")
     }
 
-    @Test func collectionsKeepCanonicalOrder() {
+    @Test func collectionsKeepCanonicalOrder() throws {
         var dict = Value.Dict()
         dict[.symbol("ab")] = 2
         dict[.symbol("b")] = 1
         #expect(Array(dict.keys) == [.symbol("b"), .symbol("ab")])
-        #expect(Value.dict(dict).encoded() == [0x80, 0x41, 0x62, 0x21, 0x31, 0x42, 0x61, 0x62, 0x21, 0x32, 0xA0])
+        #expect(try Value.dict(dict).encoded() == [0x80, 0x41, 0x62, 0x21, 0x31, 0x42, 0x61, 0x62, 0x21, 0x32, 0xA0])
 
         var set: Value.Set = [3, 1]
         #expect(set.insert(2).inserted)

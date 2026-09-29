@@ -176,7 +176,7 @@ struct SplitMix64: RandomNumberGenerator {
 
 /// Feeds `bytes` to a fresh decoder and drains it, returning what landed and
 /// the error, if any. `chunked` feeds one byte at a time.
-func land(_ bytes: [UInt8], chunked: Bool = false, limits: DecodingLimits = .default) -> (values: [Value], error: DecodeError?, pending: Bool) {
+func land(_ bytes: [UInt8], chunked: Bool = false, limits: Limits = .default) -> (values: [Value], error: DecodeError?, pending: Bool) {
     var decoder = StreamDecoder(limits: limits)
     var values: [Value] = []
     do {

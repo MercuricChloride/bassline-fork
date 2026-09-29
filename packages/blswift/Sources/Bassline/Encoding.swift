@@ -4,6 +4,9 @@
 // Scalars state their payload length; frames list their members and close
 // with END (0xA0). A Value is canonical by construction (dicts and sets are
 // kept sorted, integers are validated), so encoding is a single walk.
+//
+// The encoder holds itself to the same Limits as the decoder: it refuses to
+// produce any value that a decoder with those limits would refuse.
 
 enum Wire {
     static let end: UInt8 = 0xA0
@@ -13,62 +16,113 @@ enum Wire {
     static let largeEscape: UInt8 = 0xFF
 }
 
+/// Why a value couldn't be encoded.
+public struct EncodeError: Error, Hashable, Sendable, CustomStringConvertible {
+    public enum Reason: String, Sendable, CaseIterable {
+        /// Frames nested past `Limits.maxDepth`.
+        case tooDeep = "too-deep"
+        /// An encoding longer than `Limits.maxValueBytes`, or a scalar past the 4 GiB format ceiling.
+        case tooLarge = "too-large"
+    }
+
+    public var reason: Reason
+
+    public init(_ reason: Reason) {
+        self.reason = reason
+    }
+
+    public var description: String { reason.rawValue }
+}
+
 extension Value {
     /// The canonical encoding: the bytes that are this value's identity.
-    public func encoded() -> [UInt8] {
+    public func encoded(limits: Limits = .default) throws(EncodeError) -> [UInt8] {
         var out: [UInt8] = []
-        encode(into: &out)
+        try encode(into: &out, limits: limits)
         return out
     }
 
     /// Appends the canonical encoding to `out`. Values written back to back
     /// form a stream that ``StreamDecoder`` reads one at a time.
     ///
-    /// This does not enforce a depth limit; a receiver may refuse values
-    /// nested deeper than its own limit (64 by default here and in blnim).
-    public func encode(into out: inout [UInt8]) {
-        let header = kind.rawValue << 4 | (isMarked ? Wire.markBit : 0)
-        switch content {
+    /// Throws, leaving `out` as it was, for a value a decoder with the same
+    /// `limits` would refuse.
+    public func encode(into out: inout [UInt8], limits: Limits = .default) throws(EncodeError) {
+        let writer = CanonicalWriter(limits: limits, start: out.count)
+        do {
+            try writer.write(self, into: &out, depth: 0)
+        } catch {
+            out.removeSubrange(writer.start...)
+            throw error
+        }
+    }
+}
+
+private struct CanonicalWriter {
+    let limits: Limits
+    /// Where this value's encoding began in the output.
+    let start: Int
+
+    func write(_ value: Value, into out: inout [UInt8], depth: Int) throws(EncodeError) {
+        let header = value.kind.rawValue << 4 | (value.isMarked ? Wire.markBit : 0)
+        switch value.content {
         case .null:
+            try reserve(1, in: out)
             out.append(header)
         case .integer(let integer):
             if case .big(let spelling) = integer {
-                precondition(Integer.isCanonicalSpelling(spelling.utf8), "non-canonical integer spelling: \(spelling)")
+                precondition(Value.Integer.isCanonicalSpelling(spelling.utf8), "non-canonical integer spelling: \(spelling)")
             }
-            Self.appendScalar(header, integer.spelling.utf8, to: &out)
+            try scalar(header, integer.spelling.utf8, into: &out)
         case .text(let text):
-            Self.appendScalar(header, text.utf8, to: &out)
+            try scalar(header, text.utf8, into: &out)
         case .symbol(let symbol):
-            Self.appendScalar(header, symbol.rawValue.utf8, to: &out)
+            try scalar(header, symbol.rawValue.utf8, into: &out)
         case .bytes(let bytes):
-            Self.appendScalar(header, bytes, to: &out)
+            try scalar(header, bytes, into: &out)
         case .list(let items):
-            out.append(header)
-            for item in items { item.encode(into: &out) }
-            out.append(Wire.end)
+            try open(header, depth: depth, into: &out)
+            for item in items { try write(item, into: &out, depth: depth + 1) }
+            try close(into: &out)
         case .record(let head, let fields):
-            out.append(header)
-            head.encode(into: &out)
-            for field in fields { field.encode(into: &out) }
-            out.append(Wire.end)
+            try open(header, depth: depth, into: &out)
+            try write(head, into: &out, depth: depth + 1)
+            for field in fields { try write(field, into: &out, depth: depth + 1) }
+            try close(into: &out)
         case .dict(let dict):
-            out.append(header)
-            for (key, value) in dict {
-                key.encode(into: &out)
-                value.encode(into: &out)
+            try open(header, depth: depth, into: &out)
+            for (key, item) in dict {
+                try write(key, into: &out, depth: depth + 1)
+                try write(item, into: &out, depth: depth + 1)
             }
-            out.append(Wire.end)
+            try close(into: &out)
         case .set(let set):
-            out.append(header)
-            for member in set { member.encode(into: &out) }
-            out.append(Wire.end)
+            try open(header, depth: depth, into: &out)
+            for member in set { try write(member, into: &out, depth: depth + 1) }
+            try close(into: &out)
         }
     }
 
+    /// `depth` counts the frames around this one, as the decoder's stack
+    /// does, and the checks run in the decoder's order: size, then depth.
+    private func open(_ header: UInt8, depth: Int, into out: inout [UInt8]) throws(EncodeError) {
+        try reserve(1, in: out)
+        guard depth < limits.maxDepth else { throw EncodeError(.tooDeep) }
+        out.append(header)
+    }
+
+    private func close(into out: inout [UInt8]) throws(EncodeError) {
+        try reserve(1, in: out)
+        out.append(Wire.end)
+    }
+
     /// Header, length in the smallest form that fits, then the payload.
-    private static func appendScalar(_ header: UInt8, _ payload: some Collection<UInt8>, to out: inout [UInt8]) {
+    private func scalar(_ header: UInt8, _ payload: some Collection<UInt8>, into out: inout [UInt8]) throws(EncodeError) {
         let length = payload.count
-        precondition(length <= Int(UInt32.max), "scalar payload over 4 GiB can't be encoded")
+        guard length <= Int(UInt32.max) else { throw EncodeError(.tooLarge) }
+        let headerLength = length < 7 ? 1 : length < 255 ? 2 : 6
+        try reserve(headerLength + length, in: out)
+
         if length < 7 {
             out.append(header | UInt8(length))
         } else if length < 255 {
@@ -82,5 +136,11 @@ extension Value {
                                     UInt8(truncatingIfNeeded: n >> 8), UInt8(truncatingIfNeeded: n)])
         }
         out.append(contentsOf: payload)
+    }
+
+    /// The decoder's size rule, applied before writing: the value's whole
+    /// encoding may not pass `maxValueBytes`.
+    private func reserve(_ count: Int, in out: [UInt8]) throws(EncodeError) {
+        if out.count - start + count > limits.maxValueBytes { throw EncodeError(.tooLarge) }
     }
 }

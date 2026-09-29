@@ -4,7 +4,7 @@ extension AsyncSequence where Element == UInt8 {
     /// ```swift
     /// for try await value in url.resourceBytes.basslineValues() { … }
     /// ```
-    public func basslineValues(limits: DecodingLimits = .default) -> AsyncBasslineValues<Self> {
+    public func basslineValues(limits: Limits = .default) -> AsyncBasslineValues<Self> {
         AsyncBasslineValues(base: self, limits: limits)
     }
 }
@@ -17,7 +17,7 @@ public struct AsyncBasslineValues<Base: AsyncSequence>: AsyncSequence where Base
     public typealias Failure = any Error
 
     let base: Base
-    let limits: DecodingLimits
+    let limits: Limits
 
     public func makeAsyncIterator() -> AsyncIterator {
         AsyncIterator(base: base.makeAsyncIterator(), decoder: StreamDecoder(limits: limits))

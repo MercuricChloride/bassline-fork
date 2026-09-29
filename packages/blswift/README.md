@@ -9,9 +9,9 @@ import Bassline
 
 let message: Value = .record("msg", "hello", 42, ["k": .symbol("v")], Value.symbol("go").marked)
 message.description      // (msg "hello" 42 {"k": v} go!)
-message.encoded()        // [0x70, 0x43, 0x6d, 0x73, 0x67, …, 0xa0]
+try message.encoded()    // [0x70, 0x43, 0x6d, 0x73, 0x67, …, 0xa0]
 
-let same = try Value(decoding: message.encoded())
+let same = try Value(decoding: try message.encoded())
 same == message          // true — identity is the canonical bytes
 ```
 
@@ -20,13 +20,12 @@ same == message          // true — identity is the canonical bytes
 - [Design notes](#design-notes)
 - [Testing](#testing)
 - [Limitations and future work](#limitations-and-future-work)
-- [Notes on bassline itself](#notes-on-bassline-itself)
 
 ## Requirements
 
-- Swift tools 6.3 or later, Swift 6 language mode.
-- Platforms `.v26`: macOS, iOS, visionOS, tvOS and watchOS.
-- No dependencies. The library doesn't import Foundation; only the tests do.
+- Swift tools 6.3 or later, Swift 6 language mode
+- Platforms `.v26`: macOS, iOS
+- Foundation for testing
 
 Add it to an Xcode project through **File ▸ Add Package Dependencies ▸ Add Local…**, or from another package:
 
@@ -98,7 +97,7 @@ Value.Integer(spelling: "007")            // nil — only canonical spellings
 
 ### Dicts and sets
 
-`Value.Dict` and `Value.Set` keep their members in canonical order, so iterating, printing and encoding them is deterministic from run to run. (Swift's own `Dictionary` iterates in a different order in every process.)
+`Value.Dict` and `Value.Set` keep their members in canonical order, so iterating, printing and encoding them is deterministic from run to run. (Swift's own `Dictionary` iterates in a different order in every process.) Lookups, inserts and removals are O(log n), copies are O(1), and editing a copy only copies the few nodes on the edited path. See [collections](#collections-a-copy-on-write-b-tree).
 
 ```swift
 var dict: Value.Dict = [0: "zero", 1: "one"]
@@ -112,17 +111,33 @@ set.insert(4).inserted  // true
 set.contains(2)         // O(log n)
 ```
 
-Duplicate keys in a dict literal trap, as they do for `Swift.Dictionary`. Duplicate members in a set literal also trap, matching the text reader, which refuses `{1 1}`. `init(_:)` from a sequence deduplicates instead (last write wins for dicts).
+Duplicate keys in a dict literal trap, as they do for `Swift.Dictionary`. Duplicate members in a set literal also trap, matching the text reader, which refuses `{1 1}`. `init(_:)` from a sequence deduplicates instead (last write wins for dicts). Reaching a position (`dict[index]`) is O(log n); iterating is O(1) per element.
+
+### Editing in place
+
+Pulling a payload out with `if case .dict(var d) = value.content` leaves the enum holding a second reference, so the first edit to `d` copies the whole dict. Use the mutators instead. They move the payload out first, so edits land on the only reference, and they compose with `Value.Dict`'s subscript, which also edits in place:
+
+```swift
+value.withDict { dict in
+    dict[.symbol("users")]?.withList { $0.append(.record("user", 1)) }
+    dict[.symbol("count")] = 1
+}
+request.withRecord { head, fields in fields.append(2) }   // the mark is kept
+```
+
+`withDict`, `withSet`, `withList` and `withRecord` return `nil` without calling the closure when the value is another kind.
 
 ### Binary encoding
 
 ```swift
-let bytes: [UInt8] = value.encoded()
-value.encode(into: &buffer)              // append; back-to-back values form a stream
+let bytes: [UInt8] = try value.encoded()
+try value.encode(into: &buffer)          // append; back-to-back values form a stream
 
 let one = try Value(decoding: bytes)     // exactly one value (Data works too)
 let all = try Value.decodeAll(stream)    // every value, ending on a boundary
 ```
+
+Both directions honour the same `Limits` (`maxDepth`, default 64, and `maxValueBytes`, default 100 MiB). The encoder throws `EncodeError` (`too-deep` or `too-large`) for any value a decoder with the same limits would refuse, and leaves the buffer untouched when it does. Pass `limits:` to either side to raise or lower the line.
 
 Decoding throws a typed `DecodeError` with a `reason` and a stream `offset`. The reasons' raw values are the corpus's names for them:
 
@@ -137,7 +152,7 @@ too-deep  too-large  truncated  trailing-bytes
 `StreamDecoder` takes bytes however they arrive. It tells apart bytes that are **wrong**, which it refuses by throwing, from bytes that are only **the start of a value**, which it waits on by returning `nil`:
 
 ```swift
-var decoder = StreamDecoder(limits: DecodingLimits(maxDepth: 64, maxValueBytes: 1 << 20))
+var decoder = StreamDecoder(limits: Limits(maxDepth: 64, maxValueBytes: 1 << 20))
 decoder.append(contentsOf: chunk)          // any Sequence<UInt8>, or a Span<UInt8>
 while let value = try decoder.next() {     // nil: waiting for more bytes
     handle(value)
@@ -255,6 +270,30 @@ Wherever possible, a `Value` can't hold something non-canonical:
 
 The encoder is therefore a plain walk that can't emit invalid bytes. Swift's value semantics also make cycles impossible, which the spec requires.
 
+### Collections: a copy-on-write B-tree
+
+Why not just make `Dict` and `Set` classes? The slow part of a sorted array is shifting elements on insert, and a class has the same cost. What a class would change is sharing: editing a dict inside one `Value` would change it inside every other `Value` holding it. Keys could also be mutated while inside a set or dict, breaking its order. `Sendable` would need locks, and a dict could contain itself, which the spec forbids. blnim uses refs because assigning a Nim `seq` deep-copies; Swift arrays are already copy-on-write, so that reason doesn't carry over.
+
+So the storage is a B-tree (`CanonicalTree`) whose **nodes** are classes while the tree keeps value semantics:
+
+- A mutation makes the path it touches uniquely referenced (`isKnownUniquelyReferenced`), copying only those nodes. Everything else stays shared with other copies of the tree.
+- Nodes hold up to 63 elements, so a collection of up to 63 members is a single sorted array.
+- Each node records its subtree's size, so the element at a given position is found in O(log n). That keeps `Dict` and `Set` random-access collections.
+- The decoder, which gets members already in order, builds densely packed trees in O(n) without comparing anything.
+
+Release-build measurements with 100k entries, against the earlier sorted-array version:
+
+| operation | sorted array | B-tree | `Swift.Dictionary` |
+| --- | --- | --- | --- |
+| insert 100k keys one at a time | 1,686 ms | 69 ms | 16 ms |
+| `Dict(pairs)` | 1,703 ms | 78 ms | – |
+| 100 edits to a shared copy | 96 ms | 0.17 ms | – |
+| 100 naive edits through `value.content` | 97 ms | 0.13 ms | – |
+| look up every key | 51 ms | 60 ms | 8 ms |
+| encode / decode | 3.6 / 7.7 ms | 5.4 / 9.6 ms | – |
+
+Full traversals cost about 1.3–1.5× what a flat array does; everything that mutates got dramatically cheaper. Apple's own B-tree collections (`SortedSet` and `SortedDictionary` in swift-collections) are the same idea, but they're still behind an unstable trait. Swapping them in later would only change the private storage.
+
 ### Silence vs stated absence
 
 Swift's `Optional<Value>` maps onto the model's three states directly. `nil` is silence and `.null` is stated absence, so `dict[k] = nil` removes a key while `dict[k] = .null` asserts that its value is absent. The bridge follows suit: `Optional.none` becomes `.null`.
@@ -264,7 +303,7 @@ Swift's `Optional<Value>` maps onto the model's three states directly. `nil` is 
 - **Resumable, no recursion.** It is an explicit-stack state machine, so feeding it one byte at a time costs the same as feeding it everything at once. That matters because `AsyncBytes` delivers bytes one at a time. Deep nesting can't overflow the call stack either.
 - **Ordering checked on the raw bytes.** Set and dict ordering is checked on the bytes as they arrived, without re-encoding anything.
 - **Limits.**
-  - The depth limit (default 64, matching blnim) is required by the spec.
+  - The depth limit (default 64, matching blnim) is required by the spec. The encoder and text reader enforce the same `Limits`, and the encoder checks size before depth just as the decoder does, so a refused value gets the same reason on both sides (property-tested).
   - The size limit (default 100 MiB) is judged from headers alone, so the verdict doesn't depend on how the input was chunked. A 4 GiB length header is refused before any payload arrives.
   - One-shot decoding raises the size limit to the input's length, since the caller already holds those bytes.
 - **Precedence.** The first fault in stream order is the one reported. One-shot decoding reads everything before complaining about extra values. That way `[]` followed by a stray END reports `end-at-top`, and `trailing-bytes` only means that well-formed values followed.
@@ -276,7 +315,7 @@ With the `.v26` floor, the decoder checks UTF-8 with `UTF8Span(validating:)`, wh
 
 ### Text reader
 
-- **`Value(reading:)` requires exactly one value.** It reads the whole document first and then insists on exactly one value, like the one-shot binary decode. So `go !` is _incomplete_ (the trailing `!` is waiting for a frame) while `1 2` is _refused_. `""` is refused as "not one value"; `readDocument("")` returns `[]`.
+- **`Value(reading:)` requires exactly one value.** It reads the whole document first and then insists on exactly one value, like the one-shot binary decode. So `go !` is _incomplete_ (the trailing `!` is waiting for a frame) while `1 2` is _refused_. `""` is refused as "not one value"; `readDocument("")` returns `[]`. Both take `limits:`, and refuse text nested past `maxDepth`.
 - **It's a labelled initializer, not `LosslessStringConvertible`.** That protocol's `init?(_: String)` would take over `Value("hello")` from the bridging initializer and read `hello` as a symbol instead of text.
 - **String literals are text.** Swift has one kind of quoted literal and bassline has two, so use `Symbol` (`ExpressibleByStringLiteral`) wherever a name is meant. Record heads take a `Symbol`, which is why `.record("point", 1, 2)` reads naturally.
 
@@ -306,17 +345,18 @@ What's covered:
   - encoding round-trips, including back-to-back and ragged-chunk streams;
   - printing and reading round-trip;
   - `canonicalCompare` matches byte order;
-  - `==` matches equal bytes, and equal values hash the same.
+  - `==` matches equal bytes, and equal values hash the same;
+  - under random limits, the encoder refuses exactly the values the decoder refuses, with the same reason.
+- **The B-tree.** A randomized comparison against a sorted-array model at node sizes 3, 4, 5, 8 and 64, which forces splits, rotations and merges. A checker verifies every invariant: key order and bounds, node fill, uniform leaf depth and subtree counts. Packed builds are checked at every size from 0 to 400. Other tests check that copies share every node off the edited path, that an iterator keeps seeing the tree as it was, and that in-place edits keep value semantics.
 - **Edge cases.** NFC vs NFD, integer boundaries and big literals, length-tier edges (6/7/254/255), depth and size limits, a failed decoder staying failed, offsets across compaction, the async adapter, printer spellings, error line and column, and an exit test for the duplicate-literal trap.
 
-The tests were checked for teeth by deliberately breaking the code. Renaming a reject reason fails the `reject` tests. Flipping the "shorter frame sorts after" rule trips the decoder's ordering assertion.
+The tests were checked for teeth by deliberately breaking the code. Renaming a reject reason fails the `reject` tests. Flipping the "shorter frame sorts after" rule trips the decoder's ordering assertion. Moving the B-tree's split point, or dropping a count update in a rotation, fails the tree tests.
 
 ## Limitations and future work
 
 - **No zero-copy views.** Decoding builds full `Value` trees. blnim's `ValueView` equivalent would be a natural `Span` / `RawSpan`-based follow-up once non-escapable stored properties are stable.
-- **Dict and set inserts are O(n).** They use sorted arrays, which is fine at message sizes. Large, frequently mutated collections would want a B-tree or a persistent structure.
-- **Deep values built in code are recursive to process.** Equality, hashing, encoding and printing recurse, so a value nested thousands of levels deep, built programmatically, can overflow the stack. Values that come from the decoder or reader are capped at the depth limit.
-- **The encoder doesn't enforce a depth limit.** It will write values deeper than a receiver's limit (64 by default here and in blnim).
+- **Lookups compare structurally.** Each comparison walks both values, which is why lookups are several times slower than `Swift.Dictionary`'s hashing. Caching each key's canonical bytes would turn comparisons into `memcmp`, at the cost of memory.
+- **Deep values built in code are recursive to process.** Equality, hashing, encoding and printing recurse, so a value nested thousands of levels deep, built programmatically, can overflow the stack. Values that come from the decoder or reader, or go out through the encoder, are capped at the depth limit.
 - **The printer is single-line.** blnim's width-aware `pretty` isn't ported.
 - **Ideas:** a `#bassline("…")` macro for compile-time-checked literals; a Codable adapter as an explicit dialect; `Transferable` / `UTType` integration for dragging values between apps.
 - **Naming.** `Value.Set` hides `Swift.Set` inside any `extension Value`; write `Swift.Set` there. Don't declare a type named `Bassline` in client code, since `Bassline.Value` is how you name this type when a generic parameter called `Value` is in scope.

@@ -168,6 +168,52 @@ extension Value {
     }
 }
 
+// MARK: - In-place edits
+//
+// Pulling a payload out with `if case .dict(var d) = value.content` leaves the
+// enum holding a second reference, so the first edit to `d` copies all of it.
+// These move the payload out first, so edits happen on the only reference.
+// They compose with Dict's subscript, which edits in place too:
+//
+//     value.withDict { $0[.symbol("users")]?.withList { $0.append(user) } }
+//
+// Each returns nil, without calling `body`, when the value is another kind.
+// The mark is left as it was.
+
+extension Value {
+    @discardableResult
+    public mutating func withDict<R, E: Error>(_ body: (inout Dict) throws(E) -> R) throws(E) -> R? {
+        guard case .dict(var dict) = content else { return nil }
+        content = .null
+        defer { content = .dict(dict) }
+        return try body(&dict)
+    }
+
+    @discardableResult
+    public mutating func withSet<R, E: Error>(_ body: (inout Set) throws(E) -> R) throws(E) -> R? {
+        guard case .set(var set) = content else { return nil }
+        content = .null
+        defer { content = .set(set) }
+        return try body(&set)
+    }
+
+    @discardableResult
+    public mutating func withList<R, E: Error>(_ body: (inout [Value]) throws(E) -> R) throws(E) -> R? {
+        guard case .list(var items) = content else { return nil }
+        content = .null
+        defer { content = .list(items) }
+        return try body(&items)
+    }
+
+    @discardableResult
+    public mutating func withRecord<R, E: Error>(_ body: (inout Value, inout [Value]) throws(E) -> R) throws(E) -> R? {
+        guard case .record(var head, var fields) = content else { return nil }
+        content = .null
+        defer { content = .record(head: head, fields: fields) }
+        return try body(&head, &fields)
+    }
+}
+
 // MARK: - Literals
 //
 // No boolean, float or nil literals: the data model leaves those out on

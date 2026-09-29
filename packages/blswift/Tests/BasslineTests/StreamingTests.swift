@@ -9,18 +9,33 @@ struct StreamingTests {
         }
         #expect(try Value.decodeAll(nested(64)).count == 1)
         #expect(throws: DecodeError(.tooDeep, at: 64)) { try Value.decodeAll(nested(65)) }
-        #expect(try Value.decodeAll(nested(65), limits: DecodingLimits(maxDepth: 65)).count == 1)
+        #expect(try Value.decodeAll(nested(65), limits: Limits(maxDepth: 65)).count == 1)
     }
 
-    @Test func encoderDoesNotEnforceDepth() throws {
+    @Test func encoderHoldsItselfToTheSameLimits() throws {
         var value: Value = []
-        for _ in 0 ..< 100 { value = [value] }
-        #expect(throws: DecodeError.self) { try Value(decoding: value.encoded()) }
-        #expect(try Value(decoding: value.encoded(), limits: DecodingLimits(maxDepth: 101)) == value)
+        for _ in 0 ..< 64 { value = [value] }                 // 65 frames deep
+        #expect(throws: EncodeError(.tooDeep)) { try value.encoded() }
+        let deeper = Limits(maxDepth: 65)
+        #expect(try Value(decoding: value.encoded(limits: deeper), limits: deeper) == value)
+
+        let blob = Value.bytes(Array(repeating: 1, count: 100))
+        #expect(throws: EncodeError(.tooLarge)) { try blob.encoded(limits: Limits(maxValueBytes: 101)) }
+        #expect(try blob.encoded(limits: Limits(maxValueBytes: 102)).count == 102)
+    }
+
+    @Test func failedEncodeLeavesTheBufferAlone() throws {
+        var out: [UInt8] = []
+        try Value.symbol("kept").encode(into: &out)
+        let before = out
+        var deep: Value = []
+        for _ in 0 ..< 64 { deep = [1, deep] }
+        #expect(throws: EncodeError(.tooDeep)) { try deep.encode(into: &out) }
+        #expect(out == before)
     }
 
     @Test func oversizeScalarIsRefusedFromItsHeader() {
-        let limits = DecodingLimits(maxValueBytes: 4096)
+        let limits = Limits(maxValueBytes: 4096)
         // bytes header claiming 4097 bytes of payload, with no payload behind it
         let header: [UInt8] = [0x57, 0xFF, 0x00, 0x00, 0x10, 0x01]
         let whole = land(header, limits: limits)
@@ -29,7 +44,7 @@ struct StreamingTests {
     }
 
     @Test func unclosedFrameIsRefusedIdenticallyHoweverItArrives() {
-        let limits = DecodingLimits(maxValueBytes: 4096)
+        let limits = Limits(maxValueBytes: 4096)
         let stream: [UInt8] = [0x60] + Array(repeating: 0x10, count: 4096)
         let whole = land(stream, limits: limits)
         #expect(whole.error?.reason == .tooLarge)
@@ -38,13 +53,13 @@ struct StreamingTests {
 
     @Test func valueUnderTheCapDecodes() throws {
         let value = Value.bytes(Array(repeating: 7, count: 2048))
-        let landed = land(value.encoded(), limits: DecodingLimits(maxValueBytes: 4096))
+        let landed = land(try value.encoded(), limits: Limits(maxValueBytes: 4096))
         #expect(landed.values == [value])
     }
 
     @Test func oneShotAdmitsInputItAlreadyHolds() throws {
         let value = Value.bytes(Array(repeating: 7, count: 5000))
-        #expect(try Value(decoding: value.encoded(), limits: DecodingLimits(maxValueBytes: 4096)) == value)
+        #expect(try Value(decoding: value.encoded(), limits: Limits(maxValueBytes: 4096)) == value)
     }
 
     @Test func failedDecoderStaysFailed() {
@@ -80,14 +95,14 @@ struct StreamingTests {
     @Test(arguments: [(6, [0x56]), (7, [0x57, 0x07]), (254, [0x57, 0xFE]), (255, [0x57, 0xFF, 0, 0, 0, 0xFF])] as [(Int, [UInt8])])
     func lengthTiers(length: Int, header: [UInt8]) throws {
         let value = Value.bytes(Array(repeating: 0xAB, count: length))
-        let bytes = value.encoded()
+        let bytes = try value.encoded()
         #expect(Array(bytes.prefix(header.count)) == header)
         #expect(bytes.count == header.count + length)
         #expect(try Value(decoding: bytes) == value)
     }
 
     @Test func acceptsSpans() throws {
-        let bytes = Value.record("point", 1, 2).encoded()
+        let bytes = try Value.record("point", 1, 2).encoded()
         var decoder = StreamDecoder()
         decoder.append(contentsOf: bytes.span)
         #expect(try decoder.next() == .record("point", 1, 2))
@@ -97,7 +112,7 @@ struct StreamingTests {
     @Test func asyncByteStream() async throws {
         let values: [Value] = [1, "two", .record("three", .symbol("go").marked), [:], .set([4, 5])]
         var bytes: [UInt8] = []
-        for value in values { value.encode(into: &bytes) }
+        for value in values { try value.encode(into: &bytes) }
 
         let stream = AsyncStream<UInt8> { continuation in
             for byte in bytes { continuation.yield(byte) }

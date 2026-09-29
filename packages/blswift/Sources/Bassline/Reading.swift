@@ -26,9 +26,9 @@ public struct ReadError: Error, Hashable, Sendable, CustomStringConvertible {
 }
 
 extension Value {
-    /// Reads exactly one value from `text`.
-    public init(reading text: String) throws(ReadError) {
-        var reader = TextReader(text)
+    /// Reads exactly one value from `text`, nested no deeper than `limits.maxDepth`.
+    public init(reading text: String, limits: Limits = .default) throws(ReadError) {
+        var reader = TextReader(text, maxDepth: limits.maxDepth)
         let values = try reader.document()
         guard values.count == 1 else {
             throw reader.refusal("expected exactly one value, found \(values.count)",
@@ -38,8 +38,8 @@ extension Value {
     }
 
     /// Reads every value in `text`, in order. Empty text is an empty document.
-    public static func readDocument(_ text: String) throws(ReadError) -> [Value] {
-        var reader = TextReader(text)
+    public static func readDocument(_ text: String, limits: Limits = .default) throws(ReadError) -> [Value] {
+        var reader = TextReader(text, maxDepth: limits.maxDepth)
         return try reader.document()
     }
 }
@@ -82,12 +82,13 @@ struct TextReader {
     private let bytes: [UInt8]
     private var position = 0
     /// Frames open at once, so deep text can't exhaust the call stack.
-    let maxDepth = 64
+    let maxDepth: Int
     /// Where each top-level value began.
     private(set) var valueStarts: [Int] = []
 
-    init(_ text: String) {
+    init(_ text: String, maxDepth: Int) {
         bytes = Array(text.utf8)
+        self.maxDepth = maxDepth
     }
 
     private var atEnd: Bool { position >= bytes.count }

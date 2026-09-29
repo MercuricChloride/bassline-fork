@@ -67,7 +67,7 @@ struct PropertyTests {
 
     @Test func roundTrips() throws {
         for value in Self.values {
-            let bytes = value.encoded()
+            let bytes = try value.encoded()
             #expect(try Value(decoding: bytes) == value)
             #expect(try Value(decoding: bytes).encoded() == bytes)
 
@@ -79,7 +79,7 @@ struct PropertyTests {
 
     @Test func streamOfManyValues() throws {
         var stream: [UInt8] = []
-        for value in Self.values { value.encode(into: &stream) }
+        for value in Self.values { try value.encode(into: &stream) }
         #expect(try Value.decodeAll(stream) == Self.values)
 
         // and in ragged chunks
@@ -99,15 +99,33 @@ struct PropertyTests {
 
     @Test func canonicalOrderIsByteOrder() {
         let values = Self.values
-        let encoded = values.map { $0.encoded() }
+        let encoded = values.map { try! $0.encoded() }
         for i in values.indices {
             for j in [i, (i + 1) % values.count, (i * 7 + 3) % values.count, (i * 13 + 5) % values.count] {
                 #expect(Value.canonicalCompare(values[i], values[j]).signum() == byteOrder(encoded[i], encoded[j]),
                         "\(values[i]) vs \(values[j])")
             }
         }
-        let sorted = values.sorted(by: Value.canonicalOrder).map { $0.encoded() }
+        let sorted = values.sorted(by: Value.canonicalOrder).map { try! $0.encoded() }
         #expect(sorted == encoded.sorted { $0.lexicographicallyPrecedes($1) })
+    }
+
+    @Test func encoderRefusesExactlyWhatTheDecoderRefuses() throws {
+        var rng = SplitMix64(seed: 99)
+        let unlimited = Limits(maxDepth: .max, maxValueBytes: .max)
+        for value in Self.values {
+            let limits = Limits(maxDepth: Int.random(in: 0 ... 4, using: &rng),
+                                maxValueBytes: Int.random(in: 1 ... 600, using: &rng))
+            let decoded = land(try value.encoded(limits: unlimited), limits: limits)
+            do {
+                let bytes = try value.encoded(limits: limits)
+                #expect(decoded.error == nil)
+                #expect(decoded.values == [value])
+                #expect(bytes == (try value.encoded(limits: unlimited)))
+            } catch {
+                #expect(decoded.error?.reason.rawValue == error.reason.rawValue, "\(value) with \(limits)")
+            }
+        }
     }
 
     @Test func equalityAndHashingFollowTheBytes() throws {
@@ -117,7 +135,7 @@ struct PropertyTests {
             #expect(value.hashValue == copy.hashValue)
             #expect(value != value.marked || value.isMarked)
         }
-        let distinct = Swift.Set(Self.values.map { $0.encoded() })
+        let distinct = Swift.Set(Self.values.map { try! $0.encoded() })
         #expect(Swift.Set(Self.values).count == distinct.count)
     }
 }
