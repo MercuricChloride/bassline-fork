@@ -1,6 +1,6 @@
 # blswift
 
-A small Swift implementation of the [bassline data model](../../data-model.org): an in-memory `Value`, the canonical binary encoding (encoder plus streaming decoder), the textual syntax (reader and printer), a protocol for bridging your own Swift types, and an `AsyncSequence` adapter for byte streams.
+A small Swift implementation of the [bassline data model](../../data-model.org): an in-memory `Value`, the canonical binary encoding (encoder plus streaming decoder), the textual syntax (reader and printer), shapes for matching and building values, a protocol for bridging your own Swift types, and an `AsyncSequence` adapter for byte streams.
 
 It passes every case in the shared corpus (`../../corpus`): all 143, with the exact reason for each rejected input.
 
@@ -218,6 +218,34 @@ Conformances included:
 
 Converting back is strict. A marked value is never read as its unmarked counterpart, and a `Swift.Set` or `Dictionary` throws if distinct bassline members collapse under Swift's equality (see [Unicode](#text-is-bytes-not-swift-strings)). `[UInt8]` becomes a list like any other array; bytes are always explicit, via `.bytes(_:)`.
 
+### Shapes
+
+A shape is an example value with holes, after blnim's `rewrite.nim`. It reads values that look like the example, binding each hole to what's in its position, and it builds values by putting a binding into every hole. As a value it's written `(shape example {holes})`, or `(shape example {holes} wild)` with a wild that matches anything and binds nothing.
+
+```swift
+let bookmark = try Shape(bassline: Value(reading: "(shape (bookmark url title) {url title})"))
+// or: Shape(.record("bookmark", .symbol("url"), .symbol("title")), holes: [.symbol("url"), .symbol("title")])
+
+try bookmark.extract(from: try Value(reading: #"(bookmark "https://…" "Docs" extra)"#))
+// {url: "https://…" title: "Docs"}      — nil if the value doesn't fit
+try bookmark.matches(value)               // Bool
+switch value { case bookmark: …; default: … }
+
+try bookmark.inject([.symbol("url"): "https://…", .symbol("title"): "Docs"])
+// (bookmark "https://…" "Docs")         — every hole needs a binding
+```
+
+Matching rules:
+
+- A hole binds the value in its position when their marks agree: a hole `x` binds unmarked values, a hole `x!` marked ones.
+- A hole that occurs twice must bind equal values. Binding it to two different values throws `ShapeError` (`mismatched-hole`).
+- Everything else matches literally: kinds and marks must agree, and atoms must be equal. A marked atom like `go!` in an example matches only `go!`.
+- Lists and records match position by position, heads included, and **extras are ignored**: the value may have more trailing members, dicts more keys, and sets more members. A dialect can grow without breaking the shapes that already read it. A value with fewer members than the example doesn't match.
+- `extract` gives bindings only when every hole is bound.
+- A hole is atomic: in `(shape (foo x (k x)) {x (k x)})`, the hole `(k x)` binds whole and the `x` inside it plays no part.
+- Dict keys and set members are looked up literally, and nothing inside them binds. Reaching one that is itself a hole throws (`hole-in-key`, `hole-in-member`), since those are found by equality rather than position.
+- `inject` throws `unbound-hole` unless every hole has a binding; bindings for other names are ignored. It fills every position, dict keys and set members included.
+
 ## Design notes
 
 These are the decisions that aren't obvious from the API, and why they went the way they did.
@@ -313,6 +341,15 @@ Swift's `Optional<Value>` maps onto the model's three states directly. `nil` is 
 
 With the `.v26` floor, the decoder checks UTF-8 with `UTF8Span(validating:)`, which is strict and reports where the bad byte is, and it accepts input as a `Span<UInt8>`. Internally, the decoder and reader index plain `[UInt8]` arrays. A `Span` can't be kept as stored state in a decoder without experimental lifetime annotations, and array indexing is just as bounds-checked.
 
+### Shapes, compared with blnim
+
+The semantics are `rewrite.nim`'s, with two fixes:
+
+- **A value shorter than the example doesn't match.** `rewrite.nim` compares list members pairwise up to the shorter length, so a value missing trailing members still passes; here the value needs at least the example's members, while extras are still ignored.
+- **Nothing inside a dict key or set member binds.** `rewrite.nim` binds each found key against itself (`ensureBind(k, k)`), so a hole nested in a key, like `x` in `{(k x): 1}`, got bound to itself.
+
+Its `Match` object and helpers (`maybeInject`, the `@` / `//` operators) aren't ported; `extract`, `inject` and `matches` cover them. blnim's earlier design, in the commented-out `tops.nim` tests, made every marked atom a hole instead of listing holes; that would make a literal `go!` impossible to match, and marked values are exactly what interpreters want to accept.
+
 ### Text reader
 
 - **`Value(reading:)` requires exactly one value.** It reads the whole document first and then insists on exactly one value, like the one-shot binary decode. So `go !` is _incomplete_ (the trailing `!` is waiting for a frame) while `1 2` is _refused_. `""` is refused as "not one value"; `readDocument("")` returns `[]`. Both take `limits:`, and refuse text nested past `maxDepth`.
@@ -348,9 +385,10 @@ What's covered:
   - `==` matches equal bytes, and equal values hash the same;
   - under random limits, the encoder refuses exactly the values the decoder refuses, with the same reason.
 - **The B-tree.** A randomized comparison against a sorted-array model at node sizes 3, 4, 5, 8 and 64, which forces splits, rotations and merges. A checker verifies every invariant: key order and bounds, node fill, uniform leaf depth and subtree counts. Packed builds are checked at every size from 0 to 400. Other tests check that copies share every node off the edited path, that an iterator keeps seeing the tree as it was, and that in-place edits keep value semantics.
+- **Shapes.** Unit cases for each matching rule and error, and laws on generated values: punch holes (each with the mark of what it replaced) into a random value, then extracting from the original must give back what was punched out, injecting it must rebuild the original, extras added throughout must not change the bindings, injecting without one of the bindings must throw, and the shape must survive being written as text and read back.
 - **Edge cases.** NFC vs NFD, integer boundaries and big literals, length-tier edges (6/7/254/255), depth and size limits, a failed decoder staying failed, offsets across compaction, the async adapter, printer spellings, error line and column, and an exit test for the duplicate-literal trap.
 
-The tests were checked for teeth by deliberately breaking the code. Renaming a reject reason fails the `reject` tests. Flipping the "shorter frame sorts after" rule trips the decoder's ordering assertion. Moving the B-tree's split point, or dropping a count update in a rotation, fails the tree tests.
+The tests were checked for teeth by deliberately breaking the code. Renaming a reject reason fails the `reject` tests. Flipping the "shorter frame sorts after" rule trips the decoder's ordering assertion. Moving the B-tree's split point, or dropping a count update in a rotation, fails the tree tests. Letting a repeated hole bind a second value, or letting a value shorter than the example match, fails the shape tests.
 
 ## Limitations and future work
 

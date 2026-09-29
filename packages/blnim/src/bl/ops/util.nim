@@ -40,28 +40,42 @@ iterator items*(self: Value): lent Value =
       yield val
   else: discard
 
-proc forEach*(self: Value, fn: proc(v: Value)) =
-  fn(self)
+proc forEach*(self: Value, fn: proc(v: Value, isKey: bool)) =
   case self.kind
-  of bList, bRec, bSet, bDict:
+  of bList, bRec, bSet:
     for val in self:
-      val.forEach fn
+      fn(val, false)
+      val.forEach(fn)
+  of bDict:
+    for k,v in self.dict:
+      fn(k, true)
+      k.forEach(fn)
+      fn(v, false)
+      v.forEach(fn)
   else: discard
 
-proc map*(self: Value, fn: proc(v: Value): Value): Value =
+proc forEach*(self: Value, fn: proc(v: Value)) =
+  self.forEach(proc(v: Value, _: bool) = fn(v))
+
+proc map*(self: Value, fn: proc(v: Value, isKey: bool): Value): Value =
+  proc lifted(v: Value): Value =
+    fn(v, false)
   case self.kind
   of bList:
-    initList(self.items.map(fn), self.mark)
+    initList(self.items.map(lifted), self.mark)
   of bRec:
-    initRec(self.items.map(fn), self.mark)
+    initRec(self.items.map(lifted), self.mark)
   of bDict:
     initDict(self.dict.map(
       proc(k,v: Value): Pair[Value] =
-        (fn(k), fn(v))))
+        (fn(k, true), fn(v, false))))
   of bSet:
-    initSet(self.els.map(fn), self.mark)
+    initSet(self.els.map(lifted), self.mark)
   else:
     refuse "cannot unary map over " & $(self.kind)
+
+proc map*(self: Value, fn: proc(v: Value): Value): Value =
+  self.map(proc(v: Value, _: bool): Value = fn(v))
 
 proc map*(self: Value, fn: proc(k, v: Value): Pair[Value]): Value =
   guard self.kind == bDict, "cannot binary map over" & $(self.kind)

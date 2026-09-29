@@ -86,17 +86,13 @@ proc bindValue*(self: var Match, shape, val: Value): bool =
       if k notin val.dict:
         return
       guard k notin self.holes, "dict holes aren't supported yet"
-      ensureBind(k, k)
       ensureBind(shape[k], val[k])
-    let rest = val.dict - shape.dict
-    echo rest.toValue
     true
   of bSet:
     for v in shape.els:
       if v notin val.els:
         return
       guard v notin self.holes, "set holes aren't supported yet"
-      ensureBind(v, v)
     true
   else:
     shape == val
@@ -140,9 +136,9 @@ proc fromValue*(_: type Shape, val: Value): Shape =
   guard val.head == bl shape, "expected a shape head"
   case val.items.len:
   of 3: # (shape ex holes)
-    initShape val/1, (val/2).els
+    initShape val[1], val[2].els
   of 4: # (shape ex holes wild)
-    initShape val/1, (val/2).els, val/3
+    initShape val[1], val[2].els, val[3]
   else:
     refuse "expected (shape ex holes) or (shape ex wild holes)"
 
@@ -204,3 +200,6 @@ when isMainModule:
 
   collection.incl (shape.inject rv"{cmd: turn-on arg: swag}")
   echo collection
+
+  let a = toShape rv"(shape {(k x): x something: x} {x})"
+  echo a.extract rv "{(k x): 69 something: 69}"
