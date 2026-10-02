@@ -51,12 +51,14 @@ proc fold*[A, B](fn: Fold[A, B], init: B): Map[A, B] =
     acc = fn(acc, curr)
     acc
 
-proc scan*[A, B](fn: Fold[A, B], init: B): Map[A, array[B, B]] =
+proc scan*[A, B](fn: Fold[A, B], init: B): Map[A, tuple[prev, curr: B]] =
+  ## Like `fold`, but answers the accumulator from before each
+  ## value as well as after
   var acc = init
-  proc(curr: A): B =
+  proc(curr: A): tuple[prev, curr: B] =
     let prev = acc
     acc = fn(acc, curr)
-    [prev, acc]
+    (prev, acc)
 
 proc latch*[A](fn: Pred[A]): Pred[A] =
   ## Latch is like a normal predicate, but upon failing
@@ -89,9 +91,12 @@ proc map*[A, B](s: Stream[A], fn: Map[A, B]): Stream[B] =
   ## Applies `fn` to each value in the stream
   proc (): Option[B] = s().map(fn)
 
-proc filter*[A](s: Stream[A], fn: Pred[A]): auto =
-  ## Applies predicate `fn`, you know what filter does...
-  proc(): Option[A] = s().filter(fn)
+proc filter*[A](s: Stream[A], fn: Pred[A]): Stream[A] =
+  ## The values `fn` accepts. The others are pulled past.
+  proc(): Option[A] =
+    result = s()
+    while result.isSome and not fn(result.get):
+      result = s()
 
 proc `|>`*[A, B](s: Stream[A], fn: Map[A, B]): auto =
   when B is bool:
@@ -144,61 +149,14 @@ proc cat*[A](streams: varargs[Stream[A]]): Stream[A] =
 # ================
 
 proc take*[A](self: Stream[A], n: int): seq[A] =
+  ## Up to `n` values, pulling no more than that
   result = newSeq[A]()
-  for each in self:
-    result.add each
-    if result.len == n: return
+  while result.len < n:
+    let r = self()
+    if r.isNone: return
+    result.add r.get
 
 proc toSeq*[A](self: Stream[A]): seq[A] =
   result = newSeq[A]()
   for each in self:
     result.add each
-
-# ================
-# Stream Generators
-# ================
-
-proc nums*(start, stop: int, step = 1): auto =
-  let next = iterator(): int =
-    for n in countup(start, stop, step):
-      yield n
-  proc(): Option[int] =
-    result = some next()
-    if finished(next): return none int
-
-# ================
-# Misc Functions
-# ================
-
-proc sum*(init: int = 0): Map[int, int] =
-  proc f(a, b: int): int = a + b
-  fold(f, init)
-
-proc minimum*(init: int = int.high): Map[int, int] =
-  proc f(a, b: int): int = min(a, b)
-  fold(f, init)
-
-proc maximum*(init: int = int.low): Map[int, int] =
-  proc f(a, b: int): int = max(a, b)
-  fold(f, init)
-
-proc average*(s: Stream[int]): auto =
-  let avg: Map[Count[int], int] = (
-    proc(it: Count[int]): int =
-      it.item div (it.idx + 1))
-  s |> (sum() & count[int]() & avg)
-
-when isMainModule:
-  import std/random
-
-  randomize()
-
-  var
-    foo = nums(-200, 10)
-    bar = nums(-150, 250)
-    baz = nums(0, 1_000_000)
-
-  var r: int
-  for each in baz.average:
-    r = each
-  echo r

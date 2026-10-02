@@ -6,28 +6,26 @@ export btree, codec
 refuseWith ValueError
 
 type
-  BNumKind = enum
-    bnkWide, bnkInt
   BNum* = object
-    case kind*: BNumKind
-    of bnkWide:
+    case isWide: bool
+    of true:
       s: string
-    of bnkInt:
+    of false:
       n: int
 
 converter toNum*(n: int): BNum =
-  BNum(kind: bnkInt, n: n)
+  BNum(isWide: false, n: n)
 
 func initNum*(s: string): BNum =
   ## s is a canonical spelling; past int64 it is held as it is spelled
   guard isValidInt(s.toBytes), "not a canonical number: " & s
   try:
-    BNum(kind: bnkInt, n: parseBiggestInt(s))
+    BNum(isWide: false, n: parseBiggestInt(s))
   except ValueError:
-    BNum(kind: bnkWide, s: s)
+    BNum(isWide: true, s: s)
 
 func isWide*(n: BNum): bool =
-  n.kind == bnkWide
+  n.isWide
 
 func isInt*(n: BNum): bool =
   not n.isWide
@@ -36,19 +34,19 @@ func toInt*(n: BNum): int =
   guard n.isInt, "num is wide, not an int"
   n.n # note: why does he look so happy!
 
+func toString*(n: BNum): string =
+  if n.isWide: n.s else: $n.n
+
 func wide*(n: BNum): string =
-  if n.isWide:
-    n.s
-  else:
-    $(n.n)
+  n.toString
 
 func `$`*(n: BNum): string =
-  n.wide
+  n.toString
 
 type
   BSet* = BTreeSet[Value]
   BDict* = BTree[Value, Value]
-  
+
   Value* = object
     mark*: bool
     case kind*: Kind

@@ -57,9 +57,8 @@ template matchShape*(shape: Shape, body) =
   ]##
   route:
     shape.withMatch:
-      match += msg.value
+      accept match.add(msg.value) and isFilled(match)
       var bindings {.inject.} = match.bindings
-      accept match.isFilled
       body
 
 when isMainModule:
