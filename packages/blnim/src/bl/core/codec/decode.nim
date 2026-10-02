@@ -186,26 +186,28 @@ proc toValue(pv: PartialValue, buf: Buffer[byte]): ValueView =
     of bDict:
       ValueView(kind: k, buf: buf, offset: pv.offset, entries: @[])
 
-iterator items*(self: var Decoder, shouldValidate = true): ValueView =
-
-  template maybeYield(v: ValueView) =
-    if self.frames.len == 0:
-      if shouldValidate:
-        validate v
-      self.pending = false
-      yield v
+proc shouldYield(
+    self: var Decoder, v: ValueView, shouldValidate = true): bool =
+  if self.frames.len == 0:
+    if shouldValidate:
+      validate v
+    self.pending = false
+    return true
+  else:
+    let frame = self.frames[^1]
+    v.parent = frame
+    if frame.kind != bDict:
+      frame.children.add v
     else:
-      let frame = self.frames[^1]
-      v.parent = frame
-      if frame.kind != bDict:
-        frame.children.add v
+      if frame.entries.len > 0 and
+        frame.entries[^1].val.isNil:
+          frame.entries[^1].val = v
       else:
-        if frame.entries.len > 0 and
-          frame.entries[^1].val.isNil:
-            frame.entries[^1].val = v
-        else:
-          frame.entries.add (key: v, val: nil)
+        frame.entries.add (key: v, val: nil)
 
+iterator items*(self: var Decoder, shouldValidate = true): ValueView =
+  template maybeYield(v) =
+    if self.shouldYield(v, shouldValidate): yield v
   try:
     for part in self.cursor.partialValues(self.maxValueBytes):
       case part.kind

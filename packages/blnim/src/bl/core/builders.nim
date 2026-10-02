@@ -223,28 +223,25 @@ func head*(v: Value): lent Value =
 func toValue*(v: Value): Value = 
   v
 
-func toValue*(i: int): Value = 
+func toValue*(i: SomeInteger): Value = 
   num(i)
-
-func toValue*(i: int64): Value = 
-  num(int(i))
 
 func toValue*(s: string): Value = 
   text(s)
 
-proc toValue*(self: BDict): Value =
+func toValue*(self: BDict): Value =
   initDict(self)
 
-proc toValue*(self: BSet): Value =
+func toValue*(self: BSet): Value =
   initSet(self)
 
-proc toValue*(self: Buffer[Value]): Value =
+func toValue*(self: Buffer[Value]): Value =
   initList(self)
 
 func toValue*(b: openArray[byte]): Value = 
   bytes(b)
 
-proc toValue*[T](xs: openArray[T]): Value =
+func toValue*[T](xs: openArray[T]): Value =
   mixin toValue
   result = initList()
   for x in xs:
