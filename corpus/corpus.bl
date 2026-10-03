@@ -3,6 +3,13 @@
 ;; each record is one test case, and its head says what kind of case
 ;; it is. the expected bytes come from the spec in data-model.org
 ;;
+;; every case is input given in total: the bytes or the text are all
+;; there is. input given in total that ends inside a value is bad, but
+;; for running out rather than for breaking a rule, so the starved and
+;; incomplete cases are kept apart from reject and refuses. they are
+;; the inputs where a reader still being given more, bytes arriving on
+;; a socket or text someone is typing, waits instead
+;;
 ;; (ce name value 0xbytes)
 ;; value must encode to exactly 0xbytes, and 0xbytes must decode to
 ;; value. a reading that cannot hold value (an integer past its
@@ -17,8 +24,9 @@
 ;;   stranded-key out-of-order duplicate
 ;;
 ;; (starved name 0xbytes)
-;; 0xbytes is a proper prefix of a value. a decoder must not refuse
-;; it and must not land anything. it waits for more bytes.
+;; 0xbytes is a proper prefix of a value: it breaks no rule, it only
+;; runs out. a decoder must not refuse it and must not land anything.
+;; a decoder still being given bytes waits for more.
 ;;
 ;; (reads "text" value)
 ;; the reader must read text as value. these are spellings the
@@ -30,9 +38,11 @@
 ;; each case names the rule it breaks.
 ;;
 ;; (incomplete "text")
-;; text is an unfinished value, a prefix of something that could
-;; still be valid. the reader must report it as incomplete, never
-;; refuse it.
+;; text runs out inside a value, having broken no rule before it
+;; does: a prefix of something that could still be valid. reading it
+;; as one value, the reader must report it as incomplete, never
+;; refuse it. text that has already begun a second value can never
+;; be one value, and is refused however it ends.
 ;;
 ;; (document "text" [values])
 ;; reading text as a document must give exactly these values, in
@@ -181,6 +191,9 @@
 (refuses "!(f)!")  ; marked twice
 (refuses "a!b")  ; mark inside a token
 (refuses "1 2")  ; readValue wants exactly one value
+(refuses "1 [")  ; a second value has begun, so this can never be one
+(refuses "go !")  ; go, then a mark beginning a second value
+(refuses "")  ; no value at all
 
 ;; ================ incomplete ================
 
@@ -192,7 +205,6 @@
 (incomplete "{a:")
 (incomplete "\"open")
 (incomplete "!")
-(incomplete "go !")
 (incomplete "[1 [2] ")
 
 ;; ================ document ================

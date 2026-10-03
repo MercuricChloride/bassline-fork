@@ -2901,6 +2901,45 @@
     "value": [
       {
         "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "1 ["
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "go !"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": ""
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
         "value": "incomplete"
       },
       {
@@ -2997,19 +3036,6 @@
       {
         "kind": "text",
         "value": "!"
-      }
-    ]
-  },
-  {
-    "kind": "record",
-    "value": [
-      {
-        "kind": "symbol",
-        "value": "incomplete"
-      },
-      {
-        "kind": "text",
-        "value": "go !"
       }
     ]
   },
