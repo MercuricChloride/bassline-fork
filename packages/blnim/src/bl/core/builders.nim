@@ -180,6 +180,15 @@ func `==`*(a, b: Value): bool =
 func `<`*(a, b: Value): bool =
   cmp(a, b) < 0
 
+func `<=`*(a, b: Value): bool =
+  cmp(a, b) <= 0
+
+func `>`*(a, b: Value): bool =
+  cmp(a, b) > 0
+
+func `>=`*(a, b: Value): bool =
+  cmp(a, b) >= 0
+
 # ================ Frame constructors ================
 
 func initList*(items: sink seq[Value], mark = false): Value =
@@ -219,6 +228,9 @@ func head*(v: Value): lent Value =
 # ================ Misc converstion fns ================
 
 func toValue*(v: Value): Value = 
+  v
+
+func fromValue*(T: typedesc[Value], v: Value): Value =
   v
 
 func toValue*(i: SomeInteger): Value = 

@@ -5,7 +5,8 @@
 ## an insert with no transaction open, so there are no per-value txns.
 
 import std/[algorithm, sequtils, unittest]
-import bl/[core, store, ops]
+import bl/[core, store]
+from bl/queries import prefixes
 import bl/lib/[blah, blmacro]
 import ./corpus
 

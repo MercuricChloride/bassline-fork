@@ -1,7 +1,7 @@
 ## digests and signatures over a value's CE bytes
 
 import std/unittest
-import bl/[core, ops]
+import bl/core
 import bl/lib/[blmacro, blah]
 import bl/lib/crypto/[digest, clave]
 
@@ -52,8 +52,8 @@ suite "digest":
     refuses Digest.fromValue(bl(digest(sha256, "text")))    # not bytes
     refuses Digest.fromValue(bl(hash(sha256, x"00")))       # not the digest head
     let dv = toValue(digest(v, Sha256Algo))
-    refuses Digest.fromValue(bl(digest(sha256, %dv[2], extra)))  # a field more
-    refuses Digest.fromValue(bl(!digest(sha256, %dv[2])))        # marked
+    refuses Digest.fromValue(bl(digest(sha256, %dv.items[2], extra)))  # a field more
+    refuses Digest.fromValue(bl(!digest(sha256, %dv.items[2])))        # marked
 
 suite "clave":
   test "a keypair derives from its seed and is a value":

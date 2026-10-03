@@ -73,7 +73,7 @@ proc randValue*(depth = 0): Value =
     randFrame(depth)
 
 proc randPrefix*(v: Value): Value =
-  ## a random value that is a prefix of v (see ops.prefixes): a
+  ## a random value that is a prefix of v (see queries.prefixes): a
   ## leading run of its members in canonical order, the last maybe
   ## shortened again. A scalar has only itself as a prefix.
   case v.kind

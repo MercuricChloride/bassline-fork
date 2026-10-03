@@ -139,6 +139,31 @@ iterator pairsFrom[K, V](root: Node[K, V], lo, hi: K): lent Entry[K, V] =
     if entry.key > hi: break
     yield entry
 
+iterator pairsFrom[K, V](root: Node[K, V], atOrAfter: proc(k: K): bool):
+    lent Entry[K, V] =
+  ## from the first key `atOrAfter` holds for, onward. It must hold for
+  ## every key after one it holds for, so the descent can bisect on it
+  var leaf = root
+  while leaf != nil and leaf.kind == nkInternal:
+    # the first separator the bound holds for: lowerBound with a key that
+    # every separator failing the bound is less than
+    leaf = leaf.kids[leaf.keys.lowerBound(true, proc(k: K, _: bool): int =
+      if atOrAfter(k): 1 else: -1)]
+  var started = false
+  for entry in leaf.pairs:
+    if not started:
+      if not atOrAfter(entry.key): continue
+      started = true
+    yield entry
+
+iterator pairsFrom[K, V](root: Node[K, V], atOrAfter, upTo: proc(k: K): bool):
+    lent Entry[K, V] =
+  ## the keys from the first `atOrAfter` holds for to the last `upTo`
+  ## holds for; `upTo` must fail for every key after one it fails for
+  for entry in root.pairsFrom(atOrAfter):
+    if not upTo(entry.key): break
+    yield entry
+
 iterator keys[K, V](root: Node[K, V]): lent K =
   for k, _ in root:
     yield k
@@ -232,6 +257,20 @@ proc values*[K, V](t: BTree[K, V]): BTreeSet[V] =
 iterator pairsFrom*[K, V](t: BTree[K, V], lo: K): lent Entry[K, V] =
   ## entries with key >= lo
   for e in t.root.pairsFrom(lo): yield e
+
+iterator pairsFrom*[K, V](t: BTree[K, V], atOrAfter: proc(k: K): bool):
+    lent Entry[K, V] =
+  ## entries from the first key `atOrAfter` holds for, which must then
+  ## hold for every key after it: a bound that needn't be a key itself
+  for e in pairsFrom(t.root, atOrAfter):
+    yield e
+
+iterator pairsFrom*[K, V](t: BTree[K, V], atOrAfter, upTo: proc(k: K): bool):
+    lent Entry[K, V] =
+  ## entries from the first key `atOrAfter` holds for to the last `upTo`
+  ## holds for
+  for e in pairsFrom(t.root, atOrAfter, upTo):
+    yield e
 
 iterator pairsFrom*[K, V](t: BTree[K, V], lo, hi: K): lent Entry[K, V] =
   ## entries with hi >= key >= lo
@@ -468,6 +507,19 @@ iterator itemsFrom*[T](t: BTreeSet[T], lo: T): lent T =
 iterator itemsFrom*[T](t: BTreeSet[T], lo, hi: T): lent T =
   ## entries with hi >= key >= lo
   for v, _ in pairsFrom(t.root, lo, hi): 
+    yield v
+
+iterator itemsFrom*[T](t: BTreeSet[T], atOrAfter: proc(x: T): bool): lent T =
+  ## members from the first one `atOrAfter` holds for, which must then
+  ## hold for every member after it: a bound that needn't be a member
+  for v, _ in pairsFrom(t.root, atOrAfter):
+    yield v
+
+iterator itemsFrom*[T](t: BTreeSet[T], atOrAfter, upTo: proc(x: T): bool):
+    lent T =
+  ## members from the first one `atOrAfter` holds for to the last one
+  ## `upTo` holds for
+  for v, _ in pairsFrom(t.root, atOrAfter, upTo):
     yield v
 
 iterator lockstep*[T](a, b: BTreeSet[T]):

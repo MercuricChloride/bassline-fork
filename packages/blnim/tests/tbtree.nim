@@ -188,3 +188,44 @@ suite "dict ops":
     for e in vals:
       echo "val: ", e
     echo "sum: ", all.reduce(0, sum)
+suite "bounded by a predicate":
+  # a bound that needn't be a member: evens from 0 to 2000, asked from 501
+  let evens = newBTreeSet[int]()
+  for i in 0 .. 1000: evens.incl 2 * i
+  proc atLeast(n: int): proc(x: int): bool = (proc(x: int): bool = x >= n)
+  proc atMost(n: int): proc(x: int): bool = (proc(x: int): bool = x <= n)
+
+  test "from the first member the bound holds for, onward":
+    var got: seq[int]
+    for x in evens.itemsFrom(atLeast(501)): got.add x
+    check got.len == 750
+    check got[0] == 502 and got[^1] == 2000
+
+  test "between two bounds":
+    var got: seq[int]
+    for x in evens.itemsFrom(atLeast(501), atMost(521)): got.add x
+    check got == @[502, 504, 506, 508, 510, 512, 514, 516, 518, 520]
+
+  test "a bound past every member, or before the first":
+    var n = 0
+    for x in evens.itemsFrom(atLeast(2001)): inc n
+    check n == 0
+    for x in evens.itemsFrom(atLeast(-5), atMost(2)): inc n
+    check n == 2
+    for x in newBTreeSet[int]().itemsFrom(atLeast(0)): inc n
+    check n == 2
+
+  test "dict entries the same way":
+    let d = newBTree[int, string]()
+    for i in 0 .. 300: d[3 * i] = $i
+    var got: seq[string]
+    for k, v in d.pairsFrom(atLeast(100), atMost(110)): got.add v
+    check got == @["34", "35", "36"]
+
+  test "the descent bisects instead of walking from the first member":
+    var asked = 0
+    proc counting(x: int): bool =
+      inc asked
+      x >= 1900
+    for x in evens.itemsFrom(counting): discard
+    check asked < 120   # a walk from the start would ask about 950 times
