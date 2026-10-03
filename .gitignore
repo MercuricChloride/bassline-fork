@@ -1,6 +1,8 @@
 # general things
 .DS_Store
-.claude
+.claude/*
+!.claude/skills/
+!.claude/agents/
 
 # js things
 node_modules/
@@ -9,6 +11,11 @@ dist/
 
 # rust things
 target/
+
+# python things
+__pycache__/
+*.egg-info/
+.venv/
 
 .env
 .env.development
@@ -22,6 +29,7 @@ target/
 .mcp.json
 
 bin/
+!packages/blpy/bin/
 bench-data/
 # generated type declarations
 packages/*/types/

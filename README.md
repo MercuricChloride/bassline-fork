@@ -1,1 +1,0 @@
-packages/core/book/v2.md

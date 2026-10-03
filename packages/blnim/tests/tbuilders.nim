@@ -72,3 +72,10 @@ suite "numbers":
     check num("99999999999999999999") > num(1000000000000000000)
     check num("-99999999999999999999") > num("99999999999999999999")
     check num("123456789012345678901234567890") == num("123456789012345678901234567890")
+
+suite "frame items":
+  test "a frame's items map, filter and reduce as a Buffer":
+    let items = initList(@[num(1), num(2), num(3)]).items
+    check items.map(proc(v: Value): int = v.num.toInt).data == @[1, 2, 3]
+    check items.filter(proc(v: Value): bool = v != num(2)).data == @[num(1), num(3)]
+    check items.reduce(0, proc(acc: int, v: Value): int = acc + v.num.toInt) == 6

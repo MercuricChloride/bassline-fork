@@ -243,24 +243,24 @@ iterator lockstep*[K, V](a, b: BTree[K, V]):
   for (x, y) in lockstep(a.root, b.root):
     yield (x, y)
 
-proc map*[C,D](
-    t: BTree, fn: proc(k: t.K, v: t.V): Entry[C, D]
+proc map*[K, V, C, D](
+    t: BTree[K, V], fn: proc(k: K, v: V): Entry[C, D]
     ): BTree[C,D] =
   result = newBTree[C,D]()
   for k,v in t:
     let (key, val) = fn(k, v)
     result[key] = val
 
-proc filter*(
-    t: BTree, fn: proc(k: t.K, v: t.V): bool
-  ): BTree[t.K,t.V] =
-  result = newBTree[t.K,t.V]()
+proc filter*[K, V](
+    t: BTree[K, V], fn: proc(k: K, v: V): bool
+  ): BTree[K, V] =
+  result = newBTree[K, V]()
   for k,v in t:
     if fn(k,v):
       result[k] = v
 
-proc reduce*[A](
-    t: BTree, init: A, fn: proc(acc: A, k: t.K, v: t.V): A
+proc reduce*[K, V, A](
+    t: BTree[K, V], init: A, fn: proc(acc: A, k: K, v: V): A
   ): A =
   result = init
   for k, v in t:
@@ -287,8 +287,8 @@ proc intersection*[K, V](a, b: BTree[K, V]): BTree[K, V] =
     if k in larger: 
       result[k] = b[k]
 
-proc select*(self: BTree, keys: BTreeSet[self.K]): auto =
-  result = newBTree[self.K, self.V]()
+proc select*[K, V](self: BTree[K, V], keys: BTreeSet[K]): BTree[K, V] =
+  result = newBTree[K, V]()
   for k in keys:
     result[k] = self[k]
 
@@ -304,7 +304,7 @@ proc `*`*[K, V](a, b: BTree[K, V]): BTree[K, V] =
   ## alias for intersection
   intersection a, b
 
-proc `/`*(self: BTree, keys: BTreeSet[self.K]): auto =
+proc `/`*[K, V](self: BTree[K, V], keys: BTreeSet[K]): BTree[K, V] =
   ## alias for select
   select self, keys
 
@@ -373,10 +373,10 @@ proc intersection*[T](a, b: BTreeSet[T]): BTreeSet[T] =
   for v in smaller:
     if v in larger: incl(result, v)
 
-proc symmetricDifference*(a, b: BTreeSet): BTreeSet =
-  result = newBTreeSet[a.T]()
+proc symmetricDifference*[T](a, b: BTreeSet[T]): BTreeSet[T] =
+  result = newBTreeSet[T]()
   for v in union(a,b):
-    if v notin a and v notin b: 
+    if v notin a or v notin b:
       incl(result, v)
     
 proc `+`*[T](a, b: BTreeSet[T]): BTreeSet[T] =

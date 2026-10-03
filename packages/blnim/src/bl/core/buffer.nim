@@ -68,18 +68,18 @@ iterator lockstep*[T](a, b: Buffer[T]): (int, lent T, lent T) =
   for i in 0..<min(a.len, b.len):
     yield (i, a.data[i], b.data[i])
 
-proc map*[K](self: Buffer, fn: proc(item: self.T): K): Buffer[K] =
+proc map*[T, K](self: Buffer[T], fn: proc(item: T): K): Buffer[K] =
   result = newBufferOfCap[K](self.len)
   for item in self:
     result.add fn(item)
 
-proc filter*(self: Buffer, fn: proc(item: self.T): bool): Buffer[self.T] =
-  result = newBuffer()
+proc filter*[T](self: Buffer[T], fn: proc(item: T): bool): Buffer[T] =
+  result = newBuffer[T]()
   for item in self:
     if fn(item):
       result.add item
 
-proc reduce*[A](self: Buffer, init: A, fn: proc(acc: A, curr: self.T): A): A =
+proc reduce*[T, A](self: Buffer[T], init: A, fn: proc(acc: A, curr: T): A): A =
   result = init
   for item in self:
     result = fn(result, item)

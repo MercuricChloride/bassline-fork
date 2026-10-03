@@ -96,6 +96,11 @@ suite "set ops":
     for i in 4..6:
       check i in c
 
+  test "symmetric difference":
+    let c = symmetricDifference(a, b)
+    for i in 1..10:
+      check (i in c) == (i notin 4..6)
+
   test "mapping":
     let 
       c = a + b

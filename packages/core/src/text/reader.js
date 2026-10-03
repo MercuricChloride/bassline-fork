@@ -91,23 +91,34 @@ export function read(source, opts) {
 }
 
 /**
- * Read source text expected to hold exactly one value. A truncated input
- * throws {@link ReaderIncomplete}; zero or several values throw
- * {@link ReaderError}.
+ * Read source text that is all there is as exactly one value. Text that runs
+ * out inside that value throws {@link ReaderIncomplete}. Once the value is
+ * read, anything but whitespace and comments begins a second one, so the text
+ * can never be one value and throws {@link ReaderError} however it ends; what
+ * follows is not read. Text with no value throws {@link ReaderError}.
  * @param {string} source
  * @param {{maxDepth?: number}} [opts]
  * @returns {Value}
  */
 export function readValue(source, opts) {
-  const vs = read(source, opts)
-  if (vs.length !== 1) {
+  const top = topLevel(source, opts)
+  if (top.rest() === undefined) {
     throw new ReaderError(
       source,
-      0,
-      `expected exactly one value, got ${vs.length}`
+      source.length,
+      'expected exactly one value, got none'
     )
   }
-  return vs[0]
+  const { value } = top.next()
+  const more = top.rest()
+  if (more !== undefined) {
+    throw new ReaderError(
+      source,
+      more,
+      'expected exactly one value, and more follows'
+    )
+  }
+  return value
 }
 
 /**
@@ -122,14 +133,28 @@ export function readValue(source, opts) {
  * @returns {Spanned[]}
  */
 export function readSpans(source, opts) {
+  const top = topLevel(source, opts)
+  /** @type {Spanned[]} */
+  const values = []
+  while (top.rest() !== undefined) values.push(top.next())
+  return values
+}
+
+/**
+ * The reader over one source, standing between values at the top level:
+ * `rest` skips whitespace and comments and returns where the next value
+ * begins, or undefined at the end of the text; `next` reads that value.
+ * @param {string} source
+ * @param {{maxDepth?: number}} [opts]
+ * @returns {{ rest: () => number | undefined, next: () => Spanned }}
+ */
+function topLevel(source, opts) {
   if (typeof source !== 'string') throw new TypeError('read expects a string')
   const { maxDepth = 1024 } = opts ?? {}
 
   const n = source.length
   let pos = 0
   let depth = 0
-  /** @type {Spanned[]} */
-  const values = []
 
   /**
    * A syntax error: the input is malformed, not merely unfinished.
@@ -464,7 +489,7 @@ export function readSpans(source, opts) {
 
   /**
    * Read one value with its span — the recursive core the frame readers and
-   * the document loop share.
+   * the top level share.
    * @returns {Spanned}
    */
   function readSpanned() {
@@ -544,11 +569,11 @@ export function readSpans(source, opts) {
     return { value, start, end: pos, children }
   }
 
-  while (true) {
-    skipTrivia()
-    if (pos >= n) break
-    values.push(readSpanned())
+  return {
+    rest() {
+      skipTrivia()
+      return pos < n ? pos : undefined
+    },
+    next: readSpanned,
   }
-
-  return values
 }
