@@ -1,9 +1,23 @@
-import ../../[core, ops]
+import ../../core
 import ../blmacro
 
 refuseWith ValueError
 
-let Scheme* = bl `eddsa-blake2b`
+proc fields*(v, head: Value, n: int): seq[Value] =
+  ## the fields of `(head F1 … Fn)`, read exactly: unmarked, with that
+  ## head and n fields, no more. A field more would ride along unread,
+  ## and unsigned where a signature covers the value.
+  guard v.kind == bRec and not v.mark and v.items.len == n + 1 and
+    v.head == head, "not (" & $head & " …) with " & $n & " fields"
+  v.items.data[1 .. n]
+
+proc fill*[N: static int](dest: var array[N, byte], v: Value, what: string) =
+  ## dest from v, which must be unmarked bytes exactly N long
+  guard v.kind == bBytes and not v.mark and v.bytes.len == N,
+    "malformed " & what
+  copyMem addr dest[0], addr v.bytes[0], N
+
+let Scheme* = rv"eddsa-blake2b"
 
 type
   Seed* = array[32, byte]
@@ -32,26 +46,15 @@ func shape*(_: typedesc[Signed]): Value =
   bl shape(signed(value, sig), {value, sig})
 
 proc fromValue*(T: typedesc[Signature], v: Value): Signature =
-  var bindings: Value
-  guard extract(T.shape.toShape, v, bindings), "invalid signature shape"
-  let 
-    scheme = bindings[bl scheme]
-    sig = bindings[bl sig]
-    pubkey = bindings[bl pubkey]
-  guard scheme == Scheme, "unknown scheme"
-  guard sig.kind == bBytes and sig.bytes.len == 64, "malformed sig"
-  guard pubkey.kind == bBytes and pubkey.bytes.len == 32, "malformed pubkey"
-  result.scheme = bindings[bl scheme]
-  copyMem addr result.sig[0], addr sig.bytes[0], 64
-  copyMem addr result.pubkey[0], addr pubkey.bytes[0], 32
+  let f = v.fields(bl signature, 3)
+  guard f[0] == Scheme, "unknown scheme"
+  result.scheme = Scheme
+  result.sig.fill f[1], "sig"
+  result.pubkey.fill f[2], "pubkey"
 
 proc fromValue*(T: typedesc[Signed], v: Value): Signed =
-  var bindings: Value
-  guard extract(T.shape.toShape, v, bindings), "invalid signed shape"
-  let
-    value = bindings[bl value]
-    sig = Signature.fromValue bindings[bl sig]
-  Signed(value: value, sig: sig)
+  let f = v.fields(bl signed, 2)
+  Signed(value: f[0], sig: Signature.fromValue f[1])
 
 func toValue*(self: Signature): Value =
   bl signature(%self.scheme, %(@(self.sig)), %(@(self.pubkey)))
@@ -63,18 +66,11 @@ func shape*(_: typedesc[Keypair]): Value =
   bl shape(keypair(scheme, seed, pubkey), {scheme, seed, pubkey})
 
 proc fromValue*(T: typedesc[Keypair], v: Value): Keypair =
-  var bindings: Value
-  guard extract(T.shape.toShape, v, bindings), "invalid keypair shape"
-  let
-    scheme = bindings[bl scheme]
-    seed = bindings[bl seed]
-    pubkey = bindings[bl pubkey]
-  guard scheme == Scheme, "unknown scheme"
-  guard seed.kind == bBytes and seed.bytes.len == 32, "malformed seed"
-  guard pubkey.kind == bBytes and pubkey.bytes.len == 32, "malformed pubkey"
-  result.scheme = scheme
-  copyMem addr result.seed[0], addr seed.bytes[0], 32
-  copyMem addr result.pubkey[0], addr pubkey.bytes[0], 32
+  let f = v.fields(bl keypair, 3)
+  guard f[0] == Scheme, "unknown scheme"
+  result.scheme = Scheme
+  result.seed.fill f[1], "seed"
+  result.pubkey.fill f[2], "pubkey"
 
 func toValue*(self: Keypair): Value =
   bl keypair(%self.scheme, %(@(self.seed)), %(@(self.pubkey)))

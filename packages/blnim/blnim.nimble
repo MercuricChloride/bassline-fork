@@ -5,7 +5,6 @@ author = "mercuricchloride"
 description = "Bassline nim implementation"
 license = "AGPL-3.0-or-later"
 srcDir = "src"
-bin = @["bl"]
 binDir = "bin"
 
 # Dependencies

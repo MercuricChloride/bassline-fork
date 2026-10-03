@@ -17,6 +17,37 @@ type
   ReadError* = object of CatchableError
   Incomplete* = object of ReadError
 
+  ScanState = enum
+    ## where `scan` stands in the text
+    scCode      ## outside any string or comment
+    scDeciding  ## the same, where the next character decides what is
+                ## before it: just past a frame or string closing at the
+                ## top, or a mark there
+    scComment
+    scQuoted    ## inside a string or quoted symbol; `quote` says which
+    scEscaped   ## the same, just past a backslash
+
+  Reader* = object
+    ## text read as it arrives: `add` feeds it in pieces, `items` hands
+    ## back each value once the text so far certainly holds it, and
+    ## `finish` says no more is coming. A default `Reader` is ready.
+    ## The parser below reads a `Reader` as it would a whole string,
+    ## except that at the end of what has been fed it starves until
+    ## `finish`, so a pause is never taken for a delimiter.
+    text: string      ## fed and not yet dropped
+    pos: int          ## where the next value may start; all before it is read
+    final: bool       ## no more text will be fed
+    lines, col: int   ## newlines dropped, and characters dropped since the last
+    scanned: int      ## how far `scan` has followed the text
+    open: string      ## the closers `scan` expects there, innermost last
+    state: ScanState
+    quote: char       ## the quote `scan` last opened
+    armed: bool
+      ## the reading may have moved on since the text was last read
+    retry: int
+      ## how long the unread text may grow before it is read again
+      ## unarmed, so a refusal in a frame still open is not held back
+
 const
   Ws = {' ', '\t', '\n', '\r'}
   Delims = Ws + {'[', ']', '{', '}', '(', ')', ':', '\'', '"', ';', '!'}
@@ -35,33 +66,54 @@ func isBareSpelling*(s: string): bool =
     if c in Delims or ord(c) < 0x20: return false
   true
 
-func where(s: string, pos: int): string =
-  var
-    line = 1
-    bol = 0
-  for i in 0 ..< min(pos, s.len):
-    if s[i] == '\n':
-      inc line
-      bol = i + 1
-  "line " & $line & ", col " & $(pos - bol + 1) & ": "
+func `[]`(s: Reader, i: int): char =
+  s.text[i]
 
-func fail(s: string, pos: int, msg: string) {.noreturn.} =
+func `[]`(s: Reader, x: HSlice[int, int]): string =
+  s.text[x]
+
+func ended(s: Reader): bool =
+  if not s.final: starved("the text fed so far ends here")
+  true
+
+func past(s: Reader, pos: int): bool =
+  ## whether pos is past the end of the text. Until `finish` the text
+  ## may go on, so a reading that gets there starves
+  pos >= s.text.len and s.ended
+
+func lineCol(s: Reader, pos: int): tuple[line, col: int] =
+  ## where pos sits in all the text fed, both counted from 1
+  result = (s.lines + 1, s.col + pos + 1)
+  for i in 0 ..< min(pos, s.text.len):
+    if s.text[i] == '\n':
+      inc result.line
+      result.col = pos - i
+
+func where(s: Reader, pos: int): string =
+  let (line, col) = s.lineCol(pos)
+  "line " & $line & ", col " & $col & ": "
+
+func fail(s: Reader, pos: int, msg: string) {.noreturn.} =
   raise newException(ReadError, where(s, pos) & msg)
 
-func incomplete(s: string, pos: int, msg: string) {.noreturn.} =
+func incomplete(s: Reader, pos: int, msg: string) {.noreturn.} =
   raise newException(Incomplete, where(s, pos) & msg)
 
-func skipWs(s: string, pos: var int) =
-  while pos < s.len:
+func skipWs(s: Reader, pos: var int) =
+  ## a reading that starves in a comment leaves pos on its ';', so
+  ## what is skipped before the comment is read and the comment is not
+  while not s.past(pos):
     if s[pos] == ';':
-      while pos < s.len and s[pos] != '\n':
-        inc pos
+      var eol = pos
+      while not s.past(eol) and s[eol] != '\n':
+        inc eol
+      pos = eol
     elif s[pos] in Ws:
       inc pos
     else:
       break
 
-func nibble(s: string, pos: int, c: char): byte =
+func nibble(s: Reader, pos: int, c: char): byte =
   case c
   of '0' .. '9':
     byte(ord(c) - ord('0'))
@@ -72,20 +124,20 @@ func nibble(s: string, pos: int, c: char): byte =
   else:
     fail(s, pos, "not a hex digit in bytes: " & c)
 
-func quotedScan(s: string, pos: var int, q: char): string =
+func quotedScan(s: Reader, pos: var int, q: char): string =
   ## body of a "string" or 'symbol' where pos is on the opening quote.
   ## Escapes are \q \\ \n \t \r
   let what = if q == '"': "string" else: "symbol"
   inc pos
   while true:
-    if pos >= s.len:
+    if s.past(pos):
       incomplete(s, pos, "unterminated " & what)
     let c = s[pos]
     if c == q:
       inc pos
       break
     elif c == '\\':
-      if pos + 1 >= s.len:
+      if s.past(pos + 1):
         incomplete(s, pos, "unterminated " & what)
       let e = s[pos + 1]
       if e == q:
@@ -105,20 +157,20 @@ func quotedScan(s: string, pos: var int, q: char): string =
       result.add c
       inc pos
 
-func checkUtf8(s: string, pos: int, raw: string, what: string) =
+func checkUtf8(s: Reader, pos: int, raw: string, what: string) =
   if not isValidUtf8(raw.toBytes):
     fail(s, pos, "malformed UTF-8 in " & what)
 
-proc value(s: string, pos: var int): Value
+proc value(s: Reader, pos: var int): Value
 
-proc datum(s: string, pos: var int): Value =
+proc datum(s: Reader, pos: var int): Value =
   case s[pos]
   of '[':
     inc pos
     result = initList()
     while true:
       skipWs(s, pos)
-      if pos >= s.len:
+      if s.past(pos):
         incomplete(s, pos, "unclosed [")
       if s[pos] == ']':
         inc pos
@@ -127,14 +179,14 @@ proc datum(s: string, pos: var int): Value =
   of '(':
     inc pos
     skipWs(s, pos)
-    if pos >= s.len:
+    if s.past(pos):
       incomplete(s, pos, "unclosed (")
     if s[pos] == ')':
       fail(s, pos, "record with no head")
     result = initRec(value(s, pos))
     while true:
       skipWs(s, pos)
-      if pos >= s.len:
+      if s.past(pos):
         incomplete(s, pos, "unclosed (")
       if s[pos] == ')':
         inc pos
@@ -145,7 +197,7 @@ proc datum(s: string, pos: var int): Value =
     # member decides: a ':' after it makes the frame a dictionary
     inc pos
     skipWs(s, pos)
-    if pos >= s.len:
+    if s.past(pos):
       incomplete(s, pos, "unclosed {")
     if s[pos] == '}':
       inc pos
@@ -153,7 +205,7 @@ proc datum(s: string, pos: var int): Value =
     if s[pos] == ':':
       inc pos
       skipWs(s, pos)
-      if pos >= s.len:
+      if s.past(pos):
         incomplete(s, pos, "unclosed {")
       if s[pos] != '}':
         fail(s, pos, "'{:' is the empty dictionary; expected '}'")
@@ -161,7 +213,7 @@ proc datum(s: string, pos: var int): Value =
       return initDict()
     let first = value(s, pos)
     skipWs(s, pos)
-    if pos >= s.len:
+    if s.past(pos):
       incomplete(s, pos, "unclosed {")
     if s[pos] == ':':
       inc pos
@@ -172,14 +224,14 @@ proc datum(s: string, pos: var int): Value =
           fail(s, pos, "duplicate dict key")
         result.dict[k] = value(s, pos)
         skipWs(s, pos)
-        if pos >= s.len:
+        if s.past(pos):
           incomplete(s, pos, "unclosed {")
         if s[pos] == '}':
           inc pos
           break
         k = value(s, pos)
         skipWs(s, pos)
-        if pos >= s.len:
+        if s.past(pos):
           incomplete(s, pos, "dict entry needs ':' after its key")
         if s[pos] != ':':
           fail(s, pos, "dict entry needs ':' after its key")
@@ -192,7 +244,7 @@ proc datum(s: string, pos: var int): Value =
           fail(s, pos, "duplicate set member")
         result.els.incl m
         skipWs(s, pos)
-        if pos >= s.len:
+        if s.past(pos):
           incomplete(s, pos, "unclosed {")
         if s[pos] == '}':
           inc pos
@@ -214,7 +266,7 @@ proc datum(s: string, pos: var int): Value =
     fail(s, pos, "unexpected " & s[pos])
   else:
     let start = pos
-    while pos < s.len and s[pos] notin Delims:
+    while not s.past(pos) and s[pos] notin Delims:
       inc pos
     let tok = s[start ..< pos]
     if tok.len >= 2 and tok[0] == '0' and tok[1] == 'x':
@@ -258,15 +310,15 @@ proc datum(s: string, pos: var int): Value =
       checkUtf8(s, start, tok, "symbol")
       result = sym(tok)
 
-proc value(s: string, pos: var int): Value =
+proc value(s: Reader, pos: var int): Value =
   skipWs(s, pos)
-  if pos >= s.len:
+  if s.past(pos):
     incomplete(s, pos, "expected a value")
   var prefixMarked = false
   if s[pos] == '!':
     # a mark in front belongs to a frame; it must touch the bracket
     inc pos
-    if pos >= s.len:
+    if s.past(pos):
       incomplete(s, pos, "mark with no value")
     if s[pos] == '!':
       fail(s, pos, "repeated mark")
@@ -277,37 +329,143 @@ proc value(s: string, pos: var int): Value =
     prefixMarked = true
   let frame = s[pos] in {'(', '[', '{'}
   var v = datum(s, pos)
-  if pos < s.len and s[pos] == '!':
+  if not s.past(pos) and s[pos] == '!':
     # a mark behind belongs to an atom; it must touch the atom and
     # end at a delimiter
     if frame:
       fail(s, pos, "a frame is marked in front: !(…)")
     inc pos
-    if pos < s.len and s[pos] notin Delims:
+    if not s.past(pos) and s[pos] notin Delims:
       fail(s, pos, "a marked atom ends at a delimiter")
     v.mark = true
   elif prefixMarked:
     v.mark = true
   v
 
+## ================ READING IN PIECES ================
+
+proc add*(s: var Reader, text: string) =
+  ## more text to read. What is already read is dropped first, its
+  ## lines and columns kept so later errors still say where they are
+  doAssert not s.final, "text fed after finish"
+  if s.pos > 0:
+    let (line, col) = s.lineCol(s.pos)
+    s.lines = line - 1
+    s.col = col - 1
+    s.text.delete(0 ..< s.pos)
+    s.scanned -= s.pos
+    s.pos = 0
+  s.text.add text
+
+func scan(s: var Reader) =
+  ## follows the new text just far enough to see where the reading may
+  ## move on: a delimiter outside any frame, string or comment, anything
+  ## at all right after a frame or string closes there or after a mark
+  ## there, and a closer out of place, which the reading refuses. Only
+  ## then is the text read again, so a long frame or string arriving in
+  ## pieces is read once it is whole, not on every piece
+  while s.scanned < s.text.len:
+    let c = s.text[s.scanned]
+    inc s.scanned
+    case s.state
+    of scComment:
+      if c == '\n': s.state = scCode
+    of scEscaped:
+      s.state = scQuoted
+    of scQuoted:
+      if c == '\\':
+        s.state = scEscaped
+      elif c == s.quote:
+        s.state = if s.open.len == 0: scDeciding else: scCode
+    of scCode, scDeciding:
+      let top = s.open.len == 0
+      if top and (s.state == scDeciding or c in Delims):
+        s.armed = true
+      s.state = if top and c == '!': scDeciding else: scCode
+      case c
+      of '(': s.open.add ')'
+      of '[': s.open.add ']'
+      of '{': s.open.add '}'
+      of ')', ']', '}':
+        if top or s.open[^1] != c:
+          s.armed = true
+        else:
+          s.open.setLen(s.open.len - 1)
+          if s.open.len == 0: s.state = scDeciding
+      of '"', '\'':
+        s.quote = c
+        s.state = scQuoted
+      of ';':
+        s.state = scComment
+      else: discard
+
+proc next(s: var Reader, v: var Value): bool =
+  ## the next value, if the text certainly holds one. The whitespace
+  ## and ended comments before it are read either way, so a long run
+  ## of them is neither held nor read again
+  var pos = s.pos
+  try:
+    skipWs(s, pos)
+  except BufferStarvedError:
+    s.pos = pos
+    return false
+  s.pos = pos
+  if s.past(pos):
+    return false
+  try:
+    v = value(s, pos)
+  except BufferStarvedError:
+    return false
+  s.pos = pos
+  true
+
+iterator items*(s: var Reader): Value =
+  ## each value the text fed so far certainly holds, once. A value
+  ## still open waits for more, and so does an atom touching the end
+  ## of the text, since the next piece may go on with it. A refusal
+  ## comes out once the text has moved on past it at the top, or at
+  ## the latest once the unread text has doubled
+  s.scan()
+  if s.armed or s.text.len - s.pos > s.retry:
+    var v: Value
+    while s.next(v):
+      yield v
+    s.armed = false
+    s.retry = 2 * (s.text.len - s.pos)
+
+iterator finish*(s: var Reader): Value =
+  ## no more text is coming: the values left, the end of the text
+  ## closing an atom that touches it. A value still open is Incomplete
+  s.final = true
+  var v: Value
+  while s.next(v):
+    yield v
+
 proc readDocument*(text: string, values: var seq[Value]) =
   ## read many values into the seq values
-  var pos = 0
-  while true:
-    skipWs(text, pos)
-    if pos >= text.len:
-      break
-    values.add value(text, pos)
+  var r: Reader
+  r.add text
+  for v in r.finish:
+    values.add v
 
 proc readDocument*(text: string): seq[Value] =
   readDocument(text, result)
 
 proc readValue*(text: string): Value =
-  ## read exactly one value
-  var values = readDocument(text)
-  if values.len != 1:
-    raise newException(ReadError, "expected exactly one value, got " & $values.len)
-  move values[0]
+  ## read exactly one value from text that is all there is. Text that
+  ## runs out inside its value is Incomplete. Once the value is read,
+  ## anything but whitespace and comments begins a second one, so the
+  ## text can never be one value and is refused however it ends
+  var
+    r = Reader(text: text, final: true)
+    pos = 0
+  skipWs(r, pos)
+  if r.past(pos):
+    fail(r, pos, "expected exactly one value, got none")
+  result = value(r, pos)
+  skipWs(r, pos)
+  if not r.past(pos):
+    fail(r, pos, "expected exactly one value, and more follows")
 
 ## ================ PRINTING ================
 

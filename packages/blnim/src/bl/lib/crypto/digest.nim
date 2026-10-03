@@ -9,8 +9,9 @@
 ]##
 
 import nimcrypto/[blake2, sha2]
-import ../../[core, ops]
+import ../../core
 import ../blmacro
+import ./types
 
 refuseWith ValueError
 
@@ -60,18 +61,10 @@ func shape*(_: typedesc[Digest]): Value =
   bl shape(digest(algo, hash), {algo, hash})
 
 proc fromValue*(T: typedesc[Digest], v: Value): Digest =
-  var bindings: Value
-  guard extract(T.shape.toShape, v, bindings), "invalid digest shape"
-  let
-    algo = bindings[bl algo]
-    hash = bindings[bl hash]
-  guard algo.kind == bSym, "digest algo must be a symbol"
-  guard hash.kind == bBytes, "digest hash must be bytes"
-  guard algo == Sha256Algo or algo == Blake2bAlgo, "unknown hash algo"
-  guard hash.bytes.len == 32, "invalid hash length"
-
-  result.algo = algo
-  copyMem addr result.hash[0], addr hash.bytes[0], 32
+  let f = v.fields(bl digest, 2)
+  guard f[0] == Sha256Algo or f[0] == Blake2bAlgo, "unknown hash algo"
+  result.algo = f[0]
+  result.hash.fill f[1], "hash"
 
 proc toValue*(self: Digest): Value =
   bl digest(%(self.algo), %(@(self.hash)))

@@ -15,7 +15,7 @@ let
 
 template refuses(call: untyped) =
   ## the door raises rather than returning a wrong reading
-  expect ValueError, RuleError:
+  expect ValueError:
     discard call
 
 suite "digest":
@@ -51,6 +51,9 @@ suite "digest":
     refuses Digest.fromValue(bl(digest(sha256, x"00")))     # not 32 bytes
     refuses Digest.fromValue(bl(digest(sha256, "text")))    # not bytes
     refuses Digest.fromValue(bl(hash(sha256, x"00")))       # not the digest head
+    let dv = toValue(digest(v, Sha256Algo))
+    refuses Digest.fromValue(bl(digest(sha256, %dv[2], extra)))  # a field more
+    refuses Digest.fromValue(bl(!digest(sha256, %dv[2])))        # marked
 
 suite "clave":
   test "a keypair derives from its seed and is a value":
@@ -86,6 +89,8 @@ suite "clave":
     let back = Signed.fromValue(sv)
     check back == s
     check back.holds
+    let m = kp.signed(bl(!go(here)))
+    check Signed.fromValue(m.toValue) == m                  # any value, marked too
 
   test "a tampered signed value does not hold":
     var s = kp.signed(v)
@@ -104,3 +109,10 @@ suite "clave":
     refuses Signed.fromValue(bl(signed(1,
       signature(rsa, %bytes(kp.sign(bl 1).sig), %bytes(kp.pubkey))))) # unknown scheme
     refuses Signed.fromValue(bl(signed(1, 5)))                        # sig not a record
+    let s = kp.signed(v)
+    refuses Signed.fromValue(bl(signed(%v, %s.sig, extra)))           # unsigned field
+    refuses Signed.fromValue(bl(signed(%v, signature(s"eddsa-blake2b",
+      %bytes(s.sig.sig), %bytes(kp.pubkey), extra))))               # in the signature too
+    refuses Signed.fromValue(bl(!signed(%v, %s.sig)))                 # marked
+    refuses Keypair.fromValue(bl(keypair(s"eddsa-blake2b",
+      %bytes(seed), %bytes(kp.pubkey), extra)))

@@ -2,7 +2,7 @@
 ## This is probably gonna get thrown out in favor of a
 ## more traditional signature algorithm. But it's
 ## good-enuf
-{.compile: "../../../vendor/monocypher/monocypher.c".}
+{.compile: "../../../../vendor/monocypher/monocypher.c".}
 
 import ./types
 

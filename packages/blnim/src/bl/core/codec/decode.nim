@@ -127,7 +127,8 @@ proc childrenDo*(self: ValueView, cb: Callback, deep = false) =
   of bDict:
     for (key, val) in self.entries:
       recur key
-      recur val
+      if not val.isNil: # a dict still open may hold a key awaiting its value
+        recur val
   of bList, bRec, bSet:
     for child in self.children:
       recur child
@@ -161,15 +162,27 @@ proc compact*(self: var Decoder) =
   ## 
   ## Drops the bytes already decoded, rebasing the cursor to what is
   ## still pending.
-  let pos = self.cursor.pos
-  if pos == 0 or self.frames.len > 0:
+  ##
+  ## While a frame is open, what is dropped is every byte before the
+  ## outermost open frame began. The open frames, and the members
+  ## already attached to them, move with their bytes, so decoding
+  ## carries on as though nothing had been dropped. Each view moves
+  ## at most once: after a compact the outermost open frame starts
+  ## the buffer, and the next compact that drops anything comes after
+  ## it has closed.
+  let drop = if self.frames.len > 0: self.frames[0].offset
+             else: self.cursor.pos
+  if drop == 0:
     return
-  let rest = self.cursor.buf.data.len - pos
+  let rest = self.cursor.buf.data.len - drop
   if rest > 0:
     moveMem(addr self.cursor.buf.data[0],
-            addr self.cursor.buf.data[pos], rest)
+            addr self.cursor.buf.data[drop], rest)
   self.cursor.buf.data.setLen(rest)
-  self.cursor.pos = 0
+  self.cursor.pos -= drop
+  for frame in self.frames:
+    frame.offset -= drop
+    frame.childrenDo(proc(v: ValueView) = v.offset -= drop, deep = true)
 
 proc toValue(pv: PartialValue, buf: Buffer[byte]): ValueView =
     let 
@@ -255,8 +268,14 @@ iterator decode*(_: typedesc[ValueView], ce: openArray[byte]): ValueView =
     yield v
 
 proc decode*(_: typedesc[ValueView], ce: openArray[byte]): ValueView =
-  var first = true
-  for v in ValueView.decode(ce):
-    guard first, "decode proc should only produce 1 value"
+  ## exactly one value. ce is all there is, so where the iterator would
+  ## wait on a prefix, this refuses it, as it refuses none or several
+  var
+    d = newDecoder(newBuffer(ce))
+    n = 0
+  for v in d.checked:
+    inc n
+    guard n == 1, "decode proc should only produce 1 value"
     result = v
-    first = false
+  guard not d.pending, "ends partway through a value"
+  guard n == 1, "no value"

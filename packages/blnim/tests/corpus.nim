@@ -38,6 +38,11 @@ template refuses*(s: string) =
     except Incomplete:
       discard
 
+proc every*(size, len: int): seq[int] =
+  ## the cuts that feed len bytes or characters size at a time
+  for cut in countup(size, len - 1, size):
+    result.add cut
+
 proc land*(bytes: openArray[byte]): Landed =
   var d = newDecoder(newBuffer(bytes))
   try:
