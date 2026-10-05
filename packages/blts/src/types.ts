@@ -1,3 +1,5 @@
+import type { BTree, BTreeSet } from './btree.ts'
+
 export const TAGS = {
   nil: 1,
   number: 2,
@@ -74,7 +76,10 @@ interface INil extends IValue<'nil'> {
   readonly payload: null
 }
 
-/** An integer, held whole: a number only when it is one, a bigint past that. */
+/**
+ * An integer, held whole and in one host form: a number when it is a safe
+ * integer, a bigint otherwise, so `payload === 5` means what it says.
+ */
 interface INumber extends IValue<'number'> {
   readonly payload: number | bigint
 }
@@ -120,6 +125,11 @@ interface IDict extends IValue<'dict'> {
   entries(): Generator<[Value, Value]>
   has(key: Value): boolean
   get(key: Value): Value | undefined
+  /**
+   * The entries as a tree of their own, to add to and build a new dict from;
+   * this dict is untouched.
+   */
+  tree(): BTree<Value, Value>
 }
 
 /** Members are unique and held in canonical order, the order of their CE bytes. */
@@ -127,11 +137,32 @@ interface ISet extends IValue<'set'> {
   /** Members in canonical order. */
   children(): Generator<Value>
   has(member: Value): boolean
+  /**
+   * The members as a tree of their own, to add to and build a new set from;
+   * this set is untouched.
+   */
+  tree(): BTreeSet<Value>
 }
 
 // ================
 // Comparators
 // ================
+
+export type Atom = Value<AtomKind>
+export type Frame = Value<FrameKind>
+
+export const isAtom = (v: Value): v is Atom =>
+  v.kind === 'nil' ||
+  v.kind === 'number' ||
+  v.kind === 'text' ||
+  v.kind === 'symbol' ||
+  v.kind === 'bytes'
+
+export const isFrame = (v: Value): v is Frame =>
+  v.kind === 'list' ||
+  v.kind === 'record' ||
+  v.kind === 'dict' ||
+  v.kind === 'set'
 
 function* lockstep<A>(a: Generator<A>, b: Generator<A>) {
   while (true) {
@@ -242,6 +273,10 @@ export function cmp(a: Value, b: Value) {
   return compare.values(a, b)
 }
 
+export function eq(a: Value, b: Value) {
+  return cmp(a, b) == 0
+}
+
 export function cmpEntries(a: [Value, Value], b: [Value, Value]) {
   return cmp(a[0], b[0]) || cmp(a[1], b[1])
 }
@@ -269,10 +304,4 @@ export function utf8Length(s: string) {
     } else n += 3
   }
   return n
-}
-
-const scalars: ValueKind[] = ['nil', 'number', 'text', 'symbol', 'bytes']
-
-export function isScalarKind(v: Value) {
-  return scalars.includes(v.kind)
 }

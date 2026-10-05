@@ -1,4 +1,5 @@
-import { spelling, type Value, type ValueKind } from '../types.ts'
+import { spelling, type Atom, type Value, type ValueKind } from '../types.ts'
+import { steps } from '../ops.ts'
 import { ByteBuffer } from './buffer.ts'
 import { END, MAX_PAYLOAD, writeHeader } from './util.ts'
 
@@ -13,32 +14,37 @@ export function encode(v: Value): Uint8Array {
 
 /** Append a value's CE bytes to `out`. */
 export function encodeInto(v: Value, out: ByteBuffer) {
+  for (const { step, value } of steps(v)) {
+    switch (step) {
+      case 'open': {
+        out.push(writeHeader(value.kind, value.mark, 0))
+        break
+      }
+      case 'atom': {
+        writeAtom(value, out)
+        break
+      }
+      case 'close':
+        out.push(END)
+    }
+  }
+}
+
+function writeAtom(v: Atom, out: ByteBuffer) {
   switch (v.kind) {
     case 'nil':
-      out.push(writeHeader(v.kind, v.mark, 0))
-      return
+      return out.push(writeHeader(v.kind, v.mark, 0))
     case 'number':
       return scalar(v.kind, v.mark, ENC.encode(spelling(v.payload)), out)
     case 'symbol':
     case 'text':
-      // the value refused a lone surrogate, so nothing is replaced here
       return scalar(v.kind, v.mark, ENC.encode(v.payload), out)
     case 'bytes':
       return scalar(v.kind, v.mark, v.payload, out)
-    case 'list':
-    case 'record':
-    case 'dict':
-    case 'set':
-      // dicts and sets hold their members in CE order already, and a
-      // dict's children run key, value, key, value
-      out.push(writeHeader(v.kind, v.mark, 0))
-      for (const c of v.children()) encodeInto(c, out)
-      out.push(END)
-      return
   }
 }
 
-/** The header, the length in its smallest form, then the payload. */
+/** The header, the length in its smallest form then the payload */
 function scalar(
   kind: ValueKind,
   mark: boolean,

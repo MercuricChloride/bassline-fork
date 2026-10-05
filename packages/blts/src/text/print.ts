@@ -1,4 +1,10 @@
-import { spelling, type FrameKind, type Value } from '../types.ts'
+import {
+  spelling,
+  type FrameKind,
+  type Value,
+  isFrame,
+  type Frame,
+} from '../types.ts'
 
 const DELIMS = new Set([
   ' ',
@@ -52,14 +58,6 @@ function hex(b: Uint8Array) {
   for (const x of b) out += x.toString(16).padStart(2, '0')
   return out
 }
-
-type Frame = Value<FrameKind>
-
-const isFrame = (v: Value): v is Frame =>
-  v.kind === 'list' ||
-  v.kind === 'record' ||
-  v.kind === 'dict' ||
-  v.kind === 'set'
 
 function atom(v: Value): string {
   let out: string

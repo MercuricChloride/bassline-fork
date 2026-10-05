@@ -16,15 +16,27 @@ class BNil implements Value<'nil'> {
   }
 }
 
+const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER)
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER)
+
 class BNum implements Value<'number'> {
   readonly payload: number | bigint
   readonly mark: boolean
   constructor(payload: number | bigint, mark: boolean = false) {
-    this.payload = payload
-    this.mark = mark
     if (typeof payload == 'number' && !Number.isInteger(payload)) {
       throw new TypeError('not an integer: ' + payload)
     }
+    // one host form for each integer: a number where it is exact, else a
+    // bigint, and -0 is 0
+    this.payload =
+      typeof payload == 'bigint'
+        ? payload >= MIN_SAFE && payload <= MAX_SAFE
+          ? Number(payload)
+          : payload
+        : Number.isSafeInteger(payload)
+          ? payload + 0
+          : BigInt(payload)
+    this.mark = mark
   }
   readonly kind = 'number'
   get length(): number {
@@ -145,6 +157,9 @@ class BDict implements Value<'dict'> {
   get(k: Value): Value | undefined {
     return this.items.get(k)
   }
+  tree() {
+    return this.items.clone()
+  }
 }
 
 class BSet implements Value<'set'> {
@@ -163,6 +178,9 @@ class BSet implements Value<'set'> {
   }
   has(k: Value) {
     return this.items.has(k)
+  }
+  tree() {
+    return this.items.clone()
   }
 }
 

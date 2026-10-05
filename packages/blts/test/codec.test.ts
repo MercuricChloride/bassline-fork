@@ -9,19 +9,19 @@ import {
   Decoder,
   encode,
   Incomplete,
+  readDocument,
   value,
   type Value,
 } from '../src/index.ts'
-import { fromCarrier, parseJson } from './carrier.ts'
 import { randValue } from './random.ts'
 
-// The shared corpus, read from corpus.json through the carrier until blts
-// has a reader, and checked against corpus.blb.
+// The shared corpus, read from corpus.bl, and checked against corpus.blb.
 
 const dir = new URL('../../../corpus/', import.meta.url)
-const cases = (
-  parseJson(readFileSync(new URL('corpus.json', dir), 'utf8')) as unknown[]
-).map(fromCarrier) as Value<'record'>[]
+const cases = readDocument(
+  value,
+  readFileSync(new URL('corpus.bl', dir), 'utf8')
+) as Value<'record'>[]
 const blb = new Uint8Array(readFileSync(new URL('corpus.blb', dir)))
 
 const byHead = (head: string) =>
@@ -218,6 +218,15 @@ describe('edges', () => {
     expect(() => value.number(NaN)).toThrow(TypeError)
   })
 
+  it('each integer has one host form', () => {
+    expect(value.number(5n).payload).toBe(5)
+    expect(value.number(-0).payload).toBe(0)
+    expect(Object.is(value.number(-0).payload, 0)).toBe(true)
+    expect(value.number(2 ** 60).payload).toBe(2n ** 60n)
+    expect(value.number(2n ** 53n).payload).toBe(2n ** 53n)
+    expect(value.number(2 ** 53 - 1).payload).toBe(2 ** 53 - 1)
+  })
+
   it('text is kept as given', () => {
     const nfc = value.text('\u00E9')
     const nfd = value.text('e\u0301')
@@ -226,6 +235,20 @@ describe('edges', () => {
     expect(bom.payload).toBe('\uFEFFx')
     expect(() => value.text('\uD800')).toThrow(TypeError)
     expect(() => value.sym('a\uDC00')).toThrow(TypeError)
+  })
+
+  it('a tree from a dict or set is its own', () => {
+    const d = value.dict([[value.sym('a'), value.number(1)]])
+    const t = d.tree()
+    t.set(value.sym('b'), value.number(2))
+    const d2 = value.dict(t)
+    expect(d.length).toBe(1)
+    expect(d2.get(value.sym('b'))).toEqual(value.number(2))
+    const s = value.set([value.sym('a')])
+    const st = s.tree()
+    st.add(value.sym('b'))
+    expect(s.has(value.sym('b'))).toBe(false)
+    expect(value.set(st).length).toBe(2)
   })
 
   it('marks are per value', () => {

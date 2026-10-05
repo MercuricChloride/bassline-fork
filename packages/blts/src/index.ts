@@ -1,4 +1,6 @@
 export * from './types.ts'
 export * from './values.ts'
+export * from './ops.ts'
 export * from './codec/index.ts'
 export * from './text/index.ts'
+export * from './json/index.ts'

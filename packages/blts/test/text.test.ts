@@ -13,7 +13,6 @@ import {
   value,
   type Value,
 } from '../src/index.ts'
-import { fromCarrier, parseJson } from './carrier.ts'
 import { randValue } from './random.ts'
 
 const dir = new URL('../../../corpus/', import.meta.url)
@@ -51,14 +50,6 @@ function refusal(f: () => unknown) {
 }
 
 describe('corpus', () => {
-  it('corpus.bl reads as the cases corpus.json carries', () => {
-    const json = (
-      parseJson(readFileSync(new URL('corpus.json', dir), 'utf8')) as unknown[]
-    ).map(fromCarrier)
-    expect(cases.length).toBe(json.length)
-    cases.forEach((c, i) => same(c, json[i]!))
-  })
-
   it('corpus.bl reads the same in pieces of any size', () => {
     for (const n of [1, 2, 3, 7, 64, 1000]) {
       const got = inPieces(source, n)
