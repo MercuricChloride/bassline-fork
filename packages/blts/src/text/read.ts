@@ -1,5 +1,5 @@
 import { integer, MAX_DEPTH } from '../codec/util.ts'
-import type { Factory, Value } from '../types.ts'
+import { withMark, type Factory, type Value } from '../types.ts'
 
 /** Text that breaks a rule of the syntax. */
 export class ReadError extends Error {
@@ -34,6 +34,11 @@ const DELIMS = new Set([
   '!',
 ])
 const OPENERS = new Set(['(', '[', '{'])
+/**
+ * Where a template splices a value into its text. It reads as a delimiter, so
+ * a splice is a value of its own wherever it sits.
+ */
+const SPLICE = '\uFFFC'
 const CANONICAL = /^(0|-?[1-9][0-9]*)$/
 
 const isDigit = (c: string | undefined) =>
@@ -71,9 +76,13 @@ class Parser {
   readonly final: boolean
   readonly origin: Origin
   readonly maxDepth: number
+  /** The values a template splices in, in order, if this text is one. */
+  readonly splices: readonly Value[] | undefined
   pos: number
   /** How many frames are open around pos. */
   depth = 0
+  /** How many splices have been read. */
+  spliced = 0
 
   constructor(
     make: Factory,
@@ -81,7 +90,8 @@ class Parser {
     final: boolean,
     pos: number,
     origin: Origin,
-    maxDepth: number
+    maxDepth: number,
+    splices?: readonly Value[]
   ) {
     this.make = make
     this.text = text
@@ -89,6 +99,17 @@ class Parser {
     this.pos = pos
     this.origin = origin
     this.maxDepth = maxDepth
+    this.splices = splices
+  }
+
+  /** Whether `c` ends a bare token. */
+  delim(c: string) {
+    return DELIMS.has(c) || this.splice(c)
+  }
+
+  /** Whether `c` is where a template splices a value. */
+  splice(c: string) {
+    return c === SPLICE && this.splices !== undefined
   }
 
   /** Whether `at` is past the end of the text; starves if more may come. */
@@ -118,7 +139,11 @@ class Parser {
       const c = this.at()
       if (c === ';') {
         let eol = this.pos
-        while (!this.past(eol) && this.text[eol] !== '\n') eol++
+        while (!this.past(eol) && this.text[eol] !== '\n') {
+          if (this.splice(this.text[eol]!))
+            this.fail(eol, 'a splice inside a comment')
+          eol++
+        }
         this.pos = eol
       } else if (WS.has(c)) this.pos++
       else break
@@ -137,7 +162,7 @@ class Parser {
       if (c === '!') this.fail(this.pos, 'repeated mark')
       if (WS.has(c) || c === ';')
         this.fail(this.pos, 'mark separated from its value')
-      if (!OPENERS.has(c)) {
+      if (!OPENERS.has(c) && !this.splice(c)) {
         this.fail(
           this.pos,
           'only a frame is marked in front; an atom is marked behind: x!'
@@ -145,6 +170,7 @@ class Parser {
       }
       marked = true
     }
+    if (this.splice(this.at())) return this.spliceAt(marked)
     if (OPENERS.has(this.at())) {
       const v = this.frame(marked)
       if (!this.past() && this.at() === '!') {
@@ -157,12 +183,30 @@ class Parser {
       // a mark behind belongs to an atom; it must touch the atom and end at
       // a delimiter
       this.pos++
-      if (!this.past() && !DELIMS.has(this.at())) {
+      if (!this.past() && !this.delim(this.at())) {
         this.fail(this.pos, 'a marked atom ends at a delimiter')
       }
       marked = true
     }
     return build(marked)
+  }
+
+  /**
+   * The value spliced in at pos. It keeps whatever mark it came with, and a
+   * mark on the splice, in front or behind, marks it.
+   */
+  spliceAt(marked: boolean): Value {
+    const v = this.splices![this.spliced++]!
+    this.pos++
+    if (!this.past() && this.at() === '!') {
+      if (marked) this.fail(this.pos, 'a splice marked twice')
+      this.pos++
+      if (!this.past() && !this.delim(this.at())) {
+        this.fail(this.pos, 'a marked splice ends at a delimiter')
+      }
+      marked = true
+    }
+    return marked ? withMark(this.make, v) : v
   }
 
   /**
@@ -308,6 +352,7 @@ class Parser {
       if (this.past(i)) this.incomplete(i, 'unterminated ' + what)
       const c = this.text[i]
       if (c === q) break
+      if (this.splice(c!)) this.fail(i, 'a splice inside a quoted ' + what)
       if (c !== '\\') {
         i++
         continue
@@ -331,7 +376,7 @@ class Parser {
     const make = this.make
     const start = this.pos
     let i = start
-    while (!this.past(i) && !DELIMS.has(this.text[i]!)) i++
+    while (!this.past(i) && !this.delim(this.text[i]!)) i++
     const tok = this.text.slice(start, i)
     this.pos = i
     // '_' sits between two digits, as a visual separator
@@ -589,14 +634,54 @@ export function readValue(
   text: string,
   opts: ReaderOptions = {}
 ): Value {
+  return one(
+    new Parser(
+      factory,
+      text,
+      true,
+      0,
+      { line: 1, col: 1 },
+      opts.maxDepth ?? MAX_DEPTH
+    )
+  )
+}
+
+/**
+ * Exactly one value from a template's text, `strings`, with `splices` read
+ * where they go between them, as `readValue` reads text. A splice is a value
+ * of its own wherever it sits, and refused inside a quoted string or a
+ * comment.
+ */
+export function readTemplate(
+  factory: Factory,
+  strings: readonly string[],
+  splices: readonly Value[],
+  opts: ReaderOptions = {}
+): Value {
+  if (strings.length !== splices.length + 1) {
+    throw new TypeError('a template has one more string than it has splices')
+  }
+  const text = strings.join(SPLICE)
   const p = new Parser(
     factory,
     text,
     true,
     0,
     { line: 1, col: 1 },
-    opts.maxDepth ?? MAX_DEPTH
+    opts.maxDepth ?? MAX_DEPTH,
+    splices
   )
+  let at = -1
+  for (const s of strings) {
+    const i = s.indexOf(SPLICE)
+    if (i >= 0) p.fail(at + 1 + i, 'U+FFFC stands for a splice in a template')
+    at += s.length + 1
+  }
+  return one(p)
+}
+
+/** The one value the text holds, and nothing after it. */
+function one(p: Parser): Value {
   p.skipWs()
   if (p.past()) p.fail(p.pos, 'expected exactly one value, got none')
   const v = p.value()

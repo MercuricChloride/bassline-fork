@@ -158,6 +158,20 @@ export const isAtom = (v: Value): v is Atom =>
   v.kind === 'symbol' ||
   v.kind === 'bytes'
 
+/**
+ * Whether `x` is a value of some implementation: a kind, a mark, and a
+ * payload for an atom or members for a frame.
+ */
+export function isValue(x: unknown): x is Value {
+  if (typeof x !== 'object' || x === null) return false
+  const v = x as Partial<
+    Record<'kind' | 'mark' | 'payload' | 'children', unknown>
+  >
+  if (typeof v.kind !== 'string' || !Object.hasOwn(TAGS, v.kind)) return false
+  if (typeof v.mark !== 'boolean') return false
+  return isAtom(v as Value) ? 'payload' in v : typeof v.children === 'function'
+}
+
 export const isFrame = (v: Value): v is Frame =>
   v.kind === 'list' ||
   v.kind === 'record' ||
@@ -304,4 +318,28 @@ export function utf8Length(s: string) {
     } else n += 3
   }
   return n
+}
+
+export function withMark(f: Factory, v: Value, mark = true) {
+  if (v.mark == mark) return v
+  switch (v.kind) {
+    case 'nil':
+      return f.nil(mark)
+    case 'number':
+      return f.number(v.payload, mark)
+    case 'symbol':
+      return f.sym(v.payload, mark)
+    case 'text':
+      return f.text(v.payload, mark)
+    case 'bytes':
+      return f.bytes(v.payload, mark)
+    case 'list':
+      return f.list(v.children(), mark)
+    case 'record':
+      return f.record(v.children(), mark)
+    case 'dict':
+      return f.dict(v.entries(), mark)
+    case 'set':
+      return f.set(v.children(), mark)
+  }
 }
