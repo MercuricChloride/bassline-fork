@@ -41,7 +41,7 @@ suite "space vars":
     let v = spaceVar[Value, Peer](id = bl peers)
     check v.send(bl here, Peer(address: "10.0.0.1", connection: -1))
     check v.search.toValue == bl(!{!kind(`search-space`), identity(peers), holds({here(peer("10.0.0.1"))})})
-    let back = v.read(bl here)[]
+    let back = v.read(bl here).next
     check back.isSome and back.get.address == "10.0.0.1"
     check back.get.connection > 0                # rebuilt, connected again
 
@@ -228,7 +228,7 @@ suite "keeping":
     refuses spaceVar[Value, Value]().writeOnly.persist(keep)
     refuses spaceVar[Value, Value]().readOnly.persist(keep)
     refuses newBVar[Value, Value](proc(q, a: Value): bool = true,
-      newSearch[Value, Value](proc(q: Value): Stream[Value] = empty[Value]())).persist(keep)
+      newSearch[Value, Value](proc(q: Value): Stream[Value] = empty Value)).persist(keep)
 
   test "persist hands over the space, written down, each time it takes":
     var kept: seq[Value]
@@ -294,7 +294,7 @@ suite "memo":
     discard src.send(bl q, Ranked[Value](rank: 1, answer: bl b))
     discard src.send(bl q, Ranked[Value](rank: 2, answer: bl c))
     let m = src.search.memo
-    check m[bl q][].get.rank == 1               # kept
+    check m[bl q].next.get.rank == 1               # kept
     discard src.send(bl q, Ranked[Value](rank: 0, answer: bl a))
     var ranks: seq[int]
     for r in m[bl q]: ranks.add r.rank
@@ -302,7 +302,7 @@ suite "memo":
 
   test "a memo without an id gets a random one":
     let m = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      empty[Value]()).memo
+      empty(Value)).memo
     let id = m.id
     check id.isObject                          # !{(identity 0x…)}
     let names = identities(id).collect

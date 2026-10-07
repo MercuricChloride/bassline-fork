@@ -50,6 +50,8 @@ let
   AltKind* = sym"alt"
   FeedKind* = sym"feed"
   MergeKind* = sym"merge"
+  MoreKind* = sym"more"
+  ViaKind* = sym"via"
   SendKind* = sym"send"
   BVarKind* = sym"bvar"
 
@@ -130,7 +132,7 @@ proc toAnswer*(v: Value): Option[Answer] =
 # ================ streams over values ================
 
 proc strictlyAfter(last: Value): Pred[Value] =
-  Value -> it > last
+  proc(it: Value): auto = it > last
 
 proc between*(space: BSet, atOrAfter, upTo: Pred[Value]): Stream[Value] =
   ## a set's members from the first `atOrAfter` holds for to the last
@@ -146,7 +148,7 @@ proc between*(space: BSet, atOrAfter, upTo: Pred[Value]): Stream[Value] =
       return last
     none(Value)
 
-func against(m: Value, kind: Kind, lead: seq[Value], marked: bool): int =
+func against*(m: Value, kind: Kind, lead: seq[Value], marked: bool): int =
   ## where `m` sorts against the lists or records of `kind`, unmarked or
   ## marked, that begin with `lead`: before them (< 0), among them (0), or
   ## after them (> 0). CE order sorts by kind, then mark, then member by
@@ -163,8 +165,8 @@ proc ledBy*(space: BSet, kind: Kind, lead: seq[Value], marked = false):
     Stream[Value] =
   ## a set's lists or records (`kind`), unmarked or marked, that begin
   ## with the members `lead`, in CE order: one run, found by bisecting
-  space.between(Value -> against(it, kind, lead, marked) >= 0,
-                Value -> against(it, kind, lead, marked) <= 0)
+  space.between(proc(it: Value): auto = against(it, kind, lead, marked) >= 0,
+                proc(it: Value): auto = against(it, kind, lead, marked) <= 0)
 
 proc headed*(space: BSet, head: Value, marked = false): Stream[Value] =
   ## a set's records headed by `head`, unmarked or marked, in CE order
@@ -172,13 +174,13 @@ proc headed*(space: BSet, head: Value, marked = false): Stream[Value] =
 
 proc members*(v: Value): Stream[Value] =
   ## a set's members, in CE order; nothing for anything else
-  if v.kind != bSet: return empty[Value]()
+  if v.kind != bSet: return empty Value
   v.els.between(always, always)
 
 proc entries*(v: Value): Stream[(Value, Value)] =
   ## a dict's entries, key and value, in CE order of the keys, each pull
   ## bisecting afresh past the last key given; nothing for anything else
-  if v.kind != bDict: return empty[(Value, Value)]()
+  if v.kind != bDict: return empty((Value, Value))
   let d = v.dict
   var last = none(Value)
   proc(): Option[(Value, Value)] =
@@ -193,21 +195,22 @@ proc parts*(v: Value): Stream[Value] =
   ## values, a set's members; nothing for an atom
   case v.kind
   of bList, bRec: initStream(v.items.data)
-  of bDict: v.entries.flatMap((Value, Value) -> initStream(@[it[0], it[1]]))
+  of bDict: v.entries.flatMaps(initStream(@[it[0], it[1]]))
   of bSet: v.members
-  else: empty[Value]()
+  else: empty Value
 
 proc walk*(v: Value): Stream[Value] =
   ## `v`, then everything inside it, depth first: a record's head before
   ## its fields, a dict's key before its value
-  cat(just(v), v.parts.flatMap(Value -> walk(it)))
+  cat(just(v), v.parts.flatMaps(walk(it)))
 
 proc unique*(s: Stream[Value]): Stream[Value] =
   ## `s`, each value once
   let seen = newBSet()
-  s.filter(proc(v: Value): bool =
-    result = v notin seen
-    if result: seen.incl v)
+  s.filters(
+    if it notin seen:
+      seen.incl it
+      return true)
 
 proc similar*(v, exemplar: Value): bool =
   ## whether `v` looks like `exemplar` by kind and mark all the way down:
@@ -226,8 +229,8 @@ proc similar*(v, exemplar: Value): bool =
         return false
     true
   of bDict:
-    exemplar.entries.every((Value, Value) ->
-      it[0] in v.dict and v.dict[it[0]].similar(it[1]))
+    exemplar.entries.every do (it: (Value, Value)) -> auto:
+      it[0] in v.dict and v.dict[it[0]].similar(it[1])
   of bSet: exemplar.els <= v.els
   else: true
 
@@ -253,8 +256,9 @@ proc under(o: Value, question: Value, marked: bool): Stream[Value] =
   ## the second fields of an object's records headed by `question`,
   ## unmarked or marked, in CE order; nothing for a value that isn't an
   ## object
-  if not o.isObject: return empty[Value]()
-  o.els.headed(question, marked).filterMap(toAnswer).map(Answer -> it.answer)
+  if not o.isObject: 
+    return empty Value
+  o.els.headed(question, marked).filterMap(toAnswer).maps(it.answer)
 
 proc answers*(o: Value, question: Value): Stream[Value] =
   ## what an object answers to `question`, in CE order
@@ -263,7 +267,7 @@ proc answers*(o: Value, question: Value): Stream[Value] =
 proc answer*(o: Value, question: Value): Option[Value] =
   ## an answer an object gives to `question`, for a consumer that wants
   ## one: the first, in CE order
-  o.answers(question)[]
+  o.answers(question).next
 
 proc orders*(o: Value, question: Value): Stream[Value] =
   ## an object's orders under `question`, !(QUESTION ANSWER), in CE order
@@ -307,12 +311,12 @@ proc sharesIdentity*(a, b: Value): bool =
 
 proc identityAnswers(id: Value): Stream[Value] =
   ## the (identity NAME) records an ID stands for, to put in an object
-  identities(id).map(Value -> initRec(@[IdentityQ, it]))
+  identities(id).maps(initRec(@[IdentityQ, it]))
 
 proc identity*(names: varargs[Value]): Value =
   ## an object that is only names: one (identity NAME) per name, an
   ## object among them giving its own
-  obj(collect(initStream(@names).flatMap(Value -> identityAnswers(it))))
+  obj(collect(initStream(@names).flatMaps(identityAnswers(it))))
 
 proc identityOf*(v: Value): Value =
   ## the names alone of a thing: an object's identity answers as an
@@ -327,9 +331,9 @@ proc randomId*(): Value =
 proc alsoKnownAs*(o: Value, more: varargs[Value]): Value =
   ## `o` with more names, everything else it answers kept
   obj(collect(cat(if o.isObject: o.members else: identityAnswers(o),
-                initStream(@more).flatMap(Value -> identityAnswers(it)))))
+                initStream(@more).flatMaps(identityAnswers(it)))))
 
 proc describe*(ks: openArray[Value], id: Value, more: varargs[Value]): Value =
   ## an object of these kinds, going by `id`'s names, answering `more`
-  obj(collect(cat(initStream(@ks).map(Value -> order(KindQ, it)),
+  obj(collect(cat(initStream(@ks).maps(order(KindQ, it)),
                 identityAnswers(id), initStream(@more))))

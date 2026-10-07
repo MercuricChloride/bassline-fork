@@ -1,10 +1,12 @@
 import std/options
+from std/sequtils import toSeq
+export toSeq
 
 type
   Fold*[A, B] = proc(acc: B, curr: A): B
   Map*[A, B] = proc(it: A): B
-  Stream*[A] = proc(): Option[A]
   Pred*[A] = Map[A, bool]
+  Stream*[A] = proc(): Option[A]
 
 template `->`*(T, body): untyped =
   proc(it{.inject.}: T): auto = body
@@ -13,7 +15,7 @@ template `->`*(T, body): untyped =
 # Stream Constructors
 # ================
 
-proc empty*[A](): Stream[A] =
+template empty*[A](_: typedesc[A]): Stream[A] =
   proc(): Option[A] = none A
 
 proc just*[A](a: A): Stream[A] =
@@ -31,41 +33,53 @@ proc lazy*[A](make: proc(): Stream[A]): Stream[A] =
     if s == nil: s = make()
     s()
 
-proc initStream*[A](arr: seq[A]): Stream[A] =
-  var i = 0
-  proc(): auto =
-    if i >= arr.len: 
-      result = none A
-    else:
-      result = some arr[i]
-      inc i
-
-proc `[]`*[A](s: Stream[A]): Option[A] =
-  ## the next answer, for a consumer that wants just one: the pull itself
-  s()
-
 iterator items*(fn: Stream): auto =
   var r = fn()
   while r.isSome:
     yield r.get
     r = fn()
 
+proc initStream*[A](iter: iterator(): A): Stream[A] =
+  proc(): auto =
+    let it = iter()
+    if finished(iter): none A
+    else: some it
+
+template streamOf*(A, body: untyped): untyped =
+  initStream(iterator(): A = body)
+
+template streamOf*(body: untyped): untyped =
+  initStream(iterator(): auto = body)
+
+template `yieldEach`*(iter): untyped =
+  for each in iter: yield each
+
+proc initStream*[A](arr: seq[A]): Stream[A] =
+  streamOf A:
+    yieldEach arr
+
+converter toStream*[A](col: openArray[A]): Stream[A] =
+  initStream(@col)
+
+proc next*[A](s: Stream[A]): auto =
+  s()
+
 # ================
 # Function Combinators
 # ================
 
-proc k*[T](v: T): proc(): T =
+proc k*[T](v: T): auto =
   ## the constant: a proc that always answers `v`
   proc(): T = v
 
-proc fold*[A, B](fn: Fold[A, B], init: B): Map[A, B] =
+proc fold*[A, B](fn: Fold[A, B], init: B): auto =
   ## A reducer
   var acc = init
   proc(curr: A): B =
     acc = fn(acc, curr)
     acc
 
-proc scan*[A, B](fn: Fold[A, B], init: B): Map[A, tuple[prev, curr: B]] =
+proc scan*[A, B](fn: Fold[A, B], init: B): auto =
   ## Like `fold`, but answers the accumulator from before each
   ## value as well as after
   var acc = init
@@ -74,7 +88,7 @@ proc scan*[A, B](fn: Fold[A, B], init: B): Map[A, tuple[prev, curr: B]] =
     acc = fn(acc, curr)
     (prev, acc)
 
-proc latch*[A](fn: Pred[A]): Pred[A] =
+proc latch*[A](fn: proc(it: A): bool): auto =
   ## Latch is like a normal predicate, but upon failing
   ## it will short circuit to false ignoring the provided
   ## values.
@@ -86,39 +100,35 @@ proc latch*[A](fn: Pred[A]): Pred[A] =
 # Stream Combinators
 # ================
 
-proc map*[A, B](s: Stream[A], fn: Map[A, B]): Stream[B] =
-  ## Applies `fn` to each value in the stream
-  proc (): Option[B] = s().map(fn)
+proc map*[A, B](s: Stream[A], fn: proc(it: A): B): auto =
+  streamOf B:
+    for each in s:
+      yield fn(each)
 
-proc filter*[A](s: Stream[A], fn: Pred[A]): Stream[A] =
-  ## The values `fn` accepts. The others are pulled past.
-  proc(): Option[A] =
-    result = s()
-    while result.isSome and not fn(result.get):
-      result = s()
+proc filter*[A](s: Stream[A], fn: proc(it: A): bool): auto =
+  streamOf A:
+    for each in s:
+      if fn(each): yield each
 
-proc alt*[A](streams: varargs[Stream[A]]): Stream[A] =
-  ## `alt` produces a new stream that fairly takes
-  ## values from the input streams.
-  ## If called like: alt(a, b, c)
-  ## it will produce a, b, c, a, b, c until
-  ## they are all exhausted.
-  var
-    strms = @streams
-    i = 0
-    done = false
-  proc next(): auto =
-    result = strms[i]()
-    i = (i + 1) mod strms.len
-  proc(): Option[A] =
-    if done: return none A
-    for _ in 0..strms.high:
-      # we want to check every stream
-      result = next()
-      if result.isSome: return
-    done = true
+proc filterMap*[A, B](s: Stream[A], fn: proc(it: A): Option[B]): auto =
+  streamOf B:
+    for each in s:
+      let r = fn(each)
+      if r.isSome: yield r.get
 
-proc catFrom*[A](streams: proc(): Option[Stream[A]]): Stream[A] =
+template maps*[A](s: Stream[A], body: untyped): untyped =
+  s.map do (it{.inject.}: A) -> auto:
+    body
+
+template filters*[A](s: Stream[A], body: untyped): untyped =
+  s.filter do (it{.inject.}: A) -> bool:
+    body
+
+template filterMaps*[A](s: Stream[A], body: untyped): untyped =
+  s.filterMap do (it{.inject.}: A) -> auto:
+    body
+
+proc catFrom*[A](streams: Stream[Stream[A]]): Stream[A] =
   ## each stream `streams` hands out, in turn, the next taken only once
   ## the one before has nothing more
   var current: Stream[A] = nil
@@ -136,25 +146,6 @@ proc cat*[A](streams: varargs[Stream[A]]): Stream[A] =
   ## each stream in turn, the next pulled only once the one before has
   ## nothing more: a later stream is never reached past an endless one
   catFrom(initStream(@streams))
-
-proc flatMap*[A, B](s: Stream[A], fn: proc(a: A): Stream[B]): Stream[B] =
-  ## each answer's stream from `fn`, in turn
-  catFrom(s.map(fn))
-
-proc filterMap*[A, B](s: Stream[A], fn: proc(a: A): Option[B]): Stream[B] =
-  ## what `fn` makes of each answer, passing over those it makes nothing of
-  proc(): Option[B] =
-    while true:
-      let a = s()
-      if a.isNone: return none B
-      result = fn(a.get)
-      if result.isSome: return
-
-proc tap*[A](s: Stream[A], fn: proc(a: A)): Stream[A] =
-  ## `s`, calling `fn` on each answer as it is pulled
-  proc(): Option[A] =
-    result = s()
-    if result.isSome: fn(result.get)
 
 proc altFrom*[A](streams: proc(): Option[Stream[A]]): Stream[A] =
   ## fair turns over the streams that `streams` hands out, admitting one
@@ -181,6 +172,27 @@ proc altFrom*[A](streams: proc(): Option[Stream[A]]): Stream[A] =
         return
       live.delete(i)
 
+proc alt*[A](streams: varargs[Stream[A]]): Stream[A] =
+  ## `alt` produces a new stream that fairly takes
+  ## values from the input streams.
+  ## If called like: alt(a, b, c)
+  ## it will produce a, b, c, a, b, c until
+  ## they are all exhausted.
+  var
+    strms = @streams
+    i = 0
+    done = false
+  proc next(): auto =
+    result = strms[i]()
+    i = (i + 1) mod strms.len
+  proc(): Option[A] =
+    if done: return none A
+    for _ in 0..strms.high:
+      # we want to check every stream
+      result = next()
+      if result.isSome: return
+    done = true
+
 proc merge*[A](order: proc(a, b: A): int, streams: varargs[Stream[A]]):
     Stream[A] =
   ## streams each already in `order`, merged into one in order; on a tie
@@ -201,6 +213,25 @@ proc merge*[A](order: proc(a, b: A): int, streams: varargs[Stream[A]]):
     if best < 0: return none A
     stale.add best
     heads[best]
+
+proc tap*[A](s: Stream[A], fn: proc(a: A)): Stream[A] =
+  ## `s`, calling `fn` on each answer as it is pulled
+  streamOf:
+    for each in s:
+      fn(each)
+      yield each
+
+template taps*[A](s: Stream[A], body): untyped =
+  s.tap do (it{.inject.}: A) -> void:
+    body
+
+proc flatMap*[A, B](s: Stream[A], fn: proc(a: A): Stream[B]): Stream[B] =
+  ## each answer's stream from `fn`, in turn
+  catFrom(s.map(fn))
+
+template flatMaps*[A](s: Stream[A], body): untyped =
+  s.flatMap do (it{.inject.}: A) -> auto:
+    body
 
 # ================
 # Sugar
@@ -230,16 +261,32 @@ proc every*[A](s: Stream[A], fn: Pred[A]): bool =
     if not fn(a): return false
   true
 
-proc take*[A](self: Stream[A], n: Natural): seq[A] =
-  ## Up to `n` values, pulling no more than that
-  result = newSeq[A]()
-  while result.len < n:
-    let r = self()
+proc takeInto*[A](s: Stream[A], col: var openArray[A]): int {.discardable.} =
+  result = 0
+  while result < col.len:
+    let r = s()
     if r.isNone: return
-    result.add r.get
+    col[result] = r.get
+    inc result
 
-proc collect*[A](self: Stream[A]): seq[A] =
-  ## every answer, pulled until the stream has nothing more
-  result = newSeq[A]()
-  for each in self:
-    result.add each
+proc take*[A](s: Stream[A], n: Natural): seq[A] =
+  result = newSeq[A](n)
+  let n = s.takeInto(result)
+  if n != result.len:
+    result.shrink(n)
+
+template collect*(s: untyped): untyped =
+  toSeq(s)
+
+when isMainModule:
+  proc nums(n: int): auto =
+    var i = 0
+    iterator(): int =
+      while i < n:
+        yield i
+        inc i
+
+  let numStream = nums(10).initStream
+
+  for each in numStream.maps(it * 2).filters(it < 10):
+    echo each

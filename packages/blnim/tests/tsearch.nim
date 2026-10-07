@@ -152,7 +152,7 @@ suite "denoting":
   test "an id is had without writing the search down":
     var written = 0
     let s = newSearch[Value, Value](
-      proc(q: Value): Stream[Value] = empty[Value](),
+      proc(q: Value): Stream[Value] = Value.empty,
       proc(): Value =
         inc written
         bl(!{!kind(`search-space`), identity(p), holds({})}),
@@ -166,11 +166,11 @@ suite "denoting":
 
   test "without an id proc, the id is read from the denotation":
     let s = newSearch[Value, Value](
-      proc(q: Value): Stream[Value] = empty[Value](),
+      proc(q: Value): Stream[Value] = Value.empty,
       proc(): Value = bl(!{!kind(`search-space`), identity(p2), holds({})}))
     check s.id == identity(bl p2)
     let plain = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      empty[Value]())
+      empty Value)
     refuses plain.id
 
 suite "a peer table":
@@ -200,7 +200,7 @@ suite "composing":
   test "a scope answers first, then the scope around it":
     let scope = cat([child, parent], id = bl s)
     check scope.ask(bl x).collect == @[bl 10, bl 1]  # the first is the shadow
-    check scope.ask(bl x)[] == some(bl 10)           # the consumer takes it
+    check scope.ask(bl x).next == some(bl 10)           # the consumer takes it
     check scope.ask(bl y).collect == @[bl 2]
 
   test "the scope around is asked only once the inner one runs out":
@@ -272,7 +272,7 @@ suite "composing":
     let known = newSearch[Value, Value](proc(q: Value): Stream[Value] =
       if q == bl(p1): just(identity(bl p2))
       elif q == bl(p2): initStream(@[identity(bl p1), space])
-      else: empty[Value]())
+      else: empty Value)
     let back = Search[Value, Value].fromValue(identity(bl p1), resolve = known)
     check back[bl y].collect == @[bl 2]
 
@@ -346,5 +346,5 @@ suite "fan-out":
 
   test "an id can be given as a value":
     let s = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      empty[Value](), id = bl named)
+      empty(Value), id = bl named)
     check s.id == bl named

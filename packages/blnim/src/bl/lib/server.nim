@@ -7,6 +7,11 @@
 ##
 ## Malformed input is fatal to a connection's reading: past one bad
 ## byte there is no sound resync point. A listener then closes it.
+##
+## A listener can instead offer each connection to the program as a send
+## that tells it, for a place that answers whoever asks: it says where
+## what arrives goes, and keeps the connection open for telling after
+## the other end has stopped speaking, until a tell is refused.
 
 import std/[asyncnet, asyncdispatch, nativesockets, sequtils, tables]
 import ../core
@@ -38,6 +43,18 @@ type
 
   ViewSend = proc(view: ValueView)
 
+  Line* = object
+    ## what a program does with a connection a listener offers it
+    hear*: proc(v: Value): bool
+      ## takes each value that arrives on it
+    quiet*: proc(): bool
+      ## told once nothing more will arrive on it; answers whether to keep
+      ## it open for telling, which lasts until a tell is refused
+
+  Offer* = proc(tell: proc(v: Value): bool): Line
+    ## what a listener does with each connection it accepts: offered the
+    ## send that tells it, and nothing else about it
+
   Conn* = ref object
     socket: AsyncSocket
     address: string
@@ -50,6 +67,7 @@ type
     socket: AsyncSocket
     address: string
     send: ViewSend
+    offer: Offer          ## nil for a listener that only hears
     observe: Observer
     connId: int
     connections: Table[int, Conn]
@@ -79,9 +97,10 @@ template closingOnError(socket: AsyncSocket, body: untyped) =
 proc tell(conn: Conn, kind: EdgeKind, error: ref Exception = nil) =
   conn.observe.tell(conn.address, kind, error)
 
-proc newConn(socket: AsyncSocket, address: string, observe: Observer): Conn =
-  result = Conn(socket: socket, address: address, decoder: newDecoder(),
-                observe: observe)
+proc newConn(socket: AsyncSocket, address: string, observe: Observer,
+             maxValueBytes = MaxValueBytes): Conn =
+  result = Conn(socket: socket, address: address,
+                decoder: newDecoder(maxValueBytes = maxValueBytes), observe: observe)
   result.tell edgeOpen
 
 proc isClosed*(conn: Conn): bool =
@@ -179,13 +198,14 @@ proc pump*(conn: Conn, send: proc(ce: openArray[byte]): bool): Future[void] =
   ## not build a `Value`.
   conn.pump(toViewSend send)
 
-proc connect*(host: string, port: Port,
-              observe: Observer = nil): Future[Conn] {.async.} =
-  ## Opens a connection to `host` and `port`.
+proc connect*(host: string, port: Port, observe: Observer = nil,
+              maxValueBytes = MaxValueBytes): Future[Conn] {.async.} =
+  ## Opens a connection to `host` and `port`, whose reading refuses a
+  ## value past `maxValueBytes`.
   let socket = newAsyncSocket(buffered = false)
   closingOnError socket:
     await socket.connect(host, port)
-  return newConn(socket, host & ":" & $port, observe)
+  return newConn(socket, host & ":" & $port, observe, maxValueBytes)
 
 # ================ LISTENER ================
 
@@ -209,11 +229,31 @@ proc process(l: Listener, id: int, conn: Conn) {.async.} =
     l.connections.del id
     conn.close()
 
+proc offered(l: Listener, id: int, conn: Conn) {.async.} =
+  ## The connection is told through the send it was offered as, and once
+  ## a tell is refused it is done; reading stopping leaves it open if the
+  ## program still has something to tell it.
+  proc done() =
+    l.connections.del id
+    conn.close()
+  let telling = proc(v: Value): bool =
+    result = conn.write(v)
+    if not result: done()
+  var line: Line
+  try:
+    line = l.offer(telling)
+    await conn.pump(line.hear)
+  except CatchableError as e:
+    conn.tell edgeFailed, e
+  if line.quiet == nil or not line.quiet():
+    done()
+
 proc track(l: Listener, conn: Conn) =
   let id = l.connId
   inc l.connId
   l.connections[id] = conn
-  asyncCheck l.process(id, conn)
+  if l.offer != nil: asyncCheck l.offered(id, conn)
+  else: asyncCheck l.process(id, conn)
 
 proc addressOf(client: AsyncSocket, fallback: string): string =
   try:
@@ -269,3 +309,10 @@ proc newListener*(port: Port, send: proc(ce: openArray[byte]): bool,
   ## As above, but `send` gets each value's CE bytes, so a relay need
   ## not build a `Value`.
   listener(port, toViewSend send, observe, address)
+
+proc newListener*(port: Port, offer: Offer, observe: Observer = nil,
+                  address = ""): Listener =
+  ## Binds a listening socket; each connection it accepts is offered to
+  ## `offer` as the send that tells it.
+  result = listener(port, nil, observe, address)
+  result.offer = offer

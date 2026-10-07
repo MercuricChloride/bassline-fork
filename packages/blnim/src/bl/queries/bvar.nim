@@ -122,7 +122,7 @@ proc toValue*(v: BVar): Value =
 
 # ================ space vars ================
 
-proc record[Q, A](q: Q, a: A): Value =
+proc record*[Q, A](q: Q, a: A): Value =
   ## the record a space keeps for an answer: (q a), or ranked (q r a)
   mixin toValue
   when A is Ranked:

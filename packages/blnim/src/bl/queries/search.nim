@@ -4,7 +4,8 @@
 ## its own construction. Searches compose into new searches: one after
 ## another (`cat`, as a scope falls back to the scope around it), taking
 ## turns (`alt`), answers fed on as questions (`feed`), ranked answers
-## merged by rank (`merge`).
+## merged by rank (`merge`), and one search's answers asked of it again,
+## nearest first (`more`).
 ##
 ## Some searches can also be written down: their space denoted as an
 ## object, which interpreting turns back into a search, answers rebuilt
@@ -19,8 +20,10 @@
 ##   !{!(kind search-space) !(kind ranked) (identity ID) (holds {(Q R A) …})}
 ##   !{!(kind search-space) !(kind cat) (identity ID) (parts [PART …])}
 ##
-## and `alt`, `feed` and `merge` like `cat`; R is a natural, and a part
-## is an object, or names of a thing written down elsewhere.
+## and `alt`, `feed` and `merge` like `cat`, and `more` with one part,
+## `!(kind via)` with it answering the way each answer was reached; R is a
+## natural, and a part is an object, or names of a thing written down
+## elsewhere.
 ##
 ## A one-field record (Q) in a space is a question, Q being asked, not
 ## an answer; it sorts after Q's answers, so a query's run holds both,
@@ -35,8 +38,8 @@
 
 import std/options
 import ../core
-import ./[queries, stream]
-export queries, stream
+import ./[queries, stream, find]
+export queries, stream, find
 
 refuseWith ValueError
 
@@ -125,6 +128,54 @@ proc byId*[Q, A](s: Search[Q, A]): Search[Q, A] =
   ## it rather than carrying it whole
   let name = proc(): Value = s.id
   s.writtenAs(name, name)
+
+type Walked = object
+  ## a value reached, and the values walked through on the way to it
+  value: Value
+  path: seq[Value]
+
+proc more*(step: Search[Value, Value], id = randomId(), via = false):
+    Search[Value, Value] =
+  ## `step` asked again of each answer it gives, nearest first: asked q, it
+  ## answers what `step` answers to q, then what it answers to each of
+  ## those, and so on, each value once, so a walk that comes round again
+  ## ends. Answers the same distance away take turns. With `via` each answer
+  ## is (via [Q … PREVIOUS] A), the values walked through to reach it
+  proc ask(q: Value): Stream[Value] =
+    let answered = newBSet()
+    let expanded = toBTreeSet(@[q])
+    var level = @[Walked(value: q)]
+    var next: seq[Walked]
+    var current: Stream[Walked] = nil
+    proc(): Option[Value] =
+      while true:
+        if current == nil:
+          if level.len == 0: return none(Value)
+          current = alt(collect(initStream(level).map(proc(w: Walked): Stream[Walked] =
+            step.ask(w.value).map(proc(a: Value): Walked =
+              Walked(value: a, path: w.path & w.value)))))
+        let got = current()
+        if got.isNone:
+          level = next
+          next = @[]
+          current = nil
+          continue
+        let w = got.get
+        if w.value in answered: continue
+        answered.incl w.value
+        if w.value notin expanded:
+          expanded.incl w.value
+          next.add w
+        return some(if via: initRec(@[ViaKind, initList(w.path), w.value])
+                    else: w.value)
+  let denote =
+    if step.denotable:
+      proc(): Value =
+        describe(if via: @[SearchSpaceKind, MoreKind, ViaKind]
+                 else: @[SearchSpaceKind, MoreKind],
+                 id, initRec(@[PartsQ, initList(@[step.toValue])]))
+    else: nil
+  newSearch[Value, Value](ask, denote, k(id))
 
 proc byRank*[R: Ranked](streams: varargs[Stream[R]]): Stream[R] =
   ## ranked streams, each in rank order, merged by rank, lowest first; on
@@ -237,7 +288,7 @@ proc dictAsk[Q, A](d: BDict, skipRefused: bool): proc(q: Q): Stream[A] =
   mixin toValue
   proc(q: Q): Stream[A] =
     let query = q.toValue
-    if query notin d: return empty[A]()
+    if query notin d: return empty A
     readBack[A](just(initRec(@[query, d[query]])), false, skipRefused)
 
 proc spaceKinds[A](): seq[Value] =
@@ -269,15 +320,18 @@ proc compositeOf*(d: Value, ranked: bool): Value =
   ## is a search, `ranked` that its answers are ranked, and a composite
   ## kind how its parts are read. Refuses a kind it can't carry out, two
   ## ways of reading the parts at once, and a space ranked otherwise than
-  ## `ranked`
-  let composites = [CatKind, AltKind, FeedKind, MergeKind]
-  let unread = d.kinds.filter(Value ->
-    it notin composites and it != SearchSpaceKind and it != RankedKind)[]
+  ## `ranked`, and `via` but on a `more`
+  let composites = [CatKind, AltKind, FeedKind, MergeKind, MoreKind]
+  let unread = d.kinds.filters(
+    it notin composites and it != SearchSpaceKind and it != RankedKind and
+    it != ViaKind).next
   guard unread.isNone, "a kind this doesn't read, " & $unread.get & ", in " & $d
+  guard not d.hasKind(ViaKind) or d.hasKind(MoreKind),
+    "via is the way a more reached its answers: " & $d
   guard d.hasKind(RankedKind) == ranked,
     (if ranked: "an unranked space, read as ranked: "
      else: "a ranked space, read as unranked: ") & $d
-  let found = d.kinds.filter(Value -> it in composites).take(2)
+  let found = d.kinds.filters(it in composites).take(2)
   guard found.len < 2, "a search space read as two composites: " & $d
   if found.len == 1: found[0] else: null()
 
@@ -285,11 +339,12 @@ proc spaceBodies*(d: Value, ranked: bool): seq[Value] =
   ## everything a denoted space holds: every `holds` answer, each a set of
   ## records or, unranked, a dict. Refuses a space holding nothing, and a
   ## body it can't hold
-  result = collect(d.answers(HoldsQ).map(proc(b: Value): Value =
-    guard (b.isKind({bSet}) or (not ranked and b.isKind({bDict}))) and not b.mark,
-      "a space holds sets of records" & (if ranked: "" else: " or dicts") &
-      ": " & $d
-    b))
+  result = collect(d.answers(HoldsQ).maps(
+    block:
+      guard (it.isKind({bSet}) or (not ranked and it.isKind({bDict}))) and not it.mark,
+        "a space holds sets of records" & (if ranked: "" else: " or dicts") &
+        ": " & $d
+      it))
   guard result.len > 0, "a space that holds nothing said: " & $d
 
 proc bodyAsk[Q, A](b: Value, skipRefused: bool): proc(q: Q): Stream[A] =
@@ -305,8 +360,8 @@ proc space[Q, A](d: Value, skipRefused: bool): Search[Q, A] =
   ## answer a query only when it holds one dict
   let bodies = spaceBodies(d, A is Ranked)
   proc ask(q: Q): Stream[A] =
-    let streams = collect(initStream(bodies).map(proc(b: Value): Stream[A] =
-      bodyAsk[Q, A](b, skipRefused)(q)))
+    let streams = initStream(bodies).map(proc(b: Value): auto =
+      bodyAsk[Q, A](b, skipRefused)(q)).collect
     when A is Ranked: byRank(streams) else: cat(streams)
   newSearch[Q, A](ask, k(d), k(identityOf(d)),
                   if bodies.len == 1 and bodies[0].kind == bDict: one else: many)
@@ -314,6 +369,15 @@ proc space[Q, A](d: Value, skipRefused: bool): Search[Q, A] =
 proc interpret[Q, A](d: Value, skipRefused: bool,
                      resolve: Search[Value, Value], followed: BSet):
     Search[Q, A]
+
+type Asking = object
+  ## how a find is asked: names already followed on the way to it, and
+  ## whether refusals are passed over
+  followed: BSet
+  skipRefused: bool
+
+proc findAsked(d: Value, resolve: Search[Value, Value], how: Asking):
+    Search[Value, Value]
 
 proc named[Q, A](name: Value, skipRefused: bool,
                  resolve: Search[Value, Value], followed: BSet):
@@ -325,10 +389,10 @@ proc named[Q, A](name: Value, skipRefused: bool,
   ## come to an end. Written down, it is the name again
   guard resolve != nil, "names a space, with nothing to resolve it: " & $name
   proc ask(q: Q): Stream[A] =
-    let fresh = collect(identities(name).filter(Value -> it notin followed))
+    let fresh = collect(identities(name).filters(it notin followed))
     let now = followed + toBTreeSet(fresh)
     initStream(fresh)
-      .flatMap(Value -> resolve.ask(it))
+      .flatMaps(resolve.ask(it))
       .unique
       .flatMap(proc(d: Value): Stream[A] =
         interpret[Q, A](d, skipRefused, resolve, now).ask(q))
@@ -343,12 +407,23 @@ proc combine[Q, A](kind: Value, ps: seq[Search[Q, A]], id: Value):
     if kind == MergeKind: return merge(ps, id)
   if kind == CatKind: cat(ps, id) else: alt(ps, id)
 
-proc composite[Q, A](kind, parts, id: Value, skipRefused: bool,
+proc composite[Q, A](kind, parts, id: Value, via, skipRefused: bool,
                      resolve: Search[Value, Value], followed: BSet):
     Search[Q, A] =
   ## the composite one list of parts stands for
+  mixin toValue
   guard parts.kind == bList and not parts.mark,
     "a composite's parts are a list: " & $parts
+  if kind == MoreKind:
+    guard parts.items.len == 1, "a more has one part: " & $parts
+    when A is Ranked:
+      refuse "a more's answers are not ranked: " & $parts
+    else:
+      let walking = more(interpret[Value, Value](parts.items[0], skipRefused,
+                                                 resolve, followed), id, via)
+      return newSearch[Q, A](proc(q: Q): Stream[A] =
+        walking.ask(q.toValue).filterMap(proc(v: Value): Option[A] =
+          reading[A](v, skipRefused)), nil, k(id))
   if kind == FeedKind:
     guard parts.items.len == 2, "a feed has two parts: " & $parts
     return feed(
@@ -362,16 +437,27 @@ proc interpret[Q, A](d: Value, skipRefused: bool,
     Search[Q, A] =
   ## the search `d` stands for, `followed` the names already followed on
   ## the way to it
+  mixin toValue
   if not d.hasKind(SearchSpaceKind):
-    guard d.kinds[].isNone, "neither a search nor names of one: " & $d
+    guard d.kinds.next.isNone, "neither a search nor names of one: " & $d
     return named[Q, A](d, skipRefused, resolve, followed)
+  if isFind(d):
+    when A is Ranked:
+      refuse "a find's answers are not ranked: " & $d
+    else:
+      let answering = findAsked(d, resolve,
+        Asking(followed: followed, skipRefused: skipRefused))
+      return newSearch[Q, A](proc(q: Q): Stream[A] =
+        answering.ask(q.toValue).filterMap(proc(v: Value): Option[A] =
+          reading[A](v, skipRefused)), k(d), k(identityOf(d)))
   let kind = compositeOf(d, A is Ranked)
   if kind.kind == bNil:
     return space[Q, A](d, skipRefused)
   guard kind != MergeKind or A is Ranked, "a merge is of ranked searches: " & $d
   let id = identityOf(d)
   let made = collect(d.answers(PartsQ).map(proc(parts: Value): Search[Q, A] =
-    composite[Q, A](kind, parts, id, skipRefused, resolve, followed)))
+    composite[Q, A](kind, parts, id, d.hasKind(ViaKind), skipRefused, resolve,
+                    followed)))
   guard made.len > 0, "a composite with no parts said: " & $d
   let whole = if made.len == 1: made[0] else: combine(kind, made, id)
   whole.writtenAs(k(d), k(id))
@@ -389,3 +475,111 @@ proc fromValue*[Q, A](T: typedesc[Search[Q, A]], d: Value,
   ## name met again on its own way round is passed over. A feed's parts
   ## meet in values
   interpret[Q, A](d, skipRefused, resolve, newBSet())
+# ================ finds ================
+
+proc subjectOf(v: Value, resolve: Search[Value, Value], how: Asking,
+               within = none(bool)): Subject
+
+proc namedSubject(names: Value, resolve: Search[Value, Value],
+                  how: Asking, within: Option[bool]): Subject =
+  ## what names stand for: asked, each name not yet followed is asked of
+  ## `resolve`, as things stand then, and each thing found answers in turn,
+  ## once however many names find it. Refuses names with nothing to resolve
+  ## them
+  guard resolve != nil, "names a space, with nothing to resolve it: " & $names
+  proc found(): Stream[Subject] =
+    let fresh = collect(identities(names).filters(it notin how.followed))
+    let now = Asking(followed: how.followed + toBTreeSet(fresh),
+                     skipRefused: how.skipRefused)
+    initStream(fresh)
+      .flatMaps(resolve.ask(it))
+      .unique
+      .maps(subjectOf(it, resolve, now, within))
+  Subject(headed: proc(qs: seq[Question]): Stream[Hit] =
+            found().flatMap(proc(p: Subject): Stream[Hit] = p.headed(qs)),
+          all: proc(): Stream[Hit] =
+            found().flatMap(proc(p: Subject): Stream[Hit] = p.all()))
+
+proc asSubject*(s: Search[Value, Value]): Subject =
+  ## a search running here as something a find asks of: it answers what it
+  ## is asked, and can't say what it holds
+  let part = try: s.id except ValueError: null()
+  answering(proc(q: Value): Stream[Value] = s.ask(q), part)
+
+proc subjectOf(v: Value, resolve: Search[Value, Value], how: Asking,
+               within = none(bool)): Subject =
+  ## the subject `v` is, read as `fromValue` reads a space and refusing what
+  ## it refuses: a search space, an object, or names of one. A part of a
+  ## composite is a search ranked as the composite is (`within`); what a
+  ## find asks of directly may be any object, ranked or not
+  if not v.isObject or v.kinds.next.isNone:
+    return namedSubject(v, resolve, how, within)
+  if not v.hasKind(SearchSpaceKind):
+    guard within.isNone, "neither a search nor names of one: " & $v
+    return thing(v)
+  if isFind(v):
+    guard within != some(true), "a find's answers are not ranked: " & $v
+    return asSubject(findAsked(v, resolve, how))
+  let ranked = within.get(v.hasKind(RankedKind))
+  let kind = compositeOf(v, ranked)
+  if kind.kind == bNil: return held(v, spaceBodies(v, ranked), ranked, how.skipRefused)
+  guard kind != MergeKind or ranked, "a merge is of ranked searches: " & $v
+  if kind == MoreKind:
+    guard not ranked, "a more's answers are not ranked: " & $v
+    return asSubject(interpret[Value, Value](v, how.skipRefused, resolve, how.followed))
+  let lists = collect(v.answers(PartsQ))
+  guard lists.len > 0, "a composite with no parts said: " & $v
+  # each list of parts joined as the kind joins them, and several lists so
+  # too; a feed's first part answers what its second is asked
+  var made: seq[Subject]
+  for l in lists:
+    guard l.kind == bList and not l.mark, "a composite's parts are a list: " & $l
+    if kind == FeedKind:
+      guard l.items.len == 2, "a feed has two parts: " & $l
+      made.add fed(subjectOf(l.items[0], resolve, how, some false),
+                   subjectOf(l.items[1], resolve, how, some ranked))
+      continue
+    var parts: seq[Subject]
+    for p in l.items.data: parts.add subjectOf(p, resolve, how, some ranked)
+    made.add joined(kind, parts)
+  if made.len == 1: made[0]
+  else: joined(if kind == FeedKind: AltKind else: kind, made)
+
+proc rowsAsked(d: Value, asked: Option[Value], resolve: Search[Value, Value],
+               how: Asking, subjects: seq[Subject] = @[]): Stream[Row] =
+  ## the find `d`'s rows, its own names followed already
+  let fd = Find.fromValue(d)
+  let now = Asking(followed: how.followed + toBTreeSet(collect(identities(identityOf(d)))),
+                   skipRefused: how.skipRefused)
+  rows(fd, asked, collect(initStream(fd.subjects).map(proc(v: Value): Subject =
+    subjectOf(v, resolve, now))) & subjects)
+
+proc rows*(d: Value, asked = none(Value), resolve: Search[Value, Value] = nil,
+           subjects: seq[Subject] = @[], skipRefused = false): Stream[Row] =
+  ## every answer of the find `d`, asked `asked`, with the bindings it was
+  ## written from and which part answered each clause: one per pull,
+  ## nothing worked out ahead. What it asks of is its subjects, names among
+  ## them found through `resolve` as they are needed, and `subjects` too.
+  ## Refuses what isn't a find, and, as `fromValue` does, a subject it can't
+  ## read, unless `skipRefused` passes over records a space can't hold
+  rowsAsked(d, asked, resolve, Asking(followed: newBSet(), skipRefused: skipRefused),
+            subjects)
+
+proc findAsked(d: Value, resolve: Search[Value, Value], how: Asking):
+    Search[Value, Value] =
+  discard Find.fromValue(d)
+  newSearch[Value, Value](proc(q: Value): Stream[Value] =
+    rowsAsked(d, some q, resolve, how).map(proc(r: Row): Value = r.answer),
+    k(d), k(identityOf(d)))
+
+proc findSearch*(d: Value, resolve: Search[Value, Value] = nil,
+                 skipRefused = false): Search[Value, Value] =
+  ## the search the find `d` stands for: asked, it answers as `rows` does,
+  ## its asked holes bound to what it is asked. Written down, it is the find
+  findAsked(d, resolve, Asking(followed: newBSet(), skipRefused: skipRefused))
+
+proc search*(s: Shape, id = randomId()): Search[Value, Value] =
+  ## the shape as a search, going by `id`: asked about a value, it answers
+  ## every filling
+  newSearch[Value, Value](proc(v: Value): Stream[Value] = s.fillings(v),
+                          id = id)

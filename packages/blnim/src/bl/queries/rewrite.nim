@@ -38,11 +38,15 @@
 ## kind and mark that begin with the members already known, found by
 ## bisecting. `inject` goes the other way,
 ## filling holes from bindings.
+##
+## A dialect built on shapes can read some parts of an example its own way,
+## as forms (`fitting`): a form is never looked up as written, and fits as
+## the dialect says, given the fit for any other part.
 
 import std/options
 import ../core
-import ./search
-export search
+import ./[queries, stream]
+export queries, stream
 
 refuseWith ValueError
 
@@ -54,8 +58,21 @@ type
     holes*: BSet           ## parts of the example standing for what is there
     wild*: Option[Value]   ## a part that fits anything and binds nothing
 
-  Fit = proc(b: Value): Stream[Value]
+  Fit* = proc(b: Value): Stream[Value]
     ## every extension of the bindings `b` under which a value fits a part
+
+  Forms* = object
+    ## parts of an example read their own way: `isForm` says which, and
+    ## `fitForm` fits one, given the fit for any other part. Nil for none
+    isForm*: proc(part: Value): bool
+    fitForm*: proc(part, v: Value, fit: proc(part, v: Value): Fit): Fit
+
+  Fitter = object
+    ## a shape's holes, its wild and the forms read their own way: what
+    ## fitting it needs
+    holes: BSet
+    wild: Option[Value]
+    forms: Forms
 
 proc initShape*(example: Value, holes: openArray[Value],
                 wild = none(Value)): Shape =
@@ -78,7 +95,7 @@ proc toValue*(s: Shape): Value =
 # ================ fitting ================
 
 proc keep(b: Value): Stream[Value] = just(b)
-proc fail(_: Value): Stream[Value] = empty[Value]()
+proc fail(_: Value): Stream[Value] = empty Value
 
 proc then(a, b: Fit): Fit =
   ## `a`, then `b` from each of the bindings `a` answers
@@ -89,23 +106,26 @@ proc bound(hole, v: Value): Fit =
   ## already, none if it is bound otherwise
   proc(b: Value): Stream[Value] =
     if hole in b.dict:
-      return if b.dict[hole] == v: just(b) else: empty[Value]()
+      return if b.dict[hole] == v: just(b) else: empty Value
     let more = b.dict + newBDict()
     more[hole] = v
     just(initDict(more))
 
-proc isWild(s: Shape, part: Value): bool =
+proc isWild(s: Fitter, part: Value): bool =
   s.wild == some(part)
 
-proc isLiteral(s: Shape, part: Value): bool =
-  ## whether `part` has no hole and no wild anywhere in it
-  part notin s.holes and not s.isWild(part) and
-    part.parts.every(Value -> s.isLiteral(it))
+proc isForm(s: Fitter, part: Value): bool =
+  s.forms.isForm != nil and part notin s.holes and s.forms.isForm(part)
 
-proc holesIn(s: Shape, parts: varargs[Value]): seq[Value] =
+proc isLiteral(s: Fitter, part: Value): bool =
+  ## whether `part` has no hole, no wild and no form anywhere in it
+  part notin s.holes and not s.isWild(part) and not s.isForm(part) and
+    part.parts.every(proc(it: Value): auto = s.isLiteral(it))
+
+proc holesIn(s: Fitter, parts: varargs[Value]): seq[Value] =
   ## the holes anywhere in `parts`
-  collect(initStream(@parts).flatMap(Value -> walk(it))
-    .filter(Value -> it in s.holes).unique)
+  collect(initStream(@parts).flatMaps(walk(it))
+    .filters(it in s.holes).unique)
 
 type Choice = object
   ## one part of a frame to fit, the holes it might bind, and, for a part
@@ -142,12 +162,13 @@ proc choices(cs: seq[Choice]): Fit =
       if cs[i].rank(b) < cs[best].rank(b): best = i
     let rest = choices(cs[0 ..< best] & cs[best + 1 .. ^1])
     if cs[best].unbound(b) == 0:
-      return if cs[best].fit(b)[].isSome: rest(b) else: empty[Value]()
+      return if cs[best].fit(b).next.isSome: rest(b) else: empty Value
     cs[best].fit(b).flatMap(rest)
 
-proc fit(s: Shape, part, v: Value): Fit
+proc fit(s: Fitter, part, v: Value): Fit
+proc shaped(s: Fitter, part, v: Value): Fit
 
-proc entryChoice(s: Shape, key, item, v: Value): Choice =
+proc entryChoice(s: Fitter, key, item, v: Value): Choice =
   ## one entry of an example dict against the dict `v`: a literal key
   ## looked up, any other tried against each entry in turn
   if not s.isLiteral(key):
@@ -159,11 +180,11 @@ proc entryChoice(s: Shape, key, item, v: Value): Choice =
   if key notin v.dict: return Choice(fit: fail)
   Choice(holes: s.holesIn(item), fit: s.fit(item, v.dict[key]))
 
-proc settledLead(s: Shape, m, b: Value): seq[Value] =
+proc settledLead(s: Fitter, m, b: Value): seq[Value] =
   ## the leading members of a list or record `m` that fit only what equals
   ## them under the bindings `b`: atoms as written, and holes bound
   ## already, as far as they run unbroken
-  if m.kind notin {bList, bRec}: return
+  if m.kind notin {bList, bRec} or s.isForm(m) or m in s.holes: return
   for x in m.items.data:
     if x in s.holes:
       if x notin b.dict: break
@@ -171,18 +192,18 @@ proc settledLead(s: Shape, m, b: Value): seq[Value] =
     elif s.isWild(x) or x.kind in {bList, bRec, bDict, bSet}: break
     else: result.add x
 
-proc candidates(s: Shape, m, v, b: Value): Stream[Value] =
+proc candidates(s: Fitter, m, v, b: Value): Stream[Value] =
   ## the members of the set `v` that might fit `m` under the bindings `b`:
   ## the one a bound hole stands for, the lists or records of its kind and
   ## mark that begin with its settled lead, or else every member
   if m in s.holes and m in b.dict:
     let w = b.dict[m]
-    return if w in v.els: just(w) else: empty[Value]()
-  if m.kind in {bList, bRec}:
+    return if w in v.els: just(w) else: empty Value
+  if m.kind in {bList, bRec} and not s.isForm(m) and m notin s.holes:
     return v.els.ledBy(m.kind, s.settledLead(m, b), m.mark)
   v.members
 
-proc memberChoice(s: Shape, m, v: Value): Choice =
+proc memberChoice(s: Fitter, m, v: Value): Choice =
   ## one member of an example set against the set `v`: a literal member
   ## looked up, any other tried against each member that might fit it
   if s.isLiteral(m): return Choice(fit: if m in v.els: keep else: fail)
@@ -191,10 +212,23 @@ proc memberChoice(s: Shape, m, v: Value): Choice =
     fit: proc(b: Value): Stream[Value] =
       s.candidates(m, v, b).flatMap(Value -> s.fit(m, it)(b)))
 
-proc fit(s: Shape, part, v: Value): Fit =
+proc fit(s: Fitter, part, v: Value): Fit =
   ## every extension of bindings under which `v` fits `part`
+  if s.isForm(part):
+    return s.forms.fitForm(part, v, proc(p, w: Value): Fit = s.fit(p, w))
   if s.isWild(part): return keep
-  if part in s.holes and part.mark == v.mark: return bound(part, v)
+  if part in s.holes:
+    if part.mark == v.mark: return bound(part, v)
+    # bound otherwise (from bindings given), it still fits what it is bound to
+    let otherwise = s.shaped(part, v)
+    return proc(b: Value): Stream[Value] =
+      if part notin b.dict: otherwise(b)
+      elif b.dict[part] == v: just(b)
+      else: empty Value
+  s.shaped(part, v)
+
+proc shaped(s: Fitter, part, v: Value): Fit =
+  ## every extension of bindings under which `v` fits `part` as written
   if part.family != v.family: return fail
   case part.kind
   of bList, bRec:
@@ -204,10 +238,20 @@ proc fit(s: Shape, part, v: Value): Fit =
       cs.add Choice(holes: s.holesIn(part.items[i]),
                     fit: s.fit(part.items[i], v.items[i]))
     choices(cs)
-  of bDict: choices(collect(part.entries.map((Value, Value) ->
+  of bDict: choices(collect(part.entries.maps(
     s.entryChoice(it[0], it[1], v))))
-  of bSet: choices(collect(part.members.map(Value -> s.memberChoice(it, v))))
+  of bSet: choices(collect(part.members.maps(s.memberChoice(it, v))))
   else: (if part == v: keep else: fail)
+
+proc fitter(s: Shape, forms = Forms()): Fitter =
+  Fitter(holes: s.holes, wild: s.wild, forms: forms)
+
+proc fitting*(s: Shape, forms: Forms): proc(part, v: Value): Fit =
+  ## the fit for any part of `s`'s example against a value, reading `forms`
+  ## their own way: the search from bindings to their extensions that a
+  ## dialect built on shapes composes its own searches from
+  let fr = s.fitter(forms)
+  proc(part, v: Value): Fit = fr.fit(part, v)
 
 # ================ searching and filling ================
 
@@ -218,16 +262,10 @@ proc fillings*(s: Shape, v: Value, given = initDict()): Stream[Value] =
   guard given.kind == bDict and not given.mark,
     "bindings are a dict: " & $given
   let holes = s.holes
-  s.fit(s.example, v)(given)
+  s.fitter.fit(s.example, v)(given)
     .filter(proc(b: Value): bool =
       holes.between(always, always).every(Value -> it in b.dict))
     .unique
-
-proc search*(s: Shape, id = randomId()): Search[Value, Value] =
-  ## the shape as a search, going by `id`: asked about a value, it answers
-  ## every filling
-  newSearch[Value, Value](proc(v: Value): Stream[Value] = s.fillings(v),
-                          id = id)
 
 proc inject*(s: Shape, bindings: Value): Value =
   ## the example with each hole that `bindings` binds filled in, and any

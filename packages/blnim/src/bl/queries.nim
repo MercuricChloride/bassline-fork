@@ -1,2 +1,2 @@
-import ./queries/[queries, bvar, rewrite]
-export queries, bvar, rewrite
+import ./queries/[queries, bvar, rewrite, find]
+export queries, bvar, rewrite, find

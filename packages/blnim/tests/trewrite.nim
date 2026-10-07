@@ -42,6 +42,10 @@ suite "fillings":
     check member.fills("{b c}").len == 0           # a literal member is still needed
     check shape("(shape {[x] [y]} {x y})").fills("{[1] [2]}").sameAs(
       dicts("{x: 1 y: 1}", "{x: 1 y: 2}", "{x: 2 y: 1}", "{x: 2 y: 2}"))
+    # a hole that is a record is a hole, tried against every member of its mark
+    check shape("(shape {!(h)} {!(h)})").fills("{plain beta! alpha!}").sameAs(@[
+      initDict(@[(readValue("!(h)"), readValue("alpha!"))]),
+      initDict(@[(readValue("!(h)"), readValue("beta!"))])])
 
   test "a hole in a dict key is tried against every entry":
     check shape("(shape {k: v} {k v})").fills("{a: 1 b: 2}").sameAs(
@@ -114,7 +118,7 @@ suite "written down, and filled":
   test "inject fills the holes bound, and leaves the rest":
     let s = shape("(shape !{(cmd c): [arg x] other: y} {c x y})")
     check s.inject(bl({c: go, x: 1})) == readValue("!{(cmd go): [arg 1] other: y}")
-    check s.inject(s.fillings(readValue("!{(cmd go): [arg 1] other: 2}"))[].get) ==
+    check s.inject(s.fillings(readValue("!{(cmd go): [arg 1] other: 2}")).next.get) ==
       readValue("!{(cmd go): [arg 1] other: 2}")
     refuses s.inject(bl([c, go]))
 
