@@ -1,5 +1,6 @@
 from std/bitops import countTrailingZeroBits
 from std/endians import littleEndian64
+import std/options
 import ../buffer
 export buffer
 
@@ -15,25 +16,31 @@ const
   EndByte*: byte = 0xA0
   MarkBit*: byte = 0x08
 
-type CodecError* = object of CatchableError
+type
+  BasslineError* = object of ValueError
+    ## what bassline raises when it refuses: bytes, text or a value that
+    ## a reading cannot hold. Every module's refusals are one, so
+    ## `except BasslineError` catches them all, and being a ValueError,
+    ## `except ValueError` still does
+  CodecError* = object of BasslineError
 
 template refuseWith*(err) {.dirty.} =
+  ## gives a module its own `refuse msg`, raising `err`, and `guard cond`,
+  ## refusing unless cond holds. Both are bound where they are written,
+  ## so a generic proc refuses with its own module's error wherever it
+  ## is instantiated.
   template refuse(msg: string) =
     raise newException(err, msg)
 
-  template guard(cond: bool, msg: string) =
-    if not cond:
+  template guard(cond: untyped, msg: string) =
+    if not(cond):
       refuse(msg)
 
+  template guard(cond: untyped) =
+    if not(cond):
+      refuse("guard failed: " & astToStr(cond))
+
 refuseWith CodecError
-
-template refuseWith*(ty, err) {.dirty.} =
-  template refuse(_: type ty, msg: string) =
-    raise newException(err, msg)
-
-  template guard(T: type ty, cond: bool, msg: string) =
-    if not cond:
-      T.refuse(msg)
 
 template ensure*(cond: bool) =
   result = cond
@@ -49,10 +56,15 @@ template toBytes*(a: string): openArray[byte] =
 
 func cmpBytes*(a, b: openArray[byte]): int =
   let n = min(a.len, b.len)
-  if n > 0:
-    let r = cmpMem(addr a[0], addr b[0], n)
-    if r != 0: return r
+  when nimvm:
+    for i in 0 ..< n:
+      if a[i] != b[i]: return int(a[i]) - int(b[i])
+  else:
+    if n > 0:
+      let r = cmpMem(addr a[0], addr b[0], n)
+      if r != 0: return r
   a.len - b.len
+
 
 func cmpShortlex*(x, y: openArray[byte]): int =
   result = cmp(x.len, y.len)
@@ -112,14 +124,17 @@ func isValidUtf8*(bytes: openArray[byte]): bool =
   let n = bytes.len
   while i < n:
     if state == UTF8_ACCEPT:
-      while i + 8 <= n:
-        var w: uint64
-        littleEndian64(addr w, addr bytes[i])
-        let hi = w and 0x8080808080808080'u64
-        if hi != 0:
-          i += countTrailingZeroBits(hi) shr 3
-          break
-        i += 8
+      when nimvm:
+        discard
+      else:
+        while i + 8 <= n:
+          var w: uint64
+          littleEndian64(addr w, addr bytes[i])
+          let hi = w and 0x8080808080808080'u64
+          if hi != 0:
+            i += countTrailingZeroBits(hi) shr 3
+            break
+          i += 8
       while i < n and bytes[i] < 0x80:
         inc i
       if i >= n: break
@@ -161,6 +176,19 @@ func `$`*(kind: Kind): string =
   of bRec: "record"
   of bDict: "dict"
   of bSet: "set"
+
+func parseKind*(s: string): Option[Kind] =
+  case s
+  of "nil": some bNil
+  of "number": some bNum
+  of "text": some bText
+  of "symbol": some bSym
+  of "bytes": some bBytes
+  of "list": some bList
+  of "record": some bRec
+  of "dict": some bDict
+  of "set": some bSet
+  else: none Kind
 
 func tag*(kind: Kind): byte =
   byte(kind.ord + 1)

@@ -65,7 +65,7 @@ func find[K, V](node: Node[K, V], key: K): lent V =
   of nkInternal:
     return find(node.kids[upperBound(node.keys, key)], key)
 
-proc put[K, V](node: Node[K, V], key: K, val: V, grew: var bool):
+proc put[K, V](node: Node[K, V], key: sink K, val: sink V, grew: var bool):
     tuple[sep: K, right: Node[K, V]] =
   ## Inserts under `node`. When the insert overflows `node` it splits:
   ## the new right half comes back with the separator key to file in
@@ -80,8 +80,10 @@ proc put[K, V](node: Node[K, V], key: K, val: V, grew: var bool):
     node.entries.insert((key, val), i)
     if node.entries.len > maxKeys:
       let h = node.entries.len div 2
-      let right = Node[K, V](kind: nkLeaf,
-        entries: node.entries[h .. ^1], next: node.next)
+      var moved = newSeqOfCap[Entry[K, V]](node.entries.len - h)
+      for j in h ..< node.entries.len:
+        moved.add move(node.entries[j])
+      let right = Node[K, V](kind: nkLeaf, entries: moved, next: node.next)
       node.entries.setLen(h)
       node.next = right
       result = (right.entries[0].key, right)
@@ -93,9 +95,14 @@ proc put[K, V](node: Node[K, V], key: K, val: V, grew: var bool):
       node.kids.insert(right, at + 1)
       if node.keys.len > maxKeys:
         let h = node.keys.len div 2
-        let split = Node[K, V](kind: nkInternal,
-          keys: node.keys[h + 1 .. ^1], kids: node.kids[h + 1 .. ^1])
-        result = (node.keys[h], split)
+        var keys = newSeqOfCap[K](node.keys.len - h - 1)
+        for j in h + 1 ..< node.keys.len:
+          keys.add move(node.keys[j])
+        var kids = newSeqOfCap[Node[K, V]](node.kids.len - h - 1)
+        for j in h + 1 ..< node.kids.len:
+          kids.add move(node.kids[j])
+        let split = Node[K, V](kind: nkInternal, keys: keys, kids: kids)
+        result = (move node.keys[h], split)
         node.keys.setLen(h)
         node.kids.setLen(h + 1)
 
@@ -185,6 +192,20 @@ iterator lockstep[K, V](a, b: Node[K, V]):
       lb = lb.next
       ib = 0
 
+proc clone[K, V](node: Node[K, V], prev: var Node[K, V]): Node[K, V] =
+  ## node and everything under it, copied; `prev` is the last leaf
+  ## copied so far, linked to the next
+  case node.kind
+  of nkLeaf:
+    result = Node[K, V](kind: nkLeaf, entries: node.entries)
+    if prev != nil: prev.next = result
+    prev = result
+  of nkInternal:
+    result = Node[K, V](kind: nkInternal, keys: node.keys,
+                        kids: newSeqOfCap[Node[K, V]](node.kids.len))
+    for kid in node.kids:
+      result.kids.add clone(kid, prev)
+
 # ================ BTree ================
 
 func newBTree*[K, V](): BTree[K, V] =
@@ -203,6 +224,26 @@ proc toBTreeSet*[T](items: openArray[T]): BTreeSet[T] =
   for item in items:
     result.incl item
 
+proc fromSorted*[K, V](entries: sink seq[Entry[K, V]]): BTree[K, V] =
+  ## a tree of entries already strictly ascending by key, taken on trust
+  if entries.len <= maxKeys:
+    let n = entries.len
+    return BTree[K, V](entries: n, root: Node[K, V](kind: nkLeaf, entries: entries))
+  result = newBTree[K, V]()
+  for e in entries.mitems:
+    result[move e.key] = move e.val
+
+proc copy*[K, V](t: BTree[K, V]): BTree[K, V] =
+  ## a tree of its own with t's entries, built node for node
+  var prev: Node[K, V]
+  BTree[K, V](entries: t.entries,
+    root: if t.root == nil: nil else: clone(t.root, prev))
+
+proc copy*[T](t: BTreeSet[T]): BTreeSet[T] =
+  var prev: Node[T, bool]
+  BTreeSet[T](entries: t.entries,
+    root: if t.root == nil: nil else: clone(t.root, prev))
+
 func len*[K, V](t: BTree[K, V]): int =
   t.entries
 
@@ -214,7 +255,7 @@ func `[]`*[K, V](t: BTree[K, V], key: K): lent V =
     raise newException(KeyError, "key not found")
   return find(t.root, key)
 
-proc `[]=`*[K, V](t: BTree[K, V], key: K, val: V) =
+proc `[]=`*[K, V](t: BTree[K, V], key: sink K, val: sink V) =
   if t.root == nil:
     t.root = Node[K, V](kind: nkLeaf)
   var grew = false
@@ -382,7 +423,7 @@ func len*[T](t: BTreeSet[T]): int =
 func contains*[T](t: BTreeSet[T], val: T): bool =
   val in t.root
 
-proc incl*[T](t: BTreeSet[T], val: T) =
+proc incl*[T](t: BTreeSet[T], val: sink T) =
   if t.root == nil:
     t.root = Node[T, bool](kind: nkLeaf)
   var grew = false

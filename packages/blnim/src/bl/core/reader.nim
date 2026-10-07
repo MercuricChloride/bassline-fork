@@ -14,7 +14,7 @@ import builders, codec
 export builders
 
 type
-  ReadError* = object of CatchableError
+  ReadError* = object of BasslineError
   Incomplete* = object of ReadError
 
   ScanState = enum

@@ -1,21 +1,16 @@
 ##[
-  clave: keypairs, signatures, and signed values.
-
-    (keypair scheme! seed! public!)
-    (signature scheme! sig! pubkey!)
-    (signed value! signature!)
+  clave: keypairs, signatures, and signed values, as types.nim
+  describes them.
 
   A signature covers a value's CE bytes, so what is attested is the
   value itself. The one scheme is monocypher's EdDSA over curve25519
-  with blake2b, spoken as `eddsa-blake2b`; the library describes it
-  and the lengths it fixes, so the derived types are its arrays.
+  with blake2b, spoken as `eddsa-blake2b`.
 
   A keypair is a value so it can be kept; the secret key is derived
   from the seed when it is needed and never spoken.
 ]##
 
 import ../../core
-import ../blmacro
 import ./[eddsa, types]
 export types
 

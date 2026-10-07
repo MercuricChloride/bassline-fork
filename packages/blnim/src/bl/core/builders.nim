@@ -3,26 +3,31 @@ import ./buffer
 import btree, codec
 export btree, codec
 
-refuseWith ValueError
+refuseWith BasslineError
 
 type
   BNum* = object
     case isWide: bool
-    of true:
-      s: string
     of false:
-      n: int
+      small: int
+    of true:
+      big: string
 
 converter toNum*(n: int): BNum =
-  BNum(isWide: false, n: n)
+  BNum(isWide: false, small: n)
 
 func initNum*(s: string): BNum =
   ## s is a canonical spelling; past int64 it is held as it is spelled
   guard isValidInt(s.toBytes), "not a canonical number: " & s
   try:
-    BNum(isWide: false, n: parseBiggestInt(s))
+    BNum(isWide: false, small: parseBiggestInt(s))
   except ValueError:
-    BNum(isWide: true, s: s)
+    BNum(isWide: true, big: s)
+
+func toNum*(s: string): BNum =
+  ## the number s spells, canonically; `toNum` of an int is the
+  ## converter above
+  initNum(s)
 
 func isWide*(n: BNum): bool =
   n.isWide
@@ -32,10 +37,10 @@ func isInt*(n: BNum): bool =
 
 func toInt*(n: BNum): int =
   guard n.isInt, "num is wide, not an int"
-  n.n # note: why does he look so happy!
+  n.small
 
 func toString*(n: BNum): string =
-  if n.isWide: n.s else: $n.n
+  if n.isWide: n.big else: $n.small
 
 func wide*(n: BNum): string =
   n.toString
@@ -189,6 +194,44 @@ func `>`*(a, b: Value): bool =
 func `>=`*(a, b: Value): bool =
   cmp(a, b) >= 0
 
+# ================ Access ================
+
+func len*(a: Value): int =
+  case a.kind
+  of bList, bRec: a.items.len
+  of bDict: a.dict.len
+  of bSet: a.els.len
+  else: 0
+
+func isKind*(a: Value, k: set[Kind]): bool =
+  a.kind in k
+
+func isKind*(a: Value, k: Kind): bool =
+  a.kind == k
+
+# the message is built only on failure: a default parameter would build
+# it on every call
+
+func expectKind*(a: Value, k: Kind) =
+  guard a.isKind(k), "expected kind: " & $k
+
+func expectKind*(a: Value, k: Kind, msg: string) =
+  guard a.isKind(k), msg
+
+func expectKind*(a: Value, k: set[Kind]) =
+  guard a.isKind(k), "expected value of kind: " & $k
+
+func expectKind*(a: Value, k: set[Kind], msg: string) =
+  guard a.isKind(k), msg
+
+func `[]`*(a: Value, i: Natural): lent Value =
+  a.expectKind {bList, bRec}
+  a.items[i]
+
+func `[]`*(a: Value, k: Value): lent Value =
+  a.expectKind bDict
+  a.dict[k]
+
 # ================ Frame constructors ================
 
 func initList*(items: sink seq[Value], mark = false): Value =
@@ -200,13 +243,13 @@ proc initRec*(items: sink seq[Value], mark = false): Value =
 
 proc initSet*(items: sink seq[Value], mark = false): Value =
   result = initSet(mark)
-  for x in items:
-    result.els.incl x
+  for x in items.mitems:
+    result.els.incl move(x)
 
 proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
   result = initDict(mark)
-  for (k, v) in entries:
-    result.dict[k] = v
+  for e in entries.mitems:
+    result.dict[move e[0]] = move e[1]
 
 proc initRec*(items: Buffer[Value], mark = false): Value =
   guard items.len > 0, "record must have a head"
@@ -225,6 +268,12 @@ func head*(v: Value): lent Value =
   guard v.kind in {bList, bRec}, "head must be used with a list / record"
   return v.items[0]
 
+template toBSet*(iter): BSet =
+  var r = newBSet()
+  for each in iter:
+    r.incl each
+  r
+
 # ================ Misc converstion fns ================
 
 func toValue*(v: Value): Value = 
@@ -235,6 +284,9 @@ func fromValue*(T: typedesc[Value], v: Value): Value =
 
 func toValue*(i: SomeInteger): Value = 
   num(i)
+
+func toValue*(self: BNum): Value =
+  Value(kind: bNum, num: self)
 
 func toValue*(s: string): Value = 
   text(s)
@@ -256,6 +308,10 @@ func toValue*[T](xs: openArray[T]): Value =
   result = initList()
   for x in xs:
     result.items.add toValue(x)
+
+proc `%>`*[T](self: T): Value =
+  mixin toValue
+  toValue(self)
 
 # ================ Encoding ================
 

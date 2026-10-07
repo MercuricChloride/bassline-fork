@@ -1,29 +1,28 @@
 ##[
   Digests over a value's CE bytes.
 
-    (digest algo! bytes!)
+    (digest ALGO HASH)
 
-  The library describes `digest` with `algo!` a `HashAlgo`, one of
-  sha256 and blake2b, and `bytes!` 32 bytes: blake2b here is
-  blake2b-256, nimcrypto's parameterised form, not a truncation.
+  ALGO is sha256 or blake2b, and HASH its 32 bytes: blake2b here is
+  blake2b-256, nimcrypto's parameterised form, not a truncation. A
+  digest is read exactly, like everything clave speaks.
 ]##
 
 import nimcrypto/[blake2, sha2]
-import ../../core
-import ../blmacro
-import ./types
+import ../../[core, mold]
+export mold
 
-refuseWith ValueError
+refuseWith BasslineError
 
-let
-  Blake2bAlgo* = bl blake2b
-  Sha256Algo* = bl sha256
+moldable """
+  (digest Digest [(algo (one-of sha256 blake2b)) (hash (bytes 32))] exact)
+"""
 
-type 
-  Hash* = array[32, byte]
-  Digest* = object
-    algo*: Value
-    hash*: Hash
+const
+  Blake2bAlgo* = "blake2b"
+  Sha256Algo* = "sha256"
+
+type Hash* = array[32, byte]
 
 func sha256*(bytes: openArray[byte]): Hash =
   var ctx: sha2.sha256
@@ -37,15 +36,15 @@ func blake2b*(bytes: openArray[byte]): Hash =
   ctx.update(bytes)
   ctx.finish().data
 
-proc hash*(ce: openArray[byte], algo: Value): Hash =
-  if algo == Sha256Algo:
+proc hash*(ce: openArray[byte], algo: string): Hash =
+  if algo == "sha256":
     sha256 ce
-  elif algo == Blake2bAlgo:
+  elif algo == "blake2b":
     blake2b ce
   else:
     refuse "unknown hash algorithm: " & $algo
 
-proc digest*(value, algo: Value): Digest =
+proc digest*(value: Value, algo: string): Digest =
   ## the digest of v's CE bytes
   Digest(algo: algo, hash: hash(value.ce, algo))
 
@@ -56,15 +55,3 @@ proc verifies*(d: Digest, ce: openArray[byte]): bool =
 proc verifies*(d: Digest, v: Value): bool =
   ## whether d is the digest of v
   d.verifies(ce(v))
-
-func shape*(_: typedesc[Digest]): Value =
-  bl shape(digest(algo, hash), {algo, hash})
-
-proc fromValue*(T: typedesc[Digest], v: Value): Digest =
-  let f = v.fields(bl digest, 2)
-  guard f[0] == Sha256Algo or f[0] == Blake2bAlgo, "unknown hash algo"
-  result.algo = f[0]
-  result.hash.fill f[1], "hash"
-
-proc toValue*(self: Digest): Value =
-  bl digest(%(self.algo), %(@(self.hash)))
