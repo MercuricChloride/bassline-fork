@@ -48,7 +48,7 @@ import ../core
 import ./[queries, stream]
 export queries, stream
 
-refuseWith ValueError
+refuseWith BasslineError
 
 let ShapeHead = sym"shape"
 

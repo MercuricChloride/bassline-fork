@@ -40,11 +40,11 @@ suite "digest":
     let d = digest(v, Blake2bAlgo)
     let dv = toValue(d)
     check dv == bl(digest(blake2b, %bytes(d.hash)))
-    check Digest.fromValue(dv) == d
+    check Digest.fromValue(dv).toValue == dv
 
   test "an unknown algorithm is refused":
-    refuses hash(ce(v), bl md5)
-    refuses digest(v, bl md5)
+    refuses hash(ce(v), "md5")
+    refuses digest(v, "md5")
 
   test "what is not a digest of a known kind is refused":
     refuses Digest.fromValue(bl(digest(md5, %bytes(newSeq[byte](32)))))
@@ -62,7 +62,7 @@ suite "clave":
     check keypairFromSeed(seed).pubkey == kp.pubkey
     let kv = toValue(kp)
     check kv == bl(keypair(s"eddsa-blake2b", %bytes(seed), %bytes(kp.pubkey)))
-    check Keypair.fromValue(kv) == kp
+    check Keypair.fromValue(kv).toValue == kv
     refuses Keypair.fromValue(bl(keypair(rsa, %bytes(seed), %bytes(kp.pubkey))))
     refuses Keypair.fromValue(bl(keypair(s"eddsa-blake2b", x"00", %bytes(kp.pubkey))))
 
@@ -73,11 +73,10 @@ suite "clave":
     check sig.holds(v)
     check not sig.holds(bl(hello("world")))
     check not sig.holds(randValue(3))
-    var wrongKey = sig
-    wrongKey.pubkey = keypairFromSeed(default(Seed)).pubkey
+    let wrongKey = Signature(scheme: sig.scheme, sig: sig.sig,
+                             pubkey: keypairFromSeed(default(Seed)).pubkey)
     check not wrongKey.holds(v)
-    var wrongScheme = sig
-    wrongScheme.scheme = bl rsa
+    let wrongScheme = Signature(scheme: "rsa", sig: sig.sig, pubkey: sig.pubkey)
     check not wrongScheme.holds(v)
 
   test "a signed value travels as one value":
@@ -87,10 +86,10 @@ suite "clave":
     check sv == bl(signed(%v, signature(s"eddsa-blake2b",
       %bytes(s.sig.sig), %bytes(kp.pubkey))))
     let back = Signed.fromValue(sv)
-    check back == s
+    check back.toValue == sv
     check back.holds
     let m = kp.signed(bl(!go(here)))
-    check Signed.fromValue(m.toValue) == m                  # any value, marked too
+    check Signed.fromValue(m.toValue).toValue == m.toValue  # any value, marked too
 
   test "a tampered signed value does not hold":
     var s = kp.signed(v)

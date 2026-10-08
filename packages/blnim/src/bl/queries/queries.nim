@@ -34,7 +34,7 @@ import ../core
 import ./stream
 export stream
 
-refuseWith ValueError
+refuseWith BasslineError
 
 let
   IdentityQ* = sym"identity"
@@ -56,9 +56,6 @@ let
   BVarKind* = sym"bvar"
 
 # ================ predicates and maps over values ================
-
-func isKind*(v: Value, kinds: set[Kind]): bool =
-  v.kind in kinds
 
 func isMarked*(v: Value): bool = v.mark
 

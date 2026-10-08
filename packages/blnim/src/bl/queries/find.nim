@@ -56,7 +56,7 @@ import ../core
 import ./[queries, stream, rewrite]
 export rewrite
 
-refuseWith ValueError
+refuseWith BasslineError
 
 let
   FindKind* = sym"find"

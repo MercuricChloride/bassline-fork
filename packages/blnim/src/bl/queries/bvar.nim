@@ -32,7 +32,7 @@ import ../core
 import ./[search, send]
 export search, send
 
-refuseWith ValueError
+refuseWith BasslineError
 
 type
   Access* {.pure.} = enum

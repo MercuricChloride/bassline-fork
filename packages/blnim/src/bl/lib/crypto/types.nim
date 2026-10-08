@@ -15,13 +15,15 @@ import ../../[core, mold]
 export mold
 
 moldable """{
-  (keypair Keypair
-    [(scheme (one-of eddsa-blake2b)) (seed (bytes 32)) (pubkey (bytes 32))]
-    exact)
-  (signature Signature
-    [(scheme (one-of eddsa-blake2b)) (sig (bytes 64)) (pubkey (bytes 32))]
-    exact)
-  (signed Signed [(value any) (sig Signature)] exact)
+  (struct keypair {exact (rep record)}
+    (scheme (symbol {(one-of eddsa-blake2b)}))
+    (seed (bytes {(len 32)}))
+    (pubkey (bytes {(len 32)})))
+  (struct signature {exact (rep record)}
+    (scheme (symbol {(one-of eddsa-blake2b)}))
+    (sig (bytes {(len 64)}))
+    (pubkey (bytes {(len 32)})))
+  (struct signed {exact (rep record)} (value any) (sig signature))
 }"""
 
 const Scheme* = "eddsa-blake2b"

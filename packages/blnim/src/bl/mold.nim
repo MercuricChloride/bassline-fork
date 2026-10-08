@@ -1,2 +1,2 @@
-import ./mold/[mold, moldMacro, poly]
-export mold, moldMacro, poly
+import ./mold/[mold, parseMold, moldMacro, poly]
+export mold, parseMold, moldMacro, poly

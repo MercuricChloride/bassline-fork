@@ -14,7 +14,7 @@
 import std/os
 import ../[core, queries]
 
-refuseWith ValueError
+refuseWith BasslineError
 
 proc valueIn*(path: string): Value =
   ## the one value in the file at `path`. Refuses bytes that aren't

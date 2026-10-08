@@ -5,10 +5,11 @@ type
   PolyError* = object of BasslineError
   Poly* = ref object
     ## fields, by name, read through whichever Moldable face is asked
-    ## for, described by fields or by items. The fields are what every
-    ## face has written, the live one written over the rest. A face is
-    ## one reading of them, and only the one last asked for is live: a
-    ## face handed out before it is no longer heard from.
+    ## for. The fields are what every face has written, the live one
+    ## written over the rest: a field the live face describes is the
+    ## face's to say, so one it leaves out is left out. A face is one
+    ## reading of them, and only the one last asked for is live: a face
+    ## handed out before it is no longer heard from.
     fields: BDict
     face: Moldable
 
@@ -28,28 +29,39 @@ proc poly*(self: Value): Poly =
   Poly(fields: self.dict)
 
 proc flush(self: Poly) =
-  ## the live face's fields written over the rest; a new tree, so a dict
-  ## the poly was made from never changes underneath its owner
-  if self.face != nil:
-    self.fields = self.fields + self.face.moldFields
+  ## the live face's fields written over the rest, its own fields wholly
+  ## its to say; a new tree, so a dict the poly was made from never
+  ## changes underneath its owner
+  if self.face == nil: return
+  let described = self.face.shape.names
+  var kept = newBDict()
+  for name, v in self.fields:
+    if name notin described:
+      kept[name] = v
+  self.fields = kept + self.face.moldFields
 
 proc morph*[A: Moldable](self: Poly, _: type A): A =
   ## the fields read as an A, now the live face
   if self.face != nil and self.face of A:
     return A(self.face)
   self.flush
-  result = A.loadHeadless(initDict(self.fields))
+  result = A.loadFields(self.fields)
   self.face = result
+
+proc toDict*(self: Poly): Value =
+  ## every field, by name, the live face's written over the rest
+  self.flush
+  initDict(self.fields)
 
 proc toValue*(self: Poly): Value =
   ## every field, under the live face's head; the bare fields while no
-  ## face has been asked for. A face described by items has a place for
+  ## face has been asked for. A face written as a record has a place for
   ## its own fields only, so it is written as it molds
   self.flush
   if self.face == nil:
     initDict(self.fields)
-  elif self.face.positional:
-    self.face.mold
+  elif self.face.rep == repRecord:
+    self.face.moldRec
   else:
     initRec(@[self.face.head, initDict(self.fields)], mark = self.face.marked)
 

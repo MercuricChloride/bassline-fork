@@ -15,7 +15,9 @@ export mold
 refuseWith BasslineError
 
 moldable """
-  (digest Digest [(algo (one-of sha256 blake2b)) (hash (bytes 32))] exact)
+  (struct digest {exact (rep record)}
+    (algo (symbol {(one-of sha256 blake2b)}))
+    (hash (bytes {(len 32)})))
 """
 
 const

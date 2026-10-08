@@ -41,7 +41,7 @@ import ../core
 import ./[queries, stream, find]
 export queries, stream, find
 
-refuseWith ValueError
+refuseWith BasslineError
 
 type
   Fanout* = enum

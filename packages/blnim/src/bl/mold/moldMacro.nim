@@ -1,48 +1,17 @@
-import std/[macros, strutils, options]
+## `moldable`: a description of structs (see parseMold.nim) made into
+## Moldable types. For each struct it generates the type, its fields
+## public; `moldFields` and `loadFields`, reading and writing it by name;
+## `shape`, which everything else in mold.nim works from; and the
+## probes, `T.probe(v)` and the like, which check what a load would and
+## build nothing.
+
+import std/[macros, strutils, options, tables]
 import ../core
-import ./mold
+import ./[mold, parseMold]
 
 refuseWith MoldError
 
-# ================ What `moldable` writes calls ================
-
-func spelled(head: string, mark: bool, rest: string): string =
-  (if mark: "!(" else: "(") & head & " " & rest & ")"
-
-proc fieldsOf(v: Value, head: string, mark: bool): BDict =
-  ## the fields of `(head {…})`: marked as described, with that head, and
-  ## an unmarked dict
-  guard v.isKind(bRec) and v.mark == mark and v.items.len == 2 and
-    v.items[0].isKind(bSym) and not v.items[0].mark and
-    v.items[0].text == head and
-    v.items[1].isKind(bDict) and not v.items[1].mark,
-    "not " & spelled(head, mark, "{…}")
-  v.items[1].dict
-
-proc headlessFields(v: Value, head: string): BDict =
-  guard v.isKind(bDict) and not v.mark,
-    head & " reads its fields from an unmarked dict"
-  v.dict
-
-proc itemsOf(v: Value, head: string, mark: bool, n: int,
-             exact: bool): Buffer[Value] =
-  ## the items of `(head …)`: marked as described, with that head, and
-  ## the n items described after it, or, read exactly, those and no more
-  guard v.isKind(bRec) and v.mark == mark and
-    (if exact: v.items.len == n + 1 else: v.items.len > n) and
-    v.items[0].isKind(bSym) and not v.items[0].mark and
-    v.items[0].text == head,
-    "not " & spelled(head, mark, "…") & " with " &
-    (if exact: "exactly " else: "") & $n & " items"
-  v.items
-
-proc headlessItems(v: Value, head: string, n: int, exact: bool): Buffer[Value] =
-  guard v.isKind(bList) and not v.mark and
-    (if exact: v.items.len == n else: v.items.len >= n),
-    head & " reads " & (if exact: "exactly " else: "") & "its " & $n &
-    " items from an unmarked list, or its fields by name from an unmarked " &
-    "dict"
-  v.items
+# ================ what the generated code calls ================
 
 func fieldCmp(k: Value, name: string): int =
   ## k against the field named by the symbol `name`, in CE order,
@@ -53,16 +22,54 @@ func fieldCmp(k: Value, name: string): int =
   if result != 0: return
   result = cmpShortlex(k.text.toBytes, name.toBytes)
 
+func spelled(head: string, mark: bool, rest: string): string =
+  (if mark: "!(" else: "(") & head & " " & rest & ")"
+
+proc isHead(v: Value, head: string): bool =
+  v.isKind(bSym) and not v.mark and v.text == head
+
+proc dictFields(v: Value, head: string, mark: bool): BDict =
+  ## the fields of `(head {…})`, marked as described
+  guard v.isKind(bRec) and v.mark == mark and v.items.len == 2 and
+    v.items[0].isHead(head) and v.items[1].isKind(bDict) and
+    not v.items[1].mark, "not " & spelled(head, mark, "{…}")
+  v.items[1].dict
+
+proc recItems(v: Value, head: string, mark: bool, n: int,
+              exact: bool): Buffer[Value] =
+  ## the items of `(head …)`, marked as described: one for each field,
+  ## and, read exactly, no more
+  guard v.isKind(bRec) and v.mark == mark and
+    (if exact: v.items.len == n + 1 else: v.items.len > n) and
+    v.items[0].isHead(head),
+    "not " & spelled(head, mark, "…") & " with " &
+    (if exact: "exactly " else: "") & $n & " items"
+  v.items
+
+proc absent(v: Value): bool =
+  ## nil, where an optional field has nothing in it
+  v.isKind(bNil) and not v.mark
+
+proc present(v: Value, name: string): Value =
+  ## v, which a record can tell from nothing only when it isn't nil
+  guard not v.absent, name & " holds nil, which a record can't tell from " &
+    "nothing in it"
+  v
+
 proc missing(name: string) {.noreturn.} =
   refuse "no field " & name
 
 proc beyond(head: string) {.noreturn.} =
   refuse head & " is read exactly, and holds a field more than described"
 
+proc sized(v: Value, n: int, mark: bool, name: string) =
+  ## v, which must be exactly n bytes, marked as described
+  guard v.isKind(bBytes) and v.mark == mark and v.bytes.len == n,
+    name & " must be " & (if mark: "marked " else: "") & $n & " bytes"
+
 proc fixedBytes[N: static int](v: Value, mark: bool, name: string): array[N, byte] =
-  ## v, which must be exactly N bytes, marked as described
-  guard v.isKind(bBytes) and v.mark == mark and v.bytes.len == N,
-    name & " must be " & (if mark: "marked " else: "") & $N & " bytes"
+  ## v, which must be exactly N bytes, as the array that holds them
+  sized(v, N, mark, name)
   if N > 0:
     copyMem(addr result[0], unsafeAddr v.bytes[0], N)
 
@@ -127,131 +134,60 @@ proc dictOf(entries: sink seq[(Value, Value)], name: string): Value =
   result = initDict(entries)
   guard result.len == n, name & " holds a key twice"
 
-# ================ moldable ================
+# ================ from the tree to Nim ================
 
-proc only(t: Value): Value =
-  ## the one member of a typed set
-  for m in t.els: return m
-
-proc member(t: Value): Value =
-  if t.isKind(bSet): only(t) else: t[0]
-
-proc entry(t: Value): (Value, Value) =
-  ## the one KEY: VALUE of a typed dict
-  for k, v in t.dict: return (k, v)
-
-func headed(t: Value, head: string): bool =
-  t.isKind(bRec) and t.len > 0 and t[0].isKind(bSym) and not t[0].mark and
-    t[0].text == head
-
-func isOptional(t: Value): bool =
-  ## whether t is `(optional T)`
-  t.headed("optional") and t.len == 2
-
-func isFixedBytes(t: Value): bool =
-  ## whether t is `(bytes N)`
-  t.headed("bytes") and t.len == 2
-
-func isOneOf(t: Value): bool =
-  ## whether t is `(one-of SYMBOL …)`
-  t.headed("one-of") and t.len >= 2
-
-func fixedLen(t: Value): int =
-  t[1].num.toInt
-
-proc allowed(t: Value): NimNode =
-  ## the symbols `(one-of …)` lists, as an array of strings
-  result = newTree(nnkBracket)
-  for i in 1 ..< t.len:
-    result.add newLit(t[i].text)
-
-proc checkSpec(t: Value, name: string, description: NimNode) =
-  ## refuses, while compiling, a TYPE that nothing can be held as
-  template refuse(msg: string) =
-    error(name & ": " & msg, description)
-  if t.isOptional:
-    refuse "only a field can be optional, by being left out: " & $t
-  if t.isFixedBytes:
-    if not t[1].isKind(bNum) or t[1].mark or t[1].num.isWide or
-        t[1].num.toInt < 0:
-      refuse "(bytes N) takes a count of bytes: " & $t
-    return
-  if t.isOneOf:
-    for i in 1 ..< t.len:
-      if not t[i].isKind(bSym) or t[i].mark:
-        refuse "(one-of …) lists unmarked symbols: " & $t
-    return
-  case t.kind
-  of bText, bSym:
-    if t.text == "nil": refuse "nil holds nothing"
-    elif t.text == "any":
-      if t.mark: refuse "any is marked or not, so needs no mark"
-    elif t.text != "value" and parseKind(t.text).isNone:
-      if not validIdentifier(t.text): refuse "not a Nim type: " & t.text
-      if t.mark: refuse "a Moldable is marked as its own description says"
-  of bList, bRec, bSet:
-    if t.len != 1: refuse "a typed " & $t.kind & " has one TYPE: " & $t
-    checkSpec(t.member, name & " member", description)
-  of bDict:
-    if t.len != 1: refuse "a typed dict has one KEY: VALUE: " & $t
-    let (k, v) = t.entry
-    checkSpec(k, name & " key", description)
-    checkSpec(v, name & " value", description)
-  of bNil:
-    refuse "nil holds nothing"
-  else:
-    refuse "a TYPE is a kind, value, any or a Moldable by name, or a " &
-      "typed collection: " & $t
+proc structNim(ctx: Context, name: string): string =
+  ## the Nim name of the struct called `name`, declared here or elsewhere
+  if name in ctx.structs: ctx.structs[name].nimName
+  else: nimSpelling(name, true)
 
 proc seqOf(ty: NimNode): NimNode =
   newTree(nnkBracketExpr, ident"seq", ty)
 
-proc nimType(t: Value): NimNode =
-  ## what a field of TYPE t is held as
-  if t.isFixedBytes:
-    return newTree(nnkBracketExpr, ident"array", newLit(t.fixedLen), ident"byte")
-  if t.isOneOf:
-    return ident"string"
+proc nimType(t: Type, ctx: Context): NimNode =
+  ## what a part of TYPE t is held as
   case t.kind
-  of bList, bRec, bSet:
-    seqOf(nimType(t.member))
-  of bDict:
-    let (k, v) = t.entry
-    seqOf(newTree(nnkTupleTy,
-      newIdentDefs(ident"key", nimType(k)),
-      newIdentDefs(ident"val", nimType(v))))
-  else:
-    if t.text in ["value", "any"]: return bindSym"Value"
-    let kind = parseKind(t.text)
-    if kind.isNone: return ident(t.text)
-    case kind.get
+  of tkKind:
+    if t.len.isSome:
+      return newTree(nnkBracketExpr, ident"array", newLit(t.len.get), ident"byte")
+    case t.valueKind
     of bNum: bindSym"BNum"
     of bText, bSym: ident"string"
     of bBytes: seqOf(ident"byte")
     of bList, bRec: seqOf(bindSym"Value")
     of bDict: bindSym"BDict"
     of bSet: bindSym"BSet"
-    of bNil: newEmptyNode() # refused by checkSpec
+    of bNil: newEmptyNode() # not a TYPE
+  of tkAny: bindSym"Value"
+  of tkStruct: ident(ctx.structNim(t.name))
+  of tkList, tkSet, tkRecord: seqOf(nimType(t.each, ctx))
+  of tkDict:
+    seqOf(newTree(nnkTupleTy,
+      newIdentDefs(ident"key", nimType(t.key, ctx)),
+      newIdentDefs(ident"val", nimType(t.val, ctx))))
 
-proc moldExpr(t: Value, x: NimNode, name: string): NimNode =
+proc allowed(t: Type): NimNode =
+  result = newTree(nnkBracket)
+  for o in t.oneOf: result.add newLit(o)
+
+proc moldExpr(t: Type, x: NimNode, name: string, ctx: Context): NimNode =
   ## x, held as TYPE t, written down
   let nameLit = newLit(name)
-  if t.isFixedBytes or t.isOneOf:
-    result =
-      if t.isFixedBytes: newCall(bindSym"bytes", x)
-      else: newCall(bindSym"sym", newCall(bindSym"oneOf", x, t.allowed, nameLit))
-    if t.mark:
-      result = newCall(bindSym"withMark", result)
-    return
   case t.kind
-  of bList, bRec, bSet:
+  of tkAny:
+    return
+      if t.markFree: x
+      else: newCall(bindSym"markedAs", x, newLit(t.marked), nameLit)
+  of tkStruct:
+    return newCall(bindSym"moldOf", x, nameLit)
+  of tkList, tkSet, tkRecord:
     let
       items = genSym(nskVar, "items")
       it = genSym(nskForVar, "it")
-      each = moldExpr(t.member, it, name & " member")
+      each = moldExpr(t.each, it, name & " member", ctx)
       made = case t.kind
-        of bList: newCall(bindSym"initList", items)
-        of bRec: newCall(bindSym"recOf", items, nameLit)
+        of tkList: newCall(bindSym"initList", items)
+        of tkRecord: newCall(bindSym"recOf", items, nameLit)
         else: newCall(bindSym"setOf", items, nameLit)
     result = quote do:
       block:
@@ -259,13 +195,12 @@ proc moldExpr(t: Value, x: NimNode, name: string): NimNode =
         for `it` in `x`:
           `items`.add `each`
         `made`
-  of bDict:
+  of tkDict:
     let
-      (k, v) = t.entry
       entries = genSym(nskVar, "entries")
       it = genSym(nskForVar, "it")
-      key = moldExpr(k, newDotExpr(it, ident"key"), name & " key")
-      val = moldExpr(v, newDotExpr(it, ident"val"), name & " value")
+      key = moldExpr(t.key, newDotExpr(it, ident"key"), name & " key", ctx)
+      val = moldExpr(t.val, newDotExpr(it, ident"val"), name & " value", ctx)
       made = newCall(bindSym"dictOf", entries, nameLit)
     result = quote do:
       block:
@@ -273,393 +208,417 @@ proc moldExpr(t: Value, x: NimNode, name: string): NimNode =
         for `it` in `x`:
           `entries`.add (`key`, `val`)
         `made`
-  else:
-    if t.text == "any": return x
-    if t.text == "value":
-      return newCall(bindSym"markedAs", x, newLit(t.mark), nameLit)
-    let kind = parseKind(t.text)
-    if kind.isNone: return newCall(bindSym"moldOf", x, nameLit)
-    result = case kind.get
-      of bNum: newCall(bindSym"toValue", x)
-      of bText: newCall(bindSym"text", x)
-      of bSym: newCall(bindSym"sym", x)
-      of bBytes: newCall(bindSym"bytes", x)
-      of bList: newCall(bindSym"initList", x)
-      of bRec: newCall(bindSym"recOf", x, nameLit)
-      of bDict: newCall(bindSym"dictOf", x, nameLit)
-      of bSet: newCall(bindSym"setOf", x, nameLit)
-      of bNil: x # refused by checkSpec
-  if t.mark:
+  of tkKind:
+    result =
+      if t.len.isSome: newCall(bindSym"bytes", x)
+      elif t.oneOf.len > 0:
+        newCall(bindSym"sym", newCall(bindSym"oneOf", x, t.allowed, nameLit))
+      else:
+        case t.valueKind
+        of bNum: newCall(bindSym"toValue", x)
+        of bText: newCall(bindSym"text", x)
+        of bSym: newCall(bindSym"sym", x)
+        of bBytes: newCall(bindSym"bytes", x)
+        of bList: newCall(bindSym"initList", x)
+        of bRec: newCall(bindSym"recOf", x, nameLit)
+        of bDict: newCall(bindSym"dictOf", x, nameLit)
+        of bSet: newCall(bindSym"setOf", x, nameLit)
+        of bNil: x # not a TYPE
+  if t.marked:
     result = newCall(bindSym"withMark", result)
 
-proc loadExpr(t: Value, v: NimNode, name: string): NimNode =
+proc loadExpr(t: Type, v: NimNode, name: string, ctx: Context): NimNode =
   ## v, a Value, read as TYPE t
   let nameLit = newLit(name)
-  if t.isFixedBytes:
-    return newCall(newTree(nnkBracketExpr, bindSym"fixedBytes", newLit(t.fixedLen)),
-                   v, newLit(t.mark), nameLit)
-  if t.isOneOf:
-    let sym = newCall(bindSym"heldOf", v, newLit(bSym), newLit(t.mark), nameLit)
-    return newCall(bindSym"oneOf", newDotExpr(sym, ident"text"), t.allowed,
-                   nameLit)
   case t.kind
-  of bList, bRec, bSet, bDict:
+  of tkAny:
+    if t.markFree: v
+    else: newCall(bindSym"markedAs", v, newLit(t.marked), nameLit)
+  of tkStruct:
+    newCall(bindSym"load", ident(ctx.structNim(t.name)), v)
+  of tkList, tkSet, tkRecord, tkDict:
     let
       held = genSym(nskLet, "held")
       r = genSym(nskVar, "r")
       it = genSym(nskForVar, "it")
-      ty = nimType(t)
-      got = newCall(bindSym"heldOf", v, newLit(t.kind), newLit(t.mark), nameLit)
+      ty = nimType(t, ctx)
+      valueKind = case t.kind
+        of tkList: bList
+        of tkSet: bSet
+        of tkRecord: bRec
+        else: bDict
+      got = newCall(bindSym"heldOf", v, newLit(valueKind), newLit(t.marked),
+                    nameLit)
     var members, each: NimNode
     case t.kind
-    of bDict:
-      let (k, v) = t.entry
+    of tkDict:
       members = newCall(bindSym"pairs", newDotExpr(held, ident"dict"))
       each = newTree(nnkTupleConstr,
-        loadExpr(k, newDotExpr(it, ident"key"), name & " key"),
-        loadExpr(v, newDotExpr(it, ident"val"), name & " value"))
-    of bSet:
+        loadExpr(t.key, newDotExpr(it, ident"key"), name & " key", ctx),
+        loadExpr(t.val, newDotExpr(it, ident"val"), name & " value", ctx))
+    of tkSet:
       members = newDotExpr(held, ident"els")
-      each = loadExpr(t.member, it, name & " member")
+      each = loadExpr(t.each, it, name & " member", ctx)
     else:
       members = newDotExpr(held, ident"items")
-      each = loadExpr(t.member, it, name & " member")
-    result = quote do:
+      each = loadExpr(t.each, it, name & " member", ctx)
+    quote do:
       block:
         let `held` = `got`
         var `r`: `ty`
         for `it` in `members`:
           `r`.add `each`
         `r`
-  else:
-    if t.text == "any": return v
-    if t.text == "value":
-      return newCall(bindSym"markedAs", v, newLit(t.mark), nameLit)
-    let kind = parseKind(t.text)
-    if kind.isNone: return newCall(bindSym"load", ident(t.text), v)
-    let held = newCall(bindSym"heldOf", v, newLit(kind.get), newLit(t.mark),
-                       nameLit)
-    result = case kind.get
-      of bNum: newDotExpr(held, ident"num")
-      of bText, bSym: newDotExpr(held, ident"text")
-      of bBytes: newTree(nnkPrefix, ident"@", newDotExpr(held, ident"bytes"))
-      of bList, bRec: newDotExpr(newDotExpr(held, ident"items"), ident"data")
-      of bDict: newCall(bindSym"copied", newDotExpr(held, ident"dict"))
-      of bSet: newCall(bindSym"copied", newDotExpr(held, ident"els"))
-      of bNil: v # refused by checkSpec
+  of tkKind:
+    if t.len.isSome:
+      return newCall(newTree(nnkBracketExpr, bindSym"fixedBytes",
+                             newLit(t.len.get)), v, newLit(t.marked), nameLit)
+    let held = newCall(bindSym"heldOf", v, newLit(t.valueKind),
+                       newLit(t.marked), nameLit)
+    if t.oneOf.len > 0:
+      return newCall(bindSym"oneOf", newDotExpr(held, ident"text"), t.allowed,
+                     nameLit)
+    case t.valueKind
+    of bNum: newDotExpr(held, ident"num")
+    of bText, bSym: newDotExpr(held, ident"text")
+    of bBytes: newTree(nnkPrefix, ident"@", newDotExpr(held, ident"bytes"))
+    of bList, bRec: newDotExpr(newDotExpr(held, ident"items"), ident"data")
+    of bDict: newCall(bindSym"copied", newDotExpr(held, ident"dict"))
+    of bSet: newCall(bindSym"copied", newDotExpr(held, ident"els"))
+    of bNil: v # not a TYPE
 
-proc buildMoldable(f: BDict, selfM, fieldsM, selfL, fieldsL: NimNode,
-                   head: string, exact: bool, description: NimNode):
-    tuple[recList, moldBody, loadBody: NimNode] =
-  ## the type's fields, and the statements writing and reading them.
-  ## Writing adds `(sym NAME, …)` to the seq `fieldsM` in CE order, the
-  ## order f holds them in, leaving out an optional field that is none.
-  ## Reading walks `fieldsL` once in that order, leaving behind any field
-  ## not described (or, read exactly, refusing it), into one local per
-  ## field, and sets them on `selfL` only once every one is read; an
-  ## optional field not there is none
-  result = (newNimNode(nnkRecList), newStmtList(), newStmtList())
-  let
-    i = genSym(nskVar, "i")
-    e = genSym(nskForVar, "e")
-    names = genSym(nskConst, "names")
-    optional = genSym(nskConst, "optional")
-    taken = genSym(nskVar, "taken")
-    headLit = newLit(head)
-    exactLit = newLit(exact)
-    beyond = bindSym"beyond"
-    reads = newTree(nnkCaseStmt, i)
-    n = newLit(f.len)
-  var
-    nameLits = newTree(nnkBracket)
-    optionalLits = newTree(nnkBracket)
-    locals = newStmtList()
-    sets = newStmtList()
-    at = 0
-  for k, t in f:
-    if not k.isKind(bSym) or k.mark or not validIdentifier(k.text):
-      error("a field is named by an unmarked symbol that is a Nim " &
-            "identifier: " & $k, description)
-    let
-      opt = t.isOptional
-      inner = if opt: t[1] else: t
-    if opt and t.mark:
-      error(k.text & ": optional takes no mark", description)
-    checkSpec(inner, k.text, description)
-    let
-      name = newLit(k.text)
-      field = ident(k.text)
-      local = genSym(nskVar, k.text)
-      own = newDotExpr(selfM, field)
-      held =
-        if opt: newTree(nnkBracketExpr, bindSym"Option", nimType(inner))
-        else: nimType(inner)
-    result.recList.add newIdentDefs(postfix(field, "*"), held)
-    if opt:
-      let add = newCall(ident"add", fieldsM, newTree(nnkTupleConstr,
-        newCall(bindSym"sym", name),
-        moldExpr(inner, newCall(bindSym"get", own), k.text)))
-      result.moldBody.add quote do:
-        if `own`.isSome: `add`
+proc probeExpr(t: Type, v: NimNode, name: string, ctx: Context): NimNode =
+  ## v, a Value, checked as loadExpr reads it, and nothing built: it
+  ## refuses where loadExpr refuses
+  let nameLit = newLit(name)
+  case t.kind
+  of tkAny:
+    if t.markFree:
+      result = newTree(nnkDiscardStmt, newEmptyNode())
     else:
-      result.moldBody.add newCall(ident"add", fieldsM, newTree(nnkTupleConstr,
-        newCall(bindSym"sym", name), moldExpr(inner, own, k.text)))
-    nameLits.add name
-    optionalLits.add newLit(opt)
-    locals.add newTree(nnkVarSection, newIdentDefs(local, held))
-    var loaded = loadExpr(inner, newDotExpr(e, ident"val"), k.text)
-    if opt: loaded = newCall(bindSym"some", loaded)
-    reads.add newTree(nnkOfBranch, newLit(at), newAssignment(local, loaded))
-    sets.add newAssignment(newDotExpr(selfL, field),
-                           newCall(ident"move", local))
-    inc at
-  if f.len == 0:
-    if exact:
-      result.loadBody = quote do:
-        if `fieldsL`.len != 0: `beyond`(`headLit`)
-    return
-  reads.add newTree(nnkElse, newTree(nnkDiscardStmt, newEmptyNode()))
+      result = newTree(nnkDiscardStmt,
+        newCall(bindSym"markedAs", v, newLit(t.marked), nameLit))
+  of tkStruct:
+    result = newCall(ident"probe", ident(ctx.structNim(t.name)), v)
+  of tkKind:
+    if t.len.isSome:
+      return newCall(bindSym"sized", v, newLit(t.len.get), newLit(t.marked),
+                     nameLit)
+    let held = newCall(bindSym"heldOf", v, newLit(t.valueKind),
+                       newLit(t.marked), nameLit)
+    result =
+      if t.oneOf.len > 0:
+        newTree(nnkDiscardStmt, newCall(bindSym"oneOf",
+          newDotExpr(held, ident"text"), t.allowed, nameLit))
+      else:
+        newTree(nnkDiscardStmt, held)
+  of tkList, tkSet, tkRecord, tkDict:
+    let
+      it = genSym(nskForVar, "it")
+      valueKind = case t.kind
+        of tkList: bList
+        of tkSet: bSet
+        of tkRecord: bRec
+        else: bDict
+      held = newCall(bindSym"heldOf", v, newLit(valueKind), newLit(t.marked),
+                     nameLit)
+    var members, each: NimNode
+    case t.kind
+    of tkDict:
+      members = newCall(bindSym"pairs", newDotExpr(held, ident"dict"))
+      each = newStmtList(
+        probeExpr(t.key, newDotExpr(it, ident"key"), name & " key", ctx),
+        probeExpr(t.val, newDotExpr(it, ident"val"), name & " value", ctx))
+    of tkSet:
+      members = newDotExpr(held, ident"els")
+      each = probeExpr(t.each, it, name & " member", ctx)
+    else:
+      members = newDotExpr(held, ident"items")
+      each = probeExpr(t.each, it, name & " member", ctx)
+    result = quote do:
+      for `it` in `members`:
+        `each`
+
+# ================ one struct ================
+
+proc probeDecl(s: Struct, body: NimNode): NimNode =
+  ## `proc probe*(t: typedesc[T], v: Value)`: declared ahead of every
+  ## struct's body when body is empty, so structs may probe each other
+  newProc(postfix(ident"probe", "*"),
+    [newEmptyNode(),
+     newIdentDefs(ident"t", newTree(nnkBracketExpr, ident"typedesc",
+                                    ident(s.nimName))),
+     newIdentDefs(ident"v", bindSym"Value")],
+    body)
+
+proc structDef(s: Struct, ctx: Context): tuple[typeDef, methods: NimNode] =
   let
+    T = ident(s.nimName)
+    selfM = genSym(nskParam, "self")
+    entries = genSym(nskVar, "entries")
+    selfL = genSym(nskParam, "self")
+    fieldsL = genSym(nskParam, "fields")
+    selfS = genSym(nskParam, "self")
+    theShape = genSym(nskLet, "shape")
+    n = newLit(s.fields.len)
+    headLit = newLit(s.name)
+    exactLit = newLit(s.exact)
     fieldCmp = bindSym"fieldCmp"
     missing = bindSym"missing"
-  result.loadBody = quote do:
-    const `names` = `nameLits`
-    const `optional` = `optionalLits`
-    `locals`
-    var
-      `i` = 0
-      `taken` = 0
-    for `e` in pairs(`fieldsL`):
-      while `i` < `n`:
-        let c = `fieldCmp`(`e`.key, `names`[`i`])
-        if c < 0: break # a field not described, left behind
-        if c == 0:
-          `reads`
-          inc `i`
-          inc `taken`
-          break
-        if not `optional`[`i`]: `missing`(`names`[`i`])
-        inc `i`
-      if `i` == `n`: break
-    while `i` < `n`:
-      if not `optional`[`i`]: `missing`(`names`[`i`])
-      inc `i`
-    if `exactLit` and `taken` != `fieldsL`.len: `beyond`(`headLit`)
-    `sets`
+    beyond = bindSym"beyond"
+  var
+    recList = newNimNode(nnkRecList)
+    moldBody = newStmtList()
+    locals = newStmtList()
+    sets = newStmtList()
+    nameLits = newTree(nnkBracket)
+    optionalLits = newTree(nnkBracket)
+    shapeNames = newTree(nnkBracket)
+    shapeOptional = newTree(nnkBracket)
+    localOf = newSeq[NimNode](s.fields.len)
 
-proc positionalFields(f: Value, description: NimNode): seq[(string, Value)] =
-  ## the `(NAME TYPE)` of a positional description, in order
-  if f.mark:
-    error("a positional description is an unmarked list: " & $f, description)
-  for m in f.items:
-    if not m.isKind(bRec) or m.mark or m.len != 2 or not m[0].isKind(bSym) or
-        m[0].mark or not validIdentifier(m[0].text):
-      error("a positional field is (NAME TYPE), NAME an unmarked symbol " &
-            "that is a Nim identifier: " & $m, description)
-    let (name, t) = (m[0].text, m[1])
-    if t.isOptional:
-      error(name & ": an item has no place to be left out, so it can't " &
-            "be optional", description)
-    checkSpec(t, name, description)
-    for (seen, _) in result:
-      if seen == name:
-        error(name & " is described twice", description)
-    result.add (name, t)
+  for f in s.fields:
+    let held = nimType(f.typ, ctx)
+    recList.add newIdentDefs(postfix(ident(f.nimName), "*"),
+      if f.optional: newTree(nnkBracketExpr, bindSym"Option", held) else: held)
+    shapeNames.add newCall(bindSym"sym", newLit(f.name))
+    shapeOptional.add newLit(f.optional)
 
-proc positionalMold(fs: seq[(string, Value)], self, items: NimNode): NimNode =
-  ## `items.add …` for each field, in order
-  result = newStmtList()
-  for (name, t) in fs:
-    result.add newCall(ident"add", items,
-      moldExpr(t, newDotExpr(self, ident(name)), name))
-
-proc buildPositional(fs: seq[(string, Value)], selfL, src, off: NimNode):
-    tuple[recList, loadBody: NimNode] =
-  ## the type's fields, and the statements reading item `off + k` of
-  ## `src` as field k into a local, setting them on `selfL` only once
-  ## every one is read
-  result = (newNimNode(nnkRecList), newStmtList())
-  var sets = newStmtList()
-  for k, (name, t) in fs:
+  # writing, and reading, by name: in the order a dict holds them
+  for at, place in s.byName:
+    let f = s.fields[place]
     let
-      field = ident(name)
-      local = genSym(nskVar, name)
-      item = newTree(nnkBracketExpr, src, infix(off, "+", newLit(k)))
-    result.recList.add newIdentDefs(postfix(field, "*"), nimType(t))
-    result.loadBody.add newTree(nnkVarSection,
-      newIdentDefs(local, newEmptyNode(), loadExpr(t, item, name)))
-    sets.add newAssignment(newDotExpr(selfL, field),
+      where = s.name & " " & f.name
+      own = newDotExpr(selfM, ident(f.nimName))
+      local = genSym(nskVar, f.nimName)
+      held = nimType(f.typ, ctx)
+    if f.optional:
+      let add = newCall(ident"add", entries, newTree(nnkTupleConstr,
+        newCall(bindSym"sym", newLit(f.name)),
+        moldExpr(f.typ, newCall(bindSym"get", own), where, ctx)))
+      moldBody.add quote do:
+        if `own`.isSome: `add`
+    else:
+      moldBody.add newCall(ident"add", entries, newTree(nnkTupleConstr,
+        newCall(bindSym"sym", newLit(f.name)), moldExpr(f.typ, own, where, ctx)))
+    nameLits.add newLit(f.name)
+    optionalLits.add newLit(f.optional)
+    locals.add newTree(nnkVarSection, newIdentDefs(local,
+      if f.optional: newTree(nnkBracketExpr, bindSym"Option", held) else: held))
+    localOf[place] = local
+    sets.add newAssignment(newDotExpr(selfL, ident(f.nimName)),
                            newCall(ident"move", local))
-  result.loadBody.add sets
 
-proc moldDef(desc: Value, description: NimNode):
-    tuple[name: string, typeDef, methods: NimNode] =
-  ## the type of one `(HEAD ALIAS? {FIELD: TYPE …} exact?)` or
-  ## `(HEAD ALIAS? [(NAME TYPE) …] exact?)`, and its mold and load;
-  ## written marked when the description is, and read exactly when it
-  ## says so
-  template refuse =
-    error("expected (HEAD ALIAS? {FIELD: TYPE …} exact?) or " &
-          "(HEAD ALIAS? [(NAME TYPE) …] exact?): " & $desc, description)
-  if not desc.isKind(bRec) or desc.len < 2: refuse
-  let at = if desc[1].isKind({bDict, bList}): 1 else: 2
-  if desc.len <= at or not desc[at].isKind({bDict, bList}): refuse
+  # the walk by name, in the order a dict holds names: each field
+  # described read where it is found, and every one not optional found
+  proc namedWalk(fields: NimNode,
+                 read: proc(f: Field, place: int, val: NimNode): NimNode):
+                 NimNode =
+    if s.fields.len == 0:
+      return quote do:
+        if `exactLit` and `fields`.len != 0: `beyond`(`headLit`)
+    let
+      i = genSym(nskVar, "i")
+      e = genSym(nskForVar, "e")
+      taken = genSym(nskVar, "taken")
+      names = genSym(nskConst, "names")
+      optionalNames = genSym(nskConst, "optional")
+      reads = newTree(nnkCaseStmt, i)
+      nameLits = nameLits.copyNimTree
+      optionalLits = optionalLits.copyNimTree
+    for at, place in s.byName:
+      reads.add newTree(nnkOfBranch, newLit(at),
+                        read(s.fields[place], place, newDotExpr(e, ident"val")))
+    reads.add newTree(nnkElse, newTree(nnkDiscardStmt, newEmptyNode()))
+    quote do:
+      const `names` = `nameLits`
+      const `optionalNames` = `optionalLits`
+      var
+        `i` = 0
+        `taken` = 0
+      for `e` in pairs(`fields`):
+        while `i` < `n`:
+          let c = `fieldCmp`(`e`.key, `names`[`i`])
+          if c < 0: break # a field not described, left behind
+          if c == 0:
+            `reads`
+            inc `i`
+            inc `taken`
+            break
+          if not `optionalNames`[`i`]: `missing`(`names`[`i`])
+          inc `i`
+        if `i` == `n`: break
+      while `i` < `n`:
+        if not `optionalNames`[`i`]: `missing`(`names`[`i`])
+        inc `i`
+      if `exactLit` and `taken` != `fields`.len: `beyond`(`headLit`)
+
+  # the record form: each field at its place, in the order described
   let
-    alias = desc[at - 1]
-    f = desc[at]
-  if not desc[0].isKind(bSym) or not alias.isKind(bSym): refuse
-  var exact = false
-  for i in at + 1 ..< desc.len:
-    if exact or not desc[i].isKind(bSym) or desc[i].mark or
-        desc[i].text != "exact":
-      error("after its fields a description takes only `exact`: " & $desc,
-            description)
-    exact = true
-  if desc[0].mark or alias.mark:
-    error("a head and a type's name are unmarked symbols: " & $desc,
-          description)
-  let name = alias.text
-  if not validIdentifier(name):
-    error("a type's name must be a Nim identifier: " & name, description)
+    selfR = genSym(nskParam, "self")
+    items = genSym(nskVar, "items")
+    selfI = genSym(nskParam, "self")
+    src = genSym(nskParam, "items")
+  var
+    moldItems = newStmtList()
+    itemLocals = newStmtList()
+    itemSets = newStmtList()
+  for k, f in s.fields:
+    let
+      where = s.name & " " & f.name
+      own = newDotExpr(selfR, ident(f.nimName))
+      local = genSym(nskLet, f.nimName)
+      item = newTree(nnkBracketExpr, src, newLit(k + 1))
+    if f.optional:
+      var molded = moldExpr(f.typ, newCall(bindSym"get", own), where, ctx)
+      if f.typ.kind == tkAny:
+        molded = newCall(bindSym"present", molded, newLit(where))
+      moldItems.add quote do:
+        `items`.add(if `own`.isSome: `molded` else: null())
+      let loaded = loadExpr(f.typ, item, where, ctx)
+      itemLocals.add quote do:
+        let `local` =
+          if `item`.absent: none(typeof(`loaded`)) else: some(`loaded`)
+    else:
+      moldItems.add newCall(ident"add", items, moldExpr(f.typ, own, where, ctx))
+      itemLocals.add newTree(nnkLetSection,
+        newIdentDefs(local, newEmptyNode(), loadExpr(f.typ, item, where, ctx)))
+    itemSets.add newAssignment(newDotExpr(selfI, ident(f.nimName)), local)
+
+  let loadBody = newStmtList(locals,
+    namedWalk(fieldsL, proc(f: Field, place: int, val: NimNode): NimNode =
+      var loaded = loadExpr(f.typ, val, s.name & " " & f.name, ctx)
+      if f.optional: loaded = newCall(bindSym"some", loaded)
+      newAssignment(localOf[place], loaded)),
+    sets)
+
+  # probing: every check a load makes, in the same order, nothing built
   let
-    T = ident(name)
-    head = newLit(desc[0].text)
-    mark = newLit(desc.mark)
-    exactLit = newLit(exact)
-    n = newLit(f.len)
-    fill = genSym(nskProc, "fill")
-    selfM = genSym(nskParam, "self")
-    selfMold = genSym(nskParam, "self")
-    selfHead = genSym(nskParam, "self")
-    selfMarked = genSym(nskParam, "self")
-    selfL = genSym(nskParam, "self")
-    selfHeadless = genSym(nskParam, "self")
-    selfLoad = genSym(nskParam, "self")
-    selfHeadlessM = genSym(nskParam, "self")
-    v = genSym(nskParam, "v")
-    vHeadless = genSym(nskParam, "v")
-    sym = bindSym"sym"
-  var recList, methods: NimNode
-  if f.isKind(bDict):
+    fieldsP = genSym(nskParam, "fields")
+    probeNamed = namedWalk(fieldsP,
+      proc(f: Field, place: int, val: NimNode): NimNode =
+        probeExpr(f.typ, val, s.name & " " & f.name, ctx))
+    itemsP = genSym(nskLet, "items")
+  var probeItems = newStmtList()
+  for k, f in s.fields:
     let
-      fieldsM = genSym(nskVar, "fields")
-      fieldsL = genSym(nskParam, "fields")
-      built = buildMoldable(f.dict, selfM, fieldsM, selfL, fieldsL,
-                            desc[0].text, exact, description)
-      moldBody = built.moldBody
-      loadBody = built.loadBody
-      fieldsOf = bindSym"fieldsOf"
-      headlessFields = bindSym"headlessFields"
-      fromSorted = bindSym"fromSorted"
-    recList = built.recList
-    methods = quote do:
-      proc `fill`(`selfL`: `T`, `fieldsL`: BDict) =
-        `loadBody`
+      item = newTree(nnkBracketExpr, itemsP, newLit(k + 1))
+      probed = probeExpr(f.typ, item, s.name & " " & f.name, ctx)
+    if f.optional:
+      probeItems.add quote do:
+        if not `item`.absent: `probed`
+    else:
+      probeItems.add probed
 
-      method moldFields(`selfM`: `T`): BDict =
-        var `fieldsM` = newSeqOfCap[Entry[Value, Value]](`n`)
-        `moldBody`
-        `fromSorted`(`fieldsM`)
-
-      method moldHeadless(`selfHeadlessM`: `T`): Value =
-        initDict(`selfHeadlessM`.moldFields)
-
-      method mold(`selfMold`: `T`): Value =
-        initRec(@[`sym`(`head`), initDict(`selfMold`.moldFields)],
-                mark = `mark`)
-
-      method loadHeadless(`selfHeadless`: `T`, `vHeadless`: Value) =
-        `fill`(`selfHeadless`, `headlessFields`(`vHeadless`, `head`))
-
-      method load(`selfLoad`: `T`, `v`: Value) =
-        `fill`(`selfLoad`, `fieldsOf`(`v`, `head`, `mark`))
-  else:
-    let
-      fs = positionalFields(f, description)
-      src = genSym(nskParam, "src")
-      off = genSym(nskParam, "off")
-      built = buildPositional(fs, selfL, src, off)
-      loadBody = built.loadBody
-      items = genSym(nskVar, "items")
-      itemsMold = genSym(nskVar, "items")
-      moldBody = positionalMold(fs, selfM, items)
-      moldBodyHeaded = positionalMold(fs, selfMold, itemsMold)
-      itemsOf = bindSym"itemsOf"
-      headlessItems = bindSym"headlessItems"
-      headlessFields = bindSym"headlessFields"
-      fromSorted = bindSym"fromSorted"
-      fillNamed = genSym(nskProc, "fillNamed")
-      selfN = genSym(nskParam, "self")
-      fieldsN = genSym(nskVar, "fields")
-      selfNL = genSym(nskParam, "self")
-      fieldsNL = genSym(nskParam, "fields")
-      selfPos = genSym(nskParam, "self")
-    var named = newBDict()
-    for (name, t) in fs:
-      named[sym(name)] = t
-    let
-      byName = buildMoldable(named, selfN, fieldsN, selfNL, fieldsNL,
-                             desc[0].text, exact, description)
-      namedMold = byName.moldBody
-      namedLoad = byName.loadBody
-    recList = built.recList
-    methods = quote do:
-      proc `fill`(`selfL`: `T`, `src`: Buffer[Value], `off`: int) =
-        `loadBody`
-
-      proc `fillNamed`(`selfNL`: `T`, `fieldsNL`: BDict) =
-        `namedLoad`
-
-      method moldFields(`selfN`: `T`): BDict =
-        var `fieldsN` = newSeqOfCap[Entry[Value, Value]](`n`)
-        `namedMold`
-        `fromSorted`(`fieldsN`)
-
-      method positional(`selfPos`: `T`): bool =
-        true
-
-      method moldHeadless(`selfM`: `T`): Value =
-        var `items` = newSeqOfCap[Value](`n`)
-        `moldBody`
-        initList(`items`)
-
-      method mold(`selfMold`: `T`): Value =
-        var `itemsMold` = newSeqOfCap[Value](`n` + 1)
-        `itemsMold`.add `sym`(`head`)
-        `moldBodyHeaded`
-        initRec(`itemsMold`, mark = `mark`)
-
-      method loadHeadless(`selfHeadless`: `T`, `vHeadless`: Value) =
-        if `vHeadless`.isKind(bDict) and not `vHeadless`.mark:
-          `fillNamed`(`selfHeadless`, `headlessFields`(`vHeadless`, `head`))
-        else:
-          `fill`(`selfHeadless`,
-                 `headlessItems`(`vHeadless`, `head`, `n`, `exactLit`), 0)
-
-      method load(`selfLoad`: `T`, `v`: Value) =
-        `fill`(`selfLoad`, `itemsOf`(`v`, `head`, `mark`, `n`, `exactLit`), 1)
-
-  let objTy = newTree(nnkObjectTy,
-    newEmptyNode(),
-    newTree(nnkOfInherit, bindSym"Moldable"),
-    recList)
-  result.name = name
+  let
+    objTy = newTree(nnkObjectTy, newEmptyNode(),
+                    newTree(nnkOfInherit, bindSym"Moldable"), recList)
+    marked = newLit(s.marked)
+    rep = newLit(s.rep)
+    description = newLit(s.shape.description)
+    fromSorted = bindSym"fromSorted"
+    ShapeT = bindSym"Shape"
+    EntryT = bindSym"Entry"
   result.typeDef = newTree(nnkTypeDef, postfix(T, "*"), newEmptyNode(),
                            newTree(nnkRefTy, objTy))
+  let
+    moldNamed = genSym(nskProc, "moldNamed")
+    fillNamed = genSym(nskProc, "fillNamed")
+    moldRecord = genSym(nskProc, "moldRecord")
+    fillRecord = genSym(nskProc, "fillRecord")
+    dictFields = bindSym"dictFields"
+    recItems = bindSym"recItems"
+
+  # each method its own parameters: one symbol may not stand for two
+  proc molds(form: Rep, self: NimNode): NimNode =
+    if form == repDict:
+      quote do:
+        initRec(@[sym(`headLit`), initDict(`moldNamed`(`self`))], `marked`)
+    else:
+      quote do: `moldRecord`(`self`)
+  proc loads(form: Rep, self, v: NimNode): NimNode =
+    if form == repDict:
+      quote do: `fillNamed`(`self`, `dictFields`(`v`, `headLit`, `marked`))
+    else:
+      quote do:
+        `fillRecord`(`self`, `recItems`(`v`, `headLit`, `marked`, `n`, `exactLit`))
+  proc moldMethod(name: string, form: Rep): NimNode =
+    let self = genSym(nskParam, "self")
+    let body = molds(form, self)
+    let nameId = ident(name)
+    quote do:
+      method `nameId`(`self`: `T`): Value = `body`
+  proc loadMethod(name: string, form: Rep): NimNode =
+    let
+      self = genSym(nskParam, "self")
+      v = genSym(nskParam, "v")
+      body = loads(form, self, v)
+      nameId = ident(name)
+    quote do:
+      method `nameId`(`self`: `T`, `v`: Value) = `body`
+
+  let
+    selfF = genSym(nskParam, "self")
+    selfG = genSym(nskParam, "self")
+    fieldsG = genSym(nskParam, "fields")
   result.methods = quote do:
-    proc head*(_: type `T`): Value =
-      `sym`(`head`)
+    let `theShape` = `ShapeT`(head: sym(`headLit`), marked: `marked`,
+                             exact: `exactLit`, rep: `rep`,
+                             names: @`shapeNames`, optional: @`shapeOptional`,
+                             description: `description`)
 
-    method head(`selfHead`: `T`): Value =
-      `sym`(`head`)
+    proc `moldNamed`(`selfM`: `T`): BDict =
+      `selfM`.beforeMold()
+      var `entries` = newSeqOfCap[`EntryT`[Value, Value]](`n`)
+      `moldBody`
+      `fromSorted`(`entries`)
 
-    proc marked*(_: type `T`): bool =
-      `mark`
+    proc `fillNamed`(`selfL`: `T`, `fieldsL`: BDict) =
+      `loadBody`
 
-    method marked(`selfMarked`: `T`): bool =
-      `mark`
+    proc `moldRecord`(`selfR`: `T`): Value =
+      `selfR`.beforeMold()
+      var `items` = newSeqOfCap[Value](`n` + 1)
+      `items`.add sym(`headLit`)
+      `moldItems`
+      initRec(`items`, `marked`)
 
-    `methods`
+    proc `fillRecord`(`selfI`: `T`, `src`: Buffer[Value]) =
+      `itemLocals`
+      `itemSets`
+
+    method shape(`selfS`: `T`): `ShapeT` = `theShape`
+    method moldFields(`selfF`: `T`): BDict = `moldNamed`(`selfF`)
+    method loadFields(`selfG`: `T`, `fieldsG`: BDict) = `fillNamed`(`selfG`, `fieldsG`)
+  for m in [moldMethod("moldDict", repDict), loadMethod("loadDict", repDict),
+            moldMethod("moldRec", repRecord), loadMethod("loadRec", repRecord),
+            moldMethod("mold", s.rep), loadMethod("load", s.rep)]:
+    result.methods.add m
+
+  let
+    tP = genSym(nskParam, "t")
+    vD = genSym(nskParam, "v")
+    tD = genSym(nskParam, "t")
+    vR = genSym(nskParam, "v")
+    tR = genSym(nskParam, "t")
+    probeOwn =
+      if s.rep == repDict: newCall(ident"probeDict", T, ident"v")
+      else: newCall(ident"probeRec", T, ident"v")
+  result.methods.add quote do:
+    proc probeFields*(`tP`: typedesc[`T`], `fieldsP`: BDict) =
+      ## the fields checked by name as `loadFields` reads them, nothing
+      ## built; refuses where it refuses
+      `probeNamed`
+
+    proc probeDict*(`tD`: typedesc[`T`], `vD`: Value) =
+      probeFields(`T`, `dictFields`(`vD`, `headLit`, `marked`))
+
+    proc probeRec*(`tR`: typedesc[`T`], `vR`: Value) =
+      let `itemsP` = `recItems`(`vR`, `headLit`, `marked`, `n`, `exactLit`)
+      `probeItems`
+  discard result.methods.add probeDecl(s, newStmtList(probeOwn))
+
+# ================ moldable ================
 
 macro moldableFrom(text: static[string], description: untyped): untyped =
   ## `moldable` given the description's text, and the expression it came
@@ -667,115 +626,33 @@ macro moldableFrom(text: static[string], description: untyped): untyped =
   if text.strip.len == 0:
     error("the description is empty; a staticRead of a file that is " &
           "not there reads as empty", description)
-  let desc =
-    try: readValue(text)
-    except ReadError as e:
-      error("not a description: " & e.msg, description)
+  let ctx =
+    try: parseMold(readValue(text))
+    except BasslineError as e:
+      error(e.msg, description)
   var
-    descs: seq[Value]
     types = newTree(nnkTypeSection)
+    ahead = newStmtList()
     methods = newStmtList()
-    names: seq[string]
-  if desc.isKind(bSet):
-    if desc.mark:
-      error("mark each description in the set, not the set", description)
-    for each in desc.els: descs.add each
-  else:
-    descs.add desc
-  for each in descs:
-    let (name, typeDef, ms) = moldDef(each, description)
-    if name in names:
-      error(name & " is described twice", description)
-    names.add name
+  for s in ctx.structs.values:
+    let (typeDef, ms) = structDef(s, ctx)
     types.add typeDef
+    ahead.add probeDecl(s, newEmptyNode())
     methods.add ms
-  newStmtList(types, methods)
+  newStmtList(types, ahead, methods)
 
 macro moldable*(description: untyped): untyped =
-  ## `moldable "(HEAD {FIELD: TYPE …})"` declares HEAD, a Moldable with
-  ## those fields, written as and read from `(HEAD {FIELD: VALUE …})`,
-  ## marked when the description is: `!(HEAD {…})` molds `!(HEAD {…})`;
-  ## `(HEAD ALIAS {…})` names the type ALIAS instead, for a HEAD that is
-  ## not a Nim identifier or another reading of the same head.
-  ## A TYPE naming a kind holds a value of that kind, marked when the
-  ## TYPE is (`dict!`) and unmarked when it is not: a number as a BNum,
-  ## text and symbol as a string, bytes as a seq[byte], a list or record
-  ## as a seq[Value] (a record's head first), a dict as a BDict and a set
-  ## as a BSet, each the object's own copy. `value` holds a Value of any
-  ## kind, marked as the TYPE is, and `any` a Value of any kind, marked
-  ## or not. Any other name is another Moldable, written by its `mold`
-  ## and read by its `load`.
-  ##
-  ## A TYPE may also be a typed collection, marked or not: `[T]`, `(T)`
-  ## and `{T}` are held as a seq of T, `{K: V}` as a seq of (key, val);
-  ## each member is written and read as its TYPE, and a set or dict
-  ## refuses to be written holding one twice.
-  ##
-  ## A field's TYPE may be `(optional T)`, held as an Option[T]: none is
-  ## written by leaving the field out, and a field left out reads as
-  ## none.
-  ##
-  ## `(HEAD ALIAS? [(NAME TYPE) …])` describes the fields by position
-  ## instead: written as and read from `(HEAD VALUE …)`, each field the
-  ## item at its place, and the headless form is the items as a list.
-  ## Items past the last described are left behind; none can be
-  ## optional. Its fields still have names: `moldFields` gives them by
-  ## name, and `loadHeadless` reads them by name from a dict as well as
-  ## by place from a list, so `convert` and Poly go between the two
-  ## kinds of description by name.
-  ##
-  ## `exact` after the fields reads exactly: a field or item more than
-  ## described is refused rather than left behind, as where a signature
-  ## covers the value and what rode along would go unsigned. And two more
-  ## TYPEs: `(bytes N)`, exactly N bytes, held as an array[N, byte], and
-  ## `(one-of SYMBOL …)`, one of those symbols, held as a string. The
-  ## type and its fields are public.
-  ##
-  ## `moldable "{(HEAD ALIAS? {…}) …}"` declares each in one type
-  ## section, so they may name each other.
+  ## `moldable "(struct NAME PRAGMAS? (FIELD PRAGMAS? TYPE) …)"`, or a set
+  ## of structs declared together so they may name each other, declares
+  ## a Moldable type for each (parseMold.nim has the grammar). Its fields
+  ## are public, held as their TYPEs say: a number as a BNum, text and
+  ## symbol as a string (`(one-of …)` checked), bytes as a seq[byte] or,
+  ## with `(len N)`, an array[N, byte], an untyped list or record as a
+  ## seq[Value], dict and set as a BDict and BSet (the object's own
+  ## copies), `value` and `any` as a Value, a struct as its type, a typed
+  ## list, set or record as a seq and a typed dict as a seq of (key, val),
+  ## and an optional field as an Option.
   ##
   ## The description is any string known while compiling: a literal, a
   ## const, or `staticRead "types.bl"`.
   newCall(bindSym"moldableFrom", description, description)
-
-when isMainModule:
-  import std/os
-  let demoPath = getTempDir() / "mold-demo.bl"
-  moldable """{
-    (shelf Shelf {
-      name: text
-      size: number
-      seal: bytes
-      files: {File}
-      meta: any
-      tags: set
-      something: value
-      call: record
-      path: symbol
-      last: any
-      parts: list})
-    (file File {path: symbol last: any})
-  }"""
-
-  let shelf = Shelf(
-    name: "top", size: 1234, seal: @[1,2,3,4],
-    something: "hello".sym, 
-    files: @[
-      File(path: demoPath)
-    ],
-    last: null(true),
-    path: demoPath,
-    meta: rv"{a: 1}", 
-    tags: rv"{x y}".els, 
-    call: @[sym"go", num 1]
-  )
-  doAssert shelf.mold == %>Shelf.load(shelf.mold)
-
-  for bad in ["(file {path: foo})", "!(file {path: \"foo\"})",
-              "!(file {path: foo!})", "!(file {path: foo more: 1})",
-              "!(file {})", "!(Other {path: foo})", "!(file !{path: foo})"]:
-    try:
-      let f = File.load(rv bad)
-      echo "read: ", %>f
-    except MoldError, ValueError:
-      echo "refused ", bad, ": ", getCurrentExceptionMsg()

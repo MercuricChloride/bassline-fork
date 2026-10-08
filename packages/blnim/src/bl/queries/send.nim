@@ -18,7 +18,7 @@ import ../core
 import ./[queries, stream]
 export queries
 
-refuseWith ValueError
+refuseWith BasslineError
 
 type
   Send*[Q, A] = ref object
