@@ -32,10 +32,6 @@ template refuseWith*(err) {.dirty.} =
     if not(cond):
       refuse(msg)
 
-  template guard(cond: untyped) =
-    if not(cond):
-      refuse("guard failed: " & astToStr(cond))
-
 refuseWith CodecError
 
 func toString*(a: openArray[byte]): string =

@@ -136,16 +136,11 @@ func isKind*(a: Value, k: Kind, mark = anyMark): bool =
   a.isKind({k}, mark)
 
 func expectKind*(a: Value, k: set[Kind], mark = anyMark) =
-  guard a.isKind(k, mark), "expected value of kind: " & $k & $mark
-
-func expectKind*(a: Value, k: set[Kind], mark: Option[bool], msg: string) =
-  guard a.isKind(k, mark), msg
+  guard a.isKind(k, mark),
+    "expected value of kind: " & $k & $mark
 
 func expectKind*(a: Value, k: Kind, mark = anyMark) =
   expectKind(a, {k}, mark)
-
-func expectKind*(a: Value, k: Kind, mark: Option[bool], msg: string) =
-  guard a.isKind(k, mark), msg
 
 func `[]`*(a: Value, i: Natural): lent Value =
   a.expectKind {bList, bRec}
@@ -237,7 +232,7 @@ func initSet*(els: BSet, mark = false): Value =
   Value(kind: bSet, els: els, mark: mark)
 
 func head*(v: Value): lent Value =
-  guard v.kind in {bList, bRec}, "head must be used with a list / record"
+  guard v.isKind({bList, bRec}): "head must be used with a list / record"
   return v.items[0]
 
 template toBSet*(iter): BSet =
