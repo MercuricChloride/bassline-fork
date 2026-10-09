@@ -34,9 +34,6 @@ converter toNum*(n: BigInt): BNum =
 func `'num`*(s: string): BNum = 
   initNum(s)
 
-func `'num`*(n: SomeInteger): BNum = 
-  initNum(n)
-
 func isBig*(n: BNum): bool = n.isBig
 
 func grow*(n: BNum): BNum =

@@ -151,31 +151,77 @@ func `[]`*(a: Value, i: Natural): lent Value =
   a.expectKind {bList, bRec}
   a.items[i]
 
+func `[]`*(a: Value, i: BackwardsIndex): lent Value =
+  a.expectKind {bList, bRec}
+  a.items[i]
+
 func `[]`*(a: Value, i: BNum): lent Value =
-  a.items[i.toInt]
+  a[i.toInt]
 
 func `[]`*(a: Value, k: Value): lent Value =
   a.expectKind bDict
   a.dict[k]
+
+func `[]=`*(a: var Value, i: Natural, val: Value) =
+  a.items[i] = val
+
+func `[]=`*(a: var Value, i: BNum, val: Value) =
+  a[i.toInt] = val
+
+func add*(a: var Value, el: sink Value) =
+  a.expectKind({bList, bRec})
+  a.items.add el
+
+func pop*(a: var Value): Value =
+  a.expectKind({bList, bRec})
+  if a.isKind(bRec):
+    guard a.len > 1, "cant pop the head of a record"
+  a.items.data.pop()
+
+func `[]=`*(a: var Value, k, v: Value) =
+  a.expectKind(bDict)
+  a.dict[k] = v
+
+func incl*(a: var Value, v: Value) =
+  a.expectKind(bSet)
+  a.els.incl v
 
 # ================ Frame constructors ================
 
 func initList*(items: sink seq[Value], mark = false): Value =
   Value(kind: bList, items: newBuffer(items), mark: mark)
 
-proc initRec*(items: sink seq[Value], mark = false): Value =
+func initList*(items: openArray[Value] = [], mark = false): Value =
+  initList(@items, mark)
+
+func initRec*(items: sink seq[Value], mark = false): Value =
   doAssert items.len > 0, "a record needs a head"
   Value(kind: bRec, items: newBuffer(items), mark: mark)
 
-proc initSet*(items: sink seq[Value], mark = false): Value =
+func initRec*(head: Value, items: openArray[Value], mark = false): Value =
+  var l = newSeqOfCap[Value](items.len + 1)
+  l &= head
+  l &= items
+  initRec(l, mark)
+
+func initRec*(items: openArray[Value], mark = false): Value =
+  initRec(@items, mark)
+
+func initSet*(items: sink seq[Value], mark = false): Value =
   result = initSet(mark)
   for x in items.mitems:
     result.els.incl move(x)
+
+func initSet*(items: openArray[Value], mark = false): Value =
+  initSet(@items, mark)
 
 proc initDict*(entries: sink seq[(Value, Value)], mark = false): Value =
   result = initDict(mark)
   for e in entries.mitems:
     result.dict[move e[0]] = move e[1]
+
+proc initDict*(entries: openArray[(Value, Value)], mark = false): Value =
+  initDict(@entries, mark)
 
 proc initRec*(items: Buffer[Value], mark = false): Value =
   guard items.len > 0, "record must have a head"
@@ -200,7 +246,22 @@ template toBSet*(iter): BSet =
     r.incl each
   r
 
+func copy*(self: Value): Value =
+  case self.kind
+  of bNil..bBytes: self
+  of bList:
+    initList(self.items.data, self.mark)
+  of bRec:
+    initRec(self.items.data, self.mark)
+  of bDict:
+    initDict(self.dict.copy, self.mark)
+  of bSet:
+    initSet(self.els.copy, self.mark)
+
 # ================ Misc converstion fns ================
+
+func `'bn`*(n: string, mark = false): Value =
+  num(n, mark)
 
 func toValue*(v: Value): Value = 
   v
