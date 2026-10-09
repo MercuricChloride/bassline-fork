@@ -28,10 +28,10 @@ suite "a jam":
     let (alice, bob) = (jam.newLine(a), jam.newLine(b))
     check jam.hear(alice, bl(general("hi")))
     check jam.hear(bob, bl(general()))
-    check told[] == @[bl(general(0, "hi"))]
+    check told[] == @[bl(general(1, "hi"))]       # 0 is the jam's own (jam)
     check jam.hear(alice, bl(general("anyone?")))
     check jam.hear(alice, bl(random("elsewhere")))
-    check told[] == @[bl(general(0, "hi")), bl(general(1, "anyone?"))]
+    check told[] == @[bl(general(1, "hi")), bl(general(2, "anyone?"))]
 
   test "an answer put twice is kept once, and asking twice tells once":
     let jam = memoryJam()
@@ -41,7 +41,7 @@ suite "a jam":
     check jam.hear(line, bl(q(a)))
     check jam.hear(line, bl(q()))
     check jam.hear(line, bl(q()))
-    check told[] == @[bl(q(0, a))]
+    check told[] == @[bl(q(1, a))]
 
   test "it reads neither questions nor answers, and refuses what is neither":
     let jam = memoryJam()
@@ -49,7 +49,7 @@ suite "a jam":
     let line = jam.newLine(t)
     check jam.hear(line, readValue("({alice bob} [1 2 {x: y}])"))
     check jam.hear(line, readValue("({alice bob})"))
-    check told[] == @[readValue("({alice bob} 0 [1 2 {x: y}])")]
+    check told[] == @[readValue("({alice bob} 1 [1 2 {x: y}])")]
     check not jam.hear(line, bl(a(b, c)))       # three, not two
     check not jam.hear(line, bl(!q(a)))          # marked
     check not jam.hear(line, bl(hello))          # not a record
@@ -64,12 +64,29 @@ suite "a jam":
     check jam.hear(line, said)
     check not jam.hear(line, bl(general("unsigned")))
     check jam.hear(line, alice.ask(bl general))
-    check told[] == @[initRec(@[bl general, bl 0, said])]
+    check told[] == @[initRec(@[bl general, bl 1, said])]
     let h = heard(told[0]).get
     check h.said == bl("signed hi") and h.signer == some kp.pubkey
     var forged = said
     forged = initRec(@[forged.items[0], bl(general("changed")), forged.items[2]])
     check not jam.hear(line, forged)             # the signature doesn't hold
+
+  test "it says which jam it is: its name, an id of its own and when it began":
+    let jam = memoryJam()
+    let (told, t) = listener()
+    let line = jam.newLine(t)
+    check jam.hear(line, bl(jam()))
+    check told[].len == 1 and told[0].items[0] == JamQ and told[0].items[1] == bl 0
+    let me = told[0].items[2]
+    check me.knownAs(bl jam)
+    check collect(me.identities).filterIt(it.kind == bBytes and it.bytes.len == 16).len == 1
+    check me.answer(AtQ).isSome
+    check not jam.hear(line, initRec(@[JamQ, bl "another jam"]))   # its own to say
+    check told[].len == 1
+    let (other, o) = listener()
+    let another = newJam(spaceVar[Value, Ranked[Value]](), name = bl(bootstrap))
+    check another.hear(another.newLine(o), bl(jam()))
+    check other[0].items[2] != me and other[0].items[2].knownAs(bl bootstrap)
 
   test "a line that refuses a tell is dropped, and who it said was here is gone":
     let jam = memoryJam()
@@ -136,8 +153,13 @@ suite "a jam":
     check again.hear(line, bl(general("first")))   # kept already
     check again.hear(line, bl(general("second")))
     check again.hear(line, bl(general()))
-    check told[] == @[bl(general(0, "first")), bl(general(1, "second"))]
-    check valuesIn(path) == @[bl(general(0, "first")), bl(general(1, "second"))]
+    check told[] == @[bl(general(1, "first")), bl(general(2, "second"))]
+    let kept = valuesIn(path)
+    check kept.len == 3 and kept[0].items[0] == JamQ and kept[0].items[1] == bl 0
+    check kept[1 .. ^1] == @[bl(general(1, "first")), bl(general(2, "second"))]
+    let (which, w) = listener()
+    check again.hear(again.newLine(w), bl(jam()))   # the same jam as before
+    check which[] == @[kept[0]]
 
   test "a log cut short partway through a record is cut back to the last whole one":
     let path = getTempDir() / "tjam-torn.blb"
@@ -230,11 +252,11 @@ suite "stamps":
     check here.len == 1 and here[0].vouched
     check here[0].said.answer(StampsQ) == some sq
     let said = collect(local.heardIn(bl general))
-    check said.mapIt(it.rank) == @[1, 2]
+    check said.mapIt(it.rank) == @[2, 3]
     let ss = collect(local.stamps(sq, kp.pubkey))
-    check ss.mapIt(it.rank) == @[0, 1, 2]
-    check ss[1].vouches(said[0]) and ss[2].vouches(said[1])
-    check not ss[1].vouches(said[1])
+    check ss.mapIt(it.rank) == @[0, 1, 2, 3]       # jam, here, hi, again
+    check ss[2].vouches(said[0]) and ss[3].vouches(said[1])
+    check not ss[2].vouches(said[1])
     check ss[0].prev == bl(nil) and ss[1].prev == d(ss[0].record)
     check local.unchained(sq, kp.pubkey).len == 0
 
@@ -295,5 +317,14 @@ suite "stamps":
     let local = spaceVar[Value, Ranked[Value]]()
     for v in told[]: discard local.keep(v)
     let ss = collect(local.stamps(sq, kp.pubkey))
-    check ss.mapIt(it.rank) == @[0, 1, 2, 3, 4]   # here, first, gone, here, second
+    check ss.mapIt(it.rank) == @[0, 1, 2, 3, 4, 5]   # jam, here, first, gone, here, second
     check local.unchained(sq, kp.pubkey).len == 0
+
+  test "a marked rank or clock is no rank: neither heard nor a stamp reads it":
+    check heard(readValue("(general 3! hi)")).isNone
+    check heard(readValue("(general 3 hi)")).isSome
+    let marked = initRec(@[StampHead, bl general, readValue("3!"), d(bl "a"), bl 0, bl(nil)])
+    check stampOf(marked, kp.pubkey).isNone
+    let late = initRec(@[StampHead, bl general, bl 3, d(bl "a"), readValue("0!"), bl(nil)])
+    check stampOf(late, kp.pubkey).isNone
+    check stampOf(initRec(@[StampHead, bl general, bl 3, d(bl "a"), bl 0, bl(nil)]), kp.pubkey).isSome

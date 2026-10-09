@@ -62,7 +62,7 @@ func spelled(head: Value, mark: bool, rest: string): string =
 
 func absent(v: Value): bool =
   ## nil, where an optional field has nothing in it
-  v.isKind(bNil) and not v.mark
+  v.isKind(bNil, unmarked)
 
 proc fieldsOf*(s: Shape, v: Value, form: Rep): BDict =
   ## the fields v holds in `form`, by name, marked as described: the dict
@@ -70,17 +70,21 @@ proc fieldsOf*(s: Shape, v: Value, form: Rep): BDict =
   ## where an optional field has nothing, and, read exactly, no more
   case form
   of repDict:
-    guard v.isKind(bRec) and v.mark == s.marked and v.items.len == 2 and
-      v.items[0] == s.head and v.items[1].isKind(bDict) and
-      not v.items[1].mark, "not " & spelled(s.head, s.marked, "{…}")
+    guard v.isKind(bRec, some s.marked) and 
+      v.len == 2 and
+      v[0] == s.head and 
+      v[1].isKind(bDict, unmarked):
+        "not " & spelled(s.head, s.marked, "{…}")
     result = v.items[1].dict
   of repRecord:
-    let n = s.names.len
-    guard v.isKind(bRec) and v.mark == s.marked and
-      (if s.exact: v.items.len == n + 1 else: v.items.len > n) and
-      v.items[0] == s.head,
-      "not " & spelled(s.head, s.marked, "…") & " with " &
-      (if s.exact: "exactly " else: "") & $n & " items"
+    let 
+      n = s.names.len
+      exact = s.exact
+    guard v.isKind(bRec, some s.marked) and
+      (if exact: v.len == n + 1 else: v.len > n) and
+      v[0] == s.head:
+        "not " & spelled(s.head, s.marked, "…") & " with " &
+        (if exact: "exactly " else: "") & $n & " items"
     result = newBDict()
     for i, name in s.names:
       let item = v.items[i + 1]

@@ -5,7 +5,7 @@
 ## members between bounds (`between`), such as its lists or records that
 ## begin with given members (`ledBy`) or its records under a head
 ## (`headed`), found by bisecting. Predicates over values (`isKind`,
-## `isMarked`, `hasWidth`, `isObject`, `prefixes`, `similar`) are plain
+## `hasWidth`, `isObject`, `prefixes`, `similar`) are plain
 ## functions, value first, used through `Value -> …` lambdas with `|>`,
 ## `filter` and the rest, and `unique` passes each value once. `map`
 ## makes a frame over, part by part.
@@ -57,19 +57,16 @@ let
 
 # ================ predicates and maps over values ================
 
-func isMarked*(v: Value): bool = v.mark
-
 func hasWidth*(v: Value, n: int): bool =
   v.isKind({bList, bRec}) and v.items.len == n
 
 func isObject*(v: Value): bool =
-  v.isKind({bSet}) and v.isMarked
+  v.isKind({bSet}, marked)
 
 func always*(v: Value): bool = true
 
-func family*(v: SomeValue): tuple[kind: Kind, mark: bool] =
-  ## a value's kind and mark, which a value and what it fits share
-  (v.kind, v.mark)
+func sameFamily*(a, b: SomeValue): bool =
+  a.isKind(b.kind, some b.mark)
 
 func prefixes*(a, b: Value): bool =
   ## Whether `a` is a prefix of `b`: what `b`'s canonical encoding
@@ -80,40 +77,50 @@ func prefixes*(a, b: Value): bool =
   ## and the last is itself a prefix of `b`'s, since a truncation only
   ## drops a suffix. Dicts and sets compare in canonical order, so a
   ## prefix is a leading run of the sorted members, not a subset.
-  ensure a.family == b.family
+  if not a.sameFamily(b):
+    return false
 
   case a.kind
   of bNil, bNum, bText, bSym, bBytes:
-    ensure a == b
+    return a == b
   of bList, bRec:
     let n = a.items.len
-    ensure n <= b.items.len
+    if n > b.items.len:
+      return false
     for i, x, y in lockstep(a.items, b.items):
       if i + 1 == n:
-        ensure x.prefixes(y)
+        if not x.prefixes(y):
+          return false
       else:
-        ensure x == y
+        if x != y:
+          return false
   of bDict:
     let n = a.dict.len
-    ensure n <= b.dict.len
+    if n > b.dict.len:
+      return false
     var i = 0
     for x, y in lockstep(a.dict, b.dict):
       if i + 1 == n:
-        ensure x.key == y.key and x.val.prefixes(y.val)
+        if x.key != y.key or not x.val.prefixes(y.val):
+          return false
       else:
-        ensure x.key == y.key and x.val == y.val
+        if x.key != y.key or x.val != y.val:
+          return false
       inc i
   of bSet:
     let n = a.els.len
-    ensure n <= b.els.len
+    if n > b.els.len:
+      return false
     var i = 0
     for x, y in lockstep(a.els, b.els):
       if i + 1 == n:
-        ensure x.prefixes(y)
+        if not x.prefixes(y):
+          return false
       else:
-        ensure x == y
+        if x != y:
+          return false
       inc i
-  return true
+  true
 
 type
   Answer* = object
@@ -216,7 +223,8 @@ proc similar*(v, exemplar: Value): bool =
   ## its place (a record's head equal to it); a dict with each of the
   ## exemplar's keys, its value similar; a set with every member of the
   ## exemplar's
-  if v.family != exemplar.family: return false
+  if not v.sameFamily(exemplar):
+    return false
   case exemplar.kind
   of bList, bRec:
     if v.items.len < exemplar.items.len: return false

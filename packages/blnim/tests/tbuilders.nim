@@ -36,7 +36,7 @@ suite "ordering":
   test "value order is byte order":
     var values: seq[Value]
     for _ in 0 ..< 80:
-      values.add randValue(3)
+      values.add randValue(5)
     var spelled: seq[seq[byte]]
     for v in values:
       spelled.add v.ce
@@ -53,8 +53,8 @@ suite "numbers":
     check initNum("42").toInt == 42
 
   test "past int64 is held as spelled":
-    check initNum("9223372036854775808").isWide
-    check initNum("-9223372036854775809").isWide
+    check initNum("9223372036854775808").isBig
+    check initNum("-9223372036854775809").isBig
     check $initNum("123456789012345678901234567890") == "123456789012345678901234567890"
     expect ValueError:
       discard initNum("9223372036854775808").toInt
@@ -65,7 +65,7 @@ suite "numbers":
       expect ValueError:
         discard initNum(s)
 
-  test "wide and int compare as their spellings":
+  test "big and int compare as their spellings":
     let two63 = num("9223372036854775808")
     check num(int.high) < two63          # both nineteen digits
     check two63 < num(int.low)           # twenty digits with the sign

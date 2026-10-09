@@ -38,10 +38,6 @@ template refuseWith*(err) {.dirty.} =
 
 refuseWith CodecError
 
-template ensure*(cond: bool) =
-  result = cond
-  if not result: return
-
 func toString*(a: openArray[byte]): string =
   result = newString(a.len)
   if a.len > 0:
@@ -67,14 +63,19 @@ func cmpShortlex*(x, y: openArray[byte]): int =
   result = cmpBytes(x, y)
 
 func isValidInt*(bytes: openArray[byte]): bool =
-  ensure bytes.len > 0
+  if bytes.len == 0: 
+    return false
   let start = if bytes[0] == '-'.byte: 1 else: 0
-  ensure bytes.len > start # bare "-" refused
+  if bytes.len <= start:
+     # bare "-" refused
+    return false
   if bytes[start] == '0'.byte:
-    ensure start == 0 # "-0" refused
-    ensure bytes.len == 1 # leading zeros refused
+    if start != 0: return false
+    if bytes.len != 1: return false
   for i in start ..< bytes.len:
-    ensure bytes[i].char in {'0'..'9'}
+    if bytes[i].char notin {'0'..'9'}:
+      return false
+  true
 
 # HEADS UP NOT MY CODE!
 # Original DFA Table credit is

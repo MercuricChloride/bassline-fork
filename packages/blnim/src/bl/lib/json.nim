@@ -8,8 +8,8 @@ type JsonRefusal* = object of BasslineError
 refuseWith JsonRefusal
 
 proc toJson*(self: BNum): JsonNode =
-  if self.isWide:
-    parseJson(self.wide)
+  if self.isBig:
+    parseJson($self)
   else:
     %* self.toInt
 
@@ -41,20 +41,6 @@ proc toJson*(self: Value): JsonNode =
       items.add val.toJson
     result["value"] = %* items
 
-func parseKind(k: string): Kind =
-  case k
-  of "nil": bNil
-  of "number": bNum
-  of "text": bText
-  of "symbol": bSym
-  of "bytes": bBytes
-  of "list": bList
-  of "record": bRec
-  of "dict": bDict
-  of "set": bSet
-  else:
-    refuse "not a valid kind: " & k
-
 proc toValue*(node: JsonNode): Value
 
 func hexBytes(s: string): seq[byte] =
@@ -85,7 +71,10 @@ proc toValue*(node: JsonNode): Value =
   guard k.kind == JString,
     "value.kind must be a string"
 
-  let kind = parseKind k.str
+  let kind = block:
+    let k = parseKind k.str
+    guard k.isSome
+    k.get
 
   var mark = false
   

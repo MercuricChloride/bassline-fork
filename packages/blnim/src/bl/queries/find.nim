@@ -88,8 +88,8 @@ type
     sayingWhy*: bool       ## !(kind why)
 
   Because* = object
-    ## which part answered a clause
-    clause*, part*: Value
+    ## which part answered a clause, and with which record, as held
+    clause*, part*, record*: Value
 
   Row* = object
     ## one answer of a find, the bindings it was written from, and which
@@ -194,8 +194,7 @@ proc rankOrder(a, b: Hit): int = cmp(a.record.items[1], b.record.items[1])
 
 proc natural(v: Value): bool =
   ## a natural, of any size
-  v.kind == bNum and not v.mark and
-    (if v.num.isInt: v.num.toInt >= 0 else: not v.num.wide.startsWith("-"))
+  v.isKind(bNum, unmarked) and (v.num >= 0)
 
 proc ledHeads(space: BSet, marked: bool, led: Led): Stream[Value] =
   ## a set's records, marked or not, whose head is led as `led` says, found
@@ -536,7 +535,7 @@ proc step(c: Value, p: Pending, x: Fitting): Stream[Pending] =
         result = key notin given
         if result: given.incl key)
       .map(proc(b: Value): Pending =
-        Pending(b: b, why: p.why & Because(clause: c, part: hit.part))))
+        Pending(b: b, why: p.why & Because(clause: c, part: hit.part, record: hit.record))))
 
 proc through(clauses: seq[Value], p: Pending, x: Fitting): Stream[Pending] =
   ## the clauses fed one into the next, the next chosen each time: one that

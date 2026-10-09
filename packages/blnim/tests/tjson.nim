@@ -33,7 +33,7 @@ suite "round trips":
     survives {1, 2, !3}
     survives {}
   test "past int64 travels as a raw number":
-    let w = bl(n"123456789012345678901234567890")
+    let w = 123456789012345678901234567890'bn
     check $w.toJson["value"] == "123456789012345678901234567890"
     check w.toJson.toValue == w
     check bl(!n"-123456789012345678901234567890").toJson.toValue == bl(!n"-123456789012345678901234567890")

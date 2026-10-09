@@ -72,7 +72,8 @@ suite "finds":
                  kinds = [WhyKind])
     check answers(q) == vs("(why \"ask a path\" {!{(identity repo)}})")
     let row = rows(find(subjects = [repo], holes = vs("a"), wheres = vs("(help a)")))().get
-    check row.why == @[Because(clause: v("(help a)"), part: v("!{(identity repo)}"))]
+    check row.why == @[Because(clause: v("(help a)"), part: v("!{(identity repo)}"),
+                               record: v("(help \"ask a path\")"))]
 
 suite "forms":
   test "within fits anything with the part in it, the whole record bound by all":

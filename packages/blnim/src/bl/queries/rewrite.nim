@@ -229,7 +229,7 @@ proc fit(s: Fitter, part, v: Value): Fit =
 
 proc shaped(s: Fitter, part, v: Value): Fit =
   ## every extension of bindings under which `v` fits `part` as written
-  if part.family != v.family: return fail
+  if not part.sameFamily(v): return fail
   case part.kind
   of bList, bRec:
     if v.items.len < part.items.len: return fail
