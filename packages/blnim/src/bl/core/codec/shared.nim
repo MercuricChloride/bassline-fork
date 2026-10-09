@@ -18,10 +18,6 @@ const
 
 type
   BasslineError* = object of ValueError
-    ## what bassline raises when it refuses: bytes, text or a value that
-    ## a reading cannot hold. Every module's refusals are one, so
-    ## `except BasslineError` catches them all, and being a ValueError,
-    ## `except ValueError` still does
   CodecError* = object of BasslineError
 
 template refuseWith*(err) {.dirty.} =
@@ -64,7 +60,6 @@ func cmpBytes*(a, b: openArray[byte]): int =
       let r = cmpMem(addr a[0], addr b[0], n)
       if r != 0: return r
   a.len - b.len
-
 
 func cmpShortlex*(x, y: openArray[byte]): int =
   result = cmp(x.len, y.len)

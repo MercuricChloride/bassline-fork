@@ -1,52 +1,8 @@
-import std/[strutils, hashes]
-import ./buffer
-import btree, codec
-export btree, codec
+import std/[hashes, options]
+import ./[buffer, btree, codec, bnum]
+export btree, codec, bnum, options
 
 refuseWith BasslineError
-
-type
-  BNum* = object
-    case isWide: bool
-    of false:
-      small: int
-    of true:
-      big: string
-
-converter toNum*(n: int): BNum =
-  BNum(isWide: false, small: n)
-
-func initNum*(s: string): BNum =
-  ## s is a canonical spelling; past int64 it is held as it is spelled
-  guard isValidInt(s.toBytes), "not a canonical number: " & s
-  try:
-    BNum(isWide: false, small: parseBiggestInt(s))
-  except ValueError:
-    BNum(isWide: true, big: s)
-
-func toNum*(s: string): BNum =
-  ## the number s spells, canonically; `toNum` of an int is the
-  ## converter above
-  initNum(s)
-
-func isWide*(n: BNum): bool =
-  n.isWide
-
-func isInt*(n: BNum): bool =
-  not n.isWide
-
-func toInt*(n: BNum): int =
-  guard n.isInt, "num is wide, not an int"
-  n.small
-
-func toString*(n: BNum): string =
-  if n.isWide: n.big else: $n.small
-
-func wide*(n: BNum): string =
-  n.toString
-
-func `$`*(n: BNum): string =
-  n.toString
 
 type
   BSet* = BTreeSet[Value]
@@ -114,43 +70,6 @@ template diff(a, b) =
   result = cmp(a, b)
   if result != 0: return
 
-func magnitude(x: int): uint64 =
-  ## |x| without the abs(int.low) overflow
-  if x < 0: uint64(-(x + 1)) + 1
-  else: uint64(x)
-
-func spellingLen*(x: int): int =
-  ## the length of the canonical decimal spelling of x
-  result = 1
-  if x < 0:
-    inc result
-  var m = magnitude(x)
-  while m >= 10:
-    m = m div 10
-    inc result
-
-func spellingLen*(x: BNum): int =
-  if x.isWide:
-    x.wide.len
-  else:
-    x.toInt.spellingLen
-
-func cmpNums*(x, y: int): int =
-  ## ascii shortlex over the decimal strings
-  ## without making them strings
-  diff spellingLen(x), spellingLen(y)
-  let nx = x < 0
-  let ny = y < 0
-  if nx != ny:
-    return if nx: -1 else: 1
-  diff magnitude(x), magnitude(y)
-
-func cmpNums*(x, y: BNum): int =
-  if x.isWide or y.isWide:
-    cmpShortlex(x.wide.toBytes, y.wide.toBytes)
-  else:
-    cmpNums(x.toInt, y.toInt)
-
 func cmp*(a, b: Value): int =
   diff a.kind, b.kind
   diff a.mark, b.mark
@@ -203,30 +122,37 @@ func len*(a: Value): int =
   of bSet: a.els.len
   else: 0
 
-func isKind*(a: Value, k: set[Kind]): bool =
-  a.kind in k
+const
+  anyMark* = none(bool)
+  unmarked* = some(false)
+  marked* = some(true)
 
-func isKind*(a: Value, k: Kind): bool =
-  a.kind == k
+func isKind*(a: Value, k: set[Kind], mark = anyMark): bool =
+  a.kind in k and (
+    if mark.isSome: a.mark == mark.get else: true
+  )
 
-# the message is built only on failure: a default parameter would build
-# it on every call
+func isKind*(a: Value, k: Kind, mark = anyMark): bool =
+  a.isKind({k}, mark)
 
-func expectKind*(a: Value, k: Kind) =
-  guard a.isKind(k), "expected kind: " & $k
+func expectKind*(a: Value, k: set[Kind], mark = anyMark) =
+  guard a.isKind(k, mark), "expected value of kind: " & $k & $mark
 
-func expectKind*(a: Value, k: Kind, msg: string) =
-  guard a.isKind(k), msg
+func expectKind*(a: Value, k: set[Kind], mark: Option[bool], msg: string) =
+  guard a.isKind(k, mark), msg
 
-func expectKind*(a: Value, k: set[Kind]) =
-  guard a.isKind(k), "expected value of kind: " & $k
+func expectKind*(a: Value, k: Kind, mark = anyMark) =
+  expectKind(a, {k}, mark)
 
-func expectKind*(a: Value, k: set[Kind], msg: string) =
-  guard a.isKind(k), msg
+func expectKind*(a: Value, k: Kind, mark: Option[bool], msg: string) =
+  guard a.isKind(k, mark), msg
 
 func `[]`*(a: Value, i: Natural): lent Value =
   a.expectKind {bList, bRec}
   a.items[i]
+
+func `[]`*(a: Value, i: BNum): lent Value =
+  a.items[i.toInt]
 
 func `[]`*(a: Value, k: Value): lent Value =
   a.expectKind bDict
