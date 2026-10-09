@@ -5,9 +5,9 @@
 ## members between bounds (`between`), such as its lists or records that
 ## begin with given members (`ledBy`) or its records under a head
 ## (`headed`), found by bisecting. Predicates over values (`isKind`,
-## `hasWidth`, `isObject`, `prefixes`, `similar`) are plain
-## functions, value first, used through `Value -> …` lambdas with `|>`,
-## `filter` and the rest, and `unique` passes each value once. `map`
+## `hasWidth`, `isObject`, `prefixes`, `similar`) are plain functions,
+## value first, used through `x => …` lambdas with `filter` and the rest,
+## or through the `it` forms, and `unique` passes each value once. `map`
 ## makes a frame over, part by part.
 ##
 ## An object is a marked set: the mark says it is a thing to bring about
@@ -61,7 +61,7 @@ func hasWidth*(v: Value, n: int): bool =
   v.isKind({bList, bRec}) and v.items.len == n
 
 func isObject*(v: Value): bool =
-  v.isKind({bSet}, marked)
+  v.isKind(bSet, marked)
 
 func always*(v: Value): bool = true
 
@@ -79,7 +79,6 @@ func prefixes*(a, b: Value): bool =
   ## prefix is a leading run of the sorted members, not a subset.
   if not a.sameFamily(b):
     return false
-
   case a.kind
   of bNil, bNum, bText, bSym, bBytes:
     return a == b
@@ -89,11 +88,9 @@ func prefixes*(a, b: Value): bool =
       return false
     for i, x, y in lockstep(a.items, b.items):
       if i + 1 == n:
-        if not x.prefixes(y):
-          return false
-      else:
-        if x != y:
-          return false
+        if not x.prefixes(y): return false
+      elif x != y:
+        return false
   of bDict:
     let n = a.dict.len
     if n > b.dict.len:
@@ -101,11 +98,9 @@ func prefixes*(a, b: Value): bool =
     var i = 0
     for x, y in lockstep(a.dict, b.dict):
       if i + 1 == n:
-        if x.key != y.key or not x.val.prefixes(y.val):
-          return false
-      else:
-        if x.key != y.key or x.val != y.val:
-          return false
+        if x.key != y.key or not x.val.prefixes(y.val): return false
+      elif x.key != y.key or x.val != y.val:
+        return false
       inc i
   of bSet:
     let n = a.els.len
@@ -114,11 +109,9 @@ func prefixes*(a, b: Value): bool =
     var i = 0
     for x, y in lockstep(a.els, b.els):
       if i + 1 == n:
-        if not x.prefixes(y):
-          return false
-      else:
-        if x != y:
-          return false
+        if not x.prefixes(y): return false
+      elif x != y:
+        return false
       inc i
   true
 
@@ -128,29 +121,29 @@ type
     answer*: Value
 
 proc toAnswer*(v: Value): Option[Answer] =
-  if v.kind == bRec and v.hasWidth(2):
-    some Answer(question: v.items[0], 
-                answer: v.items[1])
+  if v.isKind(bRec) and v.hasWidth(2):
+    some Answer(question: v.items[0], answer: v.items[1])
   else: none Answer
 
 # ================ streams over values ================
 
-proc strictlyAfter(last: Value): Pred[Value] =
-  proc(it: Value): auto = it > last
+proc strictlyAfter(last: Value): (Value) -> bool =
+  (it: Value) => it > last
 
-proc between*(space: BSet, atOrAfter, upTo: Pred[Value]): Stream[Value] =
+proc between*(space: BSet, atOrAfter, upTo: (Value) -> bool): Stream[Value] =
   ## a set's members from the first `atOrAfter` holds for to the last
   ## `upTo` holds for, in CE order. Each pull bisects afresh to the first
   ## after the last one given, so the stream holds a value, not a place
   ## in the set: the set may grow between pulls, and what grows past that
   ## value is seen
   var last = none(Value)
-  proc(): Option[Value] =
+  proc pull(): Option[Value] =
     let after = if last.isNone: atOrAfter else: strictlyAfter(last.get)
     for m in space.itemsFrom(after, upTo):
-      last = some m
+      last = some(m)
       return last
     none(Value)
+  pull
 
 func against*(m: Value, kind: Kind, lead: seq[Value], marked: bool): int =
   ## where `m` sorts against the lists or records of `kind`, unmarked or
@@ -169,8 +162,8 @@ proc ledBy*(space: BSet, kind: Kind, lead: seq[Value], marked = false):
     Stream[Value] =
   ## a set's lists or records (`kind`), unmarked or marked, that begin
   ## with the members `lead`, in CE order: one run, found by bisecting
-  space.between(proc(it: Value): auto = against(it, kind, lead, marked) >= 0,
-                proc(it: Value): auto = against(it, kind, lead, marked) <= 0)
+  space.between(it => against(it, kind, lead, marked) >= 0,
+                it => against(it, kind, lead, marked) <= 0)
 
 proc headed*(space: BSet, head: Value, marked = false): Stream[Value] =
   ## a set's records headed by `head`, unmarked or marked, in CE order
@@ -178,43 +171,45 @@ proc headed*(space: BSet, head: Value, marked = false): Stream[Value] =
 
 proc members*(v: Value): Stream[Value] =
   ## a set's members, in CE order; nothing for anything else
-  if v.kind != bSet: return empty Value
+  if not v.isKind(bSet): return empty Value
   v.els.between(always, always)
 
 proc entries*(v: Value): Stream[(Value, Value)] =
   ## a dict's entries, key and value, in CE order of the keys, each pull
   ## bisecting afresh past the last key given; nothing for anything else
-  if v.kind != bDict: return empty((Value, Value))
+  if not v.isKind(bDict): return empty((Value, Value))
   let d = v.dict
   var last = none(Value)
-  proc(): Option[(Value, Value)] =
+  proc pull(): Option[(Value, Value)] =
     let after = if last.isNone: always else: strictlyAfter(last.get)
     for k, x in d.pairsFrom(after, always):
-      last = some k
-      return some (k, x)
+      last = some(k)
+      return some((k, x))
     none((Value, Value))
+  pull
 
 proc parts*(v: Value): Stream[Value] =
   ## a frame's members: a list's or record's in order, a dict's keys and
   ## values, a set's members; nothing for an atom
   case v.kind
-  of bList, bRec: initStream(v.items.data)
-  of bDict: v.entries.flatMaps(initStream(@[it[0], it[1]]))
+  of bList, bRec: initStream v.items.data
+  of bDict: v.entries.flatMaps initStream(@[it[0], it[1]])
   of bSet: v.members
   else: empty Value
 
 proc walk*(v: Value): Stream[Value] =
   ## `v`, then everything inside it, depth first: a record's head before
   ## its fields, a dict's key before its value
-  cat(just(v), v.parts.flatMaps(walk(it)))
+  just(v) & v.parts.flatMaps(walk it)
 
 proc unique*(s: Stream[Value]): Stream[Value] =
   ## `s`, each value once
-  let seen = newBSet()
-  s.filters(
-    if it notin seen:
+  var seen = initSet()
+  s.filters:
+    if it in seen.els: false
+    else:
       seen.incl it
-      return true)
+      true
 
 proc similar*(v, exemplar: Value): bool =
   ## whether `v` looks like `exemplar` by kind and mark all the way down:
@@ -230,24 +225,23 @@ proc similar*(v, exemplar: Value): bool =
     if v.items.len < exemplar.items.len: return false
     for i in 0 ..< exemplar.items.len:
       let (a, b) = (v.items[i], exemplar.items[i])
-      if not (if i == 0 and v.kind == bRec: a == b else: a.similar(b)):
+      if not (if i == 0 and v.isKind(bRec): a == b else: a.similar(b)):
         return false
     true
   of bDict:
-    exemplar.entries.every do (it: (Value, Value)) -> auto:
-      it[0] in v.dict and v.dict[it[0]].similar(it[1])
+    exemplar.entries.every(e => e[0] in v.dict and v.dict[e[0]].similar(e[1]))
   of bSet: exemplar.els <= v.els
   else: true
 
 # ================ making values over ================
 
-proc map*(v: Value, fn: proc(v: Value): Value): Value =
+proc map*(v: Value, fn: (Value) -> Value): Value =
   ## `v` with each of its parts made over by `fn`, a dict's keys as well
   ## as its values, its mark kept. Refuses an atom, which has no parts
   case v.kind
   of bList: initList(v.items.map(fn), v.mark)
   of bRec: initRec(v.items.map(fn), v.mark)
-  of bDict: initDict(v.dict.map(proc(k, x: Value): Pair[Value] = (fn(k), fn(x))), v.mark)
+  of bDict: initDict(v.dict.map((k, x: Value) -> Pair[Value] => (fn k, fn x)), v.mark)
   of bSet: initSet(v.els.map(fn), v.mark)
   else: refuse "an atom has no parts to map: " & $v
 
@@ -255,14 +249,13 @@ proc map*(v: Value, fn: proc(v: Value): Value): Value =
 
 proc obj*(members: varargs[Value]): Value =
   ## an object of these members: answers and orders
-  initSet(toBTreeSet(members), mark = true)
+  initSet(members, mark = true)
 
 proc under(o: Value, question: Value, marked: bool): Stream[Value] =
   ## the second fields of an object's records headed by `question`,
   ## unmarked or marked, in CE order; nothing for a value that isn't an
   ## object
-  if not o.isObject: 
-    return empty Value
+  if not o.isObject: return empty Value
   o.els.headed(question, marked).filterMap(toAnswer).maps(it.answer)
 
 proc answers*(o: Value, question: Value): Stream[Value] =
@@ -288,11 +281,11 @@ proc target*(id: Value): Value =
 
 proc targets*(o: Value): Stream[Value] =
   ## the IDs an object's !(to ID) orders send to
-  o.orders(ToQ)
+  o.orders ToQ
 
 proc kinds*(o: Value): Stream[Value] =
   ## an object's kinds, from its !(kind K) orders
-  o.orders(KindQ)
+  o.orders KindQ
 
 proc hasKind*(o: Value, kind: Value): bool =
   ## whether an object has this kind among its kinds
@@ -303,7 +296,7 @@ proc hasKind*(o: Value, kind: Value): bool =
 proc identities*(id: Value): Stream[Value] =
   ## the names an ID goes by: an object's answers to `identity`, or a
   ## value that isn't an object, alone
-  if id.isObject: id.answers(IdentityQ) else: just(id)
+  if id.isObject: id.answers IdentityQ else: just id
 
 proc knownAs*(id: Value, name: Value): bool =
   ## whether an ID goes by `name`
@@ -312,33 +305,32 @@ proc knownAs*(id: Value, name: Value): bool =
 proc sharesIdentity*(a, b: Value): bool =
   ## whether two IDs speak of the same thing: a name of one is a name of
   ## the other
-  identities(a).exists(proc(id: Value): bool = b.knownAs(id))
+  a.identities.exists(id => b.knownAs id)
 
 proc identityAnswers(id: Value): Stream[Value] =
   ## the (identity NAME) records an ID stands for, to put in an object
-  identities(id).maps(initRec(@[IdentityQ, it]))
+  id.identities.maps initRec(@[IdentityQ, it])
 
 proc identity*(names: varargs[Value]): Value =
   ## an object that is only names: one (identity NAME) per name, an
   ## object among them giving its own
-  obj(collect(initStream(@names).flatMaps(identityAnswers(it))))
+  initStream(@names).flatMaps(identityAnswers it).toSeq.obj
 
 proc identityOf*(v: Value): Value =
   ## the names alone of a thing: an object's identity answers as an
   ## object, or a value that isn't an object, itself
-  if v.isObject: obj(collect(identityAnswers(v))) else: v
+  if v.isObject: v.identityAnswers.toSeq.obj else: v
 
 proc randomId*(): Value =
   ## an identity of sixteen random bytes, for a thing nobody else has
   ## named
-  identity(bytes(urandom(16)))
+  identity bytes(urandom 16)
 
 proc alsoKnownAs*(o: Value, more: varargs[Value]): Value =
   ## `o` with more names, everything else it answers kept
-  obj(collect(cat(if o.isObject: o.members else: identityAnswers(o),
-                initStream(@more).flatMaps(identityAnswers(it)))))
+  let own = if o.isObject: o.members else: o.identityAnswers
+  (own & initStream(@more).flatMaps(identityAnswers it)).toSeq.obj
 
 proc describe*(ks: openArray[Value], id: Value, more: varargs[Value]): Value =
   ## an object of these kinds, going by `id`'s names, answering `more`
-  obj(collect(cat(initStream(@ks).maps(order(KindQ, it)),
-                identityAnswers(id), initStream(@more))))
+  (initStream(@ks).maps(order(KindQ, it)) & id.identityAnswers & initStream(@more)).toSeq.obj

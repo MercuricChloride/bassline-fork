@@ -78,12 +78,12 @@ proc randPrefix*(v: Value): Value =
   ## shortened again. A scalar has only itself as a prefix.
   case v.kind
   of bList, bRec:
-    let lo = if v.kind == bRec: 1 else: 0   # a record keeps its head
+    let lo = if v.isKind(bRec): 1 else: 0   # a record keeps its head
     let j = rand(lo .. v.items.len.int)
     var kids: seq[Value]
     for i in 0 ..< j:
       kids.add(if i == j - 1 and rand(bool): randPrefix(v.items[i]) else: v.items[i])
-    result = if v.kind == bList: initList(kids, v.mark) else: initRec(kids, v.mark)
+    result = if v.isKind(bList): initList(kids, v.mark) else: initRec(kids, v.mark)
   of bDict:
     let j = rand(0 .. v.dict.len.int)
     result = initDict(v.mark)

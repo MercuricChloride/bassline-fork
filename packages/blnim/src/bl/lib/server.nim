@@ -13,7 +13,7 @@
 ## what arrives goes, and keeps the connection open for telling after
 ## the other end has stopped speaking, until a tell is refused.
 
-import std/[asyncnet, asyncdispatch, nativesockets, sequtils, tables]
+import std/[asyncnet, asyncdispatch, nativesockets, sequtils, sugar, tables]
 import ../core
 export asyncnet, asyncdispatch
 
@@ -38,20 +38,20 @@ type
                            ## own, for an accept that failed
     error*: ref Exception  ## why, for `edgeMalformed` and `edgeFailed`
 
-  Observer* = proc(e: EdgeEvent)
+  Observer* = (EdgeEvent) -> void
     ## hears what happens at the edge; never handed a value
 
-  ViewSend = proc(view: ValueView)
+  ViewSend = (ValueView) -> void
 
   Line* = object
     ## what a program does with a connection a listener offers it
-    hear*: proc(v: Value): bool
+    hear*: (Value) -> bool
       ## takes each value that arrives on it
-    quiet*: proc(): bool
+    quiet*: () -> bool
       ## told once nothing more will arrive on it; answers whether to keep
       ## it open for telling, which lasts until a tell is refused
 
-  Offer* = proc(tell: proc(v: Value): bool): Line
+  Offer* = ((Value) -> bool) -> Line
     ## what a listener does with each connection it accepts: offered the
     ## send that tells it, and nothing else about it
 
@@ -136,20 +136,22 @@ proc write*(conn: Conn, ce: openArray[byte]): bool =
 proc write*(conn: Conn, v: Value): bool =
   conn.write(v.ce)
 
-proc sender*(conn: Conn): proc(v: Value): bool =
+proc sender*(conn: Conn): (Value) -> bool =
   ## A send that writes each value's CE to `conn`.
-  result = proc(v: Value): bool = conn.write(v)
+  (v: Value) => conn.write(v)
 
 proc flush*(conn: Conn) {.async.} =
   ## Done once every write queued so far has gone out or failed.
   if conn.lastWrite != nil:
     await conn.lastWrite
 
-proc toViewSend(send: proc(v: Value): bool): ViewSend =
-  result = proc(view: ValueView) = discard send(view.toValue)
+proc toViewSend(send: (Value) -> bool): ViewSend =
+  proc viewSend(view: ValueView) = discard send(view.toValue)
+  viewSend
 
-proc toViewSend(send: proc(ce: openArray[byte]): bool): ViewSend =
-  result = proc(view: ValueView) = discard send(view.ce)
+proc toViewSend(send: (openArray[byte]) -> bool): ViewSend =
+  proc viewSend(view: ValueView) = discard send(view.ce)
+  viewSend
 
 proc pump(conn: Conn, send: ViewSend) {.async.} =
   ## Drives the connection, handing every value that arrives on it to
@@ -188,12 +190,12 @@ proc pump(conn: Conn, send: ViewSend) {.async.} =
     if not conn.isClosed: # else closed from our side
       conn.tell edgeFailed, e
 
-proc pump*(conn: Conn, send: proc(v: Value): bool): Future[void] =
+proc pump*(conn: Conn, send: (Value) -> bool): Future[void] =
   ## Hands every value that arrives on `conn` to `send` until reading
   ## stops.
   conn.pump(toViewSend send)
 
-proc pump*(conn: Conn, send: proc(ce: openArray[byte]): bool): Future[void] =
+proc pump*(conn: Conn, send: (openArray[byte]) -> bool): Future[void] =
   ## As above, but `send` gets each value's CE bytes, so a relay need
   ## not build a `Value`.
   conn.pump(toViewSend send)
@@ -236,7 +238,7 @@ proc offered(l: Listener, id: int, conn: Conn) {.async.} =
   proc done() =
     l.connections.del id
     conn.close()
-  let telling = proc(v: Value): bool =
+  proc telling(v: Value): bool =
     result = conn.write(v)
     if not result: done()
   var line: Line
@@ -299,12 +301,12 @@ proc listener(port: Port, send: ViewSend, observe: Observer,
     bound = host & ":" & $p
   Listener(socket: socket, address: bound, send: send, observe: observe)
 
-proc newListener*(port: Port, send: proc(v: Value): bool,
+proc newListener*(port: Port, send: (Value) -> bool,
                   observe: Observer = nil, address = ""): Listener =
   ## Binds a listening socket; every value that arrives goes to `send`.
   listener(port, toViewSend send, observe, address)
 
-proc newListener*(port: Port, send: proc(ce: openArray[byte]): bool,
+proc newListener*(port: Port, send: (openArray[byte]) -> bool,
                   observe: Observer = nil, address = ""): Listener =
   ## As above, but `send` gets each value's CE bytes, so a relay need
   ## not build a `Value`.

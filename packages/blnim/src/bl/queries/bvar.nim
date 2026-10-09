@@ -27,7 +27,8 @@
 ## file. `memo` keeps a search's answers in a bvar and answers from them
 ## first.
 
-import std/[options, sets]
+import std/options
+import std/sets except initSet
 import ../core
 import ./[search, send]
 export search, send
@@ -42,14 +43,14 @@ type
   BVar*[Q, A] = ref object
     sending: Send[Q, A]      ## nil for a holder who can't send
     reading: Search[Q, A]    ## nil for a holder who can't read
-    identifying: proc(): Value
+    identifying: () -> Value
 
 proc newBVar*[Q, A](send: Send[Q, A] = nil, read: Search[Q, A] = nil,
                     id = randomId()): BVar[Q, A] =
   ## a bvar whose sends go to `send` and whose reads ask `read`
   BVar[Q, A](sending: send, reading: read, identifying: k(id))
 
-proc newBVar*[Q, A](send: proc(q: Q, a: A): bool, read: Search[Q, A] = nil,
+proc newBVar*[Q, A](send: (Q, A) -> bool, read: Search[Q, A] = nil,
                     id = randomId()): BVar[Q, A] =
   ## the same, its send made from a proc, with no denotation
   newBVar(newSend(send), read, id)
@@ -130,8 +131,8 @@ proc record*[Q, A](q: Q, a: A): Value =
   else:
     initRec(@[q.toValue, a.toValue])
 
-proc spaceSend[Q, A](send: proc(q: Q, a: A): bool, id: Value): Send[Q, A] =
-  newSend(send, k(sendTo(id)))
+proc spaceSend[Q, A](send: (Q, A) -> bool, id: Value): Send[Q, A] =
+  newSend(send, k(sendTo id))
 
 proc setVar[Q, A](held: BSet, id: Value, skipRefused: bool): BVar[Q, A] =
   ## a space var over a set: every answer sent is kept
@@ -167,25 +168,24 @@ proc spaceVar*[Q, A](space: Value, skipRefused = false): BVar[Q, A] =
   ## else
   guard space.isObject and space.hasKind(SearchSpaceKind),
     "not a search space: " & $space
-  guard compositeOf(space, A is Ranked).kind == bNil,
+  guard compositeOf(space, A is Ranked).isKind(bNil),
     "a composite holds nothing itself: " & $space
   let bodies = spaceBodies(space, A is Ranked)
-  let id = identityOf(space)
-  if bodies.len == 1 and bodies[0].kind == bDict:
+  let id = identityOf space
+  if bodies.len == 1 and bodies[0].isKind(bDict):
     when A isnot Ranked:   # a ranked space holds only sets
-      return dictVar[Q, A](bodies[0].dict + newBDict(), id, skipRefused)
-  let records = initStream(bodies).flatMap(proc(b: Value): Stream[Value] =
-    if b.kind == bSet: b.members
-    else: b.entries.map((Value, Value) -> initRec(@[it[0], it[1]])))
-  setVar[Q, A](toBTreeSet(collect(records)), id, skipRefused)
+      return dictVar[Q, A](bodies[0].copy.dict, id, skipRefused)
+  let records = initStream(bodies).flatMaps:
+    if it.isKind(bSet): it.members
+    else: it.entries.maps(initRec(@[it[0], it[1]]))
+  setVar[Q, A](toBSet(records), id, skipRefused)
 
 # ================ reading a bvar back ================
 
 proc uniqueRefs[T: ref](s: Stream[T]): Stream[T] =
   ## `s`, each object once
   var seen = initHashSet[pointer]()
-  s.filter(proc(x: T): bool =
-    result = not seen.containsOrIncl(cast[pointer](x)))
+  s.filter((x: T) => not seen.containsOrIncl(cast[pointer](x)))
 
 proc fromValue*[Q, A](T: typedesc[BVar[Q, A]], d: Value,
                       resolveSend: Search[Value, Send[Q, A]] = nil,
@@ -199,9 +199,9 @@ proc fromValue*[Q, A](T: typedesc[BVar[Q, A]], d: Value,
   ## answers for the space's names as well. Searches are read through
   ## `resolve`. A half not answered is missing
   guard d.isObject and d.hasKind(BVarKind), "not a bvar: " & $d
-  let id = identityOf(d)
-  let isPlainSpace = proc(r: Value): bool =
-    r.hasKind(SearchSpaceKind) and compositeOf(r, A is Ranked).kind == bNil
+  let id = identityOf d
+  proc isPlainSpace(r: Value): bool =
+    r.hasKind(SearchSpaceKind) and compositeOf(r, A is Ranked).isKind(bNil)
   var
     copies: seq[(Value, BVar[Q, A])]   # plain spaces held live, by their names
     searches: seq[Search[Q, A]]
@@ -212,24 +212,19 @@ proc fromValue*[Q, A](T: typedesc[BVar[Q, A]], d: Value,
       searches.add live.reading
     else:
       searches.add Search[Q, A].fromValue(r, skipRefused, resolve)
-  let sends = collect(d.answers(SendQ).map(proc(s: Value): Value =
-    guard s.isObject and s.hasKind(SendKind), "not a send: " & $s
-    s))
+  let sends = d.answers(SendQ).taps(guard(it.isObject and it.hasKind(SendKind), "not a send: " & $it)).toSeq
   var sending: Send[Q, A] = nil
   if sends.len > 0:
-    let ids = collect(initStream(sends).flatMap(targets))
+    let ids = initStream(sends).flatMap(targets).toSeq
     proc reaching(t: Value): Stream[Send[Q, A]] =
       # the live copies going by a name of t, then whatever sends the
       # environment has for each of its names, by now
-      let held = initStream(copies)
-        .filter(proc(c: (Value, BVar[Q, A])): bool = sharesIdentity(t, c[0]))
-        .map(proc(c: (Value, BVar[Q, A])): Send[Q, A] = c[1].sending)
+      let held = initStream(copies).filters(sharesIdentity(t, it[0])).maps(it[1].sending)
       if resolveSend == nil: return held
-      cat(held, identities(t).flatMap(proc(n: Value): Stream[Send[Q, A]] =
-        resolveSend.ask(n)))
+      held & identities(t).flatMaps(resolveSend.ask(it))
     proc send(q: Q, a: A): bool =
-      initStream(ids).flatMap(reaching).uniqueRefs.collect.tee.send(q, a)
-    sending = newSend(send, k(sendTo(ids)))
+      initStream(ids).flatMap(reaching).uniqueRefs.toSeq.tee.send(q, a)
+    sending = newSend(send, k(sendTo ids))
   let reading =
     if searches.len == 0: nil
     elif searches.len == 1: searches[0]
@@ -238,8 +233,7 @@ proc fromValue*[Q, A](T: typedesc[BVar[Q, A]], d: Value,
 
 # ================ keeping a bvar ================
 
-proc persist*[Q, A](v: BVar[Q, A], keep: proc(space: Value): bool):
-    BVar[Q, A] =
+proc persist*[Q, A](v: BVar[Q, A], keep: (Value) -> bool): BVar[Q, A] =
   ## the same place, handing its space, written down, to `keep` each
   ## time it takes something. Refuses a place that can't be both sent to
   ## and written down here
@@ -250,8 +244,7 @@ proc persist*[Q, A](v: BVar[Q, A], keep: proc(space: Value): bool):
     # taken means kept: a send the keeper couldn't keep answers no, though
     # the place holds it all the same, and the next keep writes it
     inner.send(q, a) and keep(space.toValue)
-  var denote: proc(): Value = nil
-  if inner.denotable: denote = proc(): Value = inner.toValue
+  let denote = if inner.denotable: () => inner.toValue else: nil
   newBVar(newSend(send, denote), v.reading, v.id)
 
 # ================ many places as one ================
@@ -260,7 +253,7 @@ proc union*[Q, A](parts: openArray[BVar[Q, A]], id = randomId()): BVar[Q, A] =
   ## many places as one: a send tells every part that can be sent to,
   ## taken if any took it, and a read asks every part that can be read,
   ## their answers taking turns. A primary resolver is this, over many
-  var 
+  var
     sends: seq[Send[Q, A]]
     reads: seq[Search[Q, A]]
   for each in parts:
@@ -279,21 +272,18 @@ proc memo*[Q, A](s: Search[Q, A], kept: BVar[Q, A]): Search[Q, A] =
   ## answer, since the memo stops at its first. Written down, it is what
   ## `kept` holds
   proc ask(q: Q): Stream[A] =
-    let given = newBSet()
+    var given = initSet()
     proc firstTime(a: A): bool =
       let r = record(q, a)
-      result = r notin given
+      result = r notin given.els
       if result: given.incl r
-    let fresh = lazy(proc(): Stream[A] =
-      s.ask(q)
-        .filter(proc(a: A): bool = record(q, a) notin given)
-        .tap(proc(a: A) = discard kept.send(q, a)))
+    proc keeping(a: A) = discard kept.send(q, a)
+    let fresh = lazy(() => s.ask(q).filter((a: A) => record(q, a) notin given.els).tap(keeping))
     when A is Ranked: byRank(kept[q], fresh).filter(firstTime)
     else: cat(kept[q], fresh).filter(firstTime)
-  newSearch[Q, A](ask, proc(): Value = kept.search.toValue,
-                  proc(): Value = kept.search.id, s.fanout)
+  newSearch[Q, A](ask, () => kept.search.toValue, () => kept.search.id, s.fanout)
 
 proc memo*[Q, A](s: Search[Q, A], id = randomId()): Search[Q, A] =
   ## `s`, memoised in memory: a set of records, or for a search with one
   ## answer a query, a dict
-  s.memo(spaceVar[Q, A](s.fanout, id))
+  s.memo spaceVar[Q, A](s.fanout, id)

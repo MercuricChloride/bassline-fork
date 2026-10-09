@@ -14,6 +14,7 @@
 ## identity reaches depends on where it is read, and where nothing
 ## answers for it, it reaches nothing.
 
+import std/sequtils
 import ../core
 import ./[queries, stream]
 export queries
@@ -22,12 +23,10 @@ refuseWith BasslineError
 
 type
   Send*[Q, A] = ref object
-    sending: proc(q: Q, a: A): bool
-    denoting: proc(): Value
-    ## nil for a send with no denotation
+    sending: (Q, A) -> bool
+    denoting: () -> Value  ## nil for a send with no denotation
 
-proc newSend*[Q, A](send: proc(q: Q, a: A): bool,
-                    denote: proc(): Value = nil): Send[Q, A] =
+proc newSend*[Q, A](send: (Q, A) -> bool, denote: () -> Value = nil): Send[Q, A] =
   ## a send that tells `send`, and writes itself down with `denote` if it
   ## can. A send needs no name of its own: it is told apart by what it
   ## sends to
@@ -47,9 +46,7 @@ proc toValue*(s: Send): Value =
 
 proc sendTo*(ids: varargs[Value]): Value =
   ## a send written down: !{!(kind send) !(to ID) …}
-  var members = @[order(KindQ, SendKind)]
-  for id in ids: members.add target(id)
-  obj(members)
+  obj(order(KindQ, SendKind) & initStream(@ids).maps(target(it)).toSeq)
 
 proc tee*[Q, A](parts: openArray[Send[Q, A]]): Send[Q, A] =
   ## tells every part, and was taken if any part took it. Written down,
@@ -58,9 +55,7 @@ proc tee*[Q, A](parts: openArray[Send[Q, A]]): Send[Q, A] =
   proc send(q: Q, a: A): bool =
     for p in ps:
       if p.send(q, a): result = true
-  var denote: proc(): Value = nil
-  if initStream(ps).every(proc(p: Send[Q, A]): bool = p.denotable):
-    denote = proc(): Value =
-      sendTo(collect(initStream(ps).flatMap(proc(p: Send[Q, A]): Stream[Value] =
-        p.toValue.targets)))
+  let denote =
+    if initStream(ps).every(p => p.denotable): () => sendTo(initStream(ps).flatMaps(it.toValue.targets).toSeq)
+    else: nil
   newSend[Q, A](send, denote)

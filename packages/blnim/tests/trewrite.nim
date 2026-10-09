@@ -1,6 +1,7 @@
 ## rewrite: shapes with holes, and the search for what fills them
 
-import std/[unittest, options, random, sets]
+import std/[unittest, options, random]
+import std/sets except initSet
 import bl/core
 import bl/lib/blmacro
 import bl/queries
@@ -13,7 +14,7 @@ proc shape(text: string): Shape = Shape.fromValue(readValue(text))
 
 proc fills(s: Shape, text: string): seq[Value] =
   ## every filling of the value `text` reads as, in the order found
-  s.fillings(readValue(text)).collect
+  s.fillings(readValue(text)).toSeq
 
 proc dicts(texts: varargs[string]): seq[Value] =
   for t in texts: result.add readValue(t)
@@ -70,40 +71,39 @@ suite "fillings":
 
   test "a search can start from bindings already had":
     let row = shape("(shape (row label n) {label n})")
-    check row.fillings(bl(row(a, 1)), bl({label: a})).collect == @[bl({label: a, n: 1})]
-    check row.fillings(bl(row(a, 1)), bl({label: b})).collect.len == 0
-    check row.fillings(bl(row(a, 1)), bl({seen: yes})).collect ==   # what it doesn't bind rides along
+    check row.fillings(bl(row(a, 1)), bl({label: a})).toSeq == @[bl({label: a, n: 1})]
+    check row.fillings(bl(row(a, 1)), bl({label: b})).toSeq.len == 0
+    check row.fillings(bl(row(a, 1)), bl({seen: yes})).toSeq ==   # what it doesn't bind rides along
       @[bl({label: a, n: 1, seen: yes})]
     refuses row.fillings(bl(row(a, 1)), bl([label, a]))
 
   test "nothing is worked out ahead of a pull":
-    var members = newBSet()
+    var members = initSet()
     for i in 0 ..< 200: members.incl initList(@[toValue(i)])
     let three = shape("(shape {[x] [y] [z]} {x y z})")
-    let first = three.fillings(initSet(members)).take(3)   # eight million, three taken
+    let first = three.fillings(members).take(3)   # eight million, three taken
     check first.len == 3 and initSet(first).els.len == 3
 
   test "what the bindings decide is checked before anything branches":
-    var lists = newBSet()
+    var lists = initSet()
     for i in 0 ..< 1000: lists.incl initList(@[toValue(i)])
     # (stop) sorts after the lists; checked last, it would fail a million times
-    check shape("(shape {(stop) [x] [y]} {x y})").fills($initSet(lists)).len == 0
-    var graph = newBSet()
+    check shape("(shape {(stop) [x] [y]} {x y})").fills($lists).len == 0
+    var graph = initSet()
     for i in 0 ..< 1000:
       graph.incl initRec(@[sym"edge", toValue(i), toValue(i + 1)])
       graph.incl initRec(@[sym"node", toValue(i)])
     # each edge found by bisecting on the members bound already
     check shape("(shape {(edge x y) (edge y z) (node z)} {x y z})").fills(
-      $initSet(graph)).len == 998
+      $graph).len == 998
 
 suite "a shape as a search":
   test "asked about a value, it answers every filling, and composes":
     let row = shape("(shape (row label n) {label n})").search
-    check row[bl(row(a, 1))].collect == @[bl({label: a, n: 1})]
+    check row[bl(row(a, 1))].toSeq == @[bl({label: a, n: 1})]
     check (row ? bl(note(x))).isNone
-    let rows = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      initStream(@[bl(row(a, 1)), bl(note(x)), bl(row(b, 2))]))
-    check feed(rows, row)[bl anything].collect ==
+    let rows = newSearch[Value, Value](q => initStream(@[bl(row(a, 1)), bl(note(x)), bl(row(b, 2))]))
+    check feed(rows, row)[bl anything].toSeq ==
       @[bl({label: a, n: 1}), bl({label: b, n: 2})]
 
 suite "written down, and filled":
@@ -134,7 +134,7 @@ proc fits(s: Shape, part, v, b: Value): bool =
   ## `part`, as quantifiers over the value's own keys and members
   if s.wild == some(part): return true
   if part in s.holes: return part.mark == v.mark and part in b.dict and b.dict[part] == v
-  if part.kind != v.kind or part.mark != v.mark: return false
+  if not part.sameFamily(v): return false
   case part.kind
   of bList, bRec:
     if v.items.len < part.items.len: return false
@@ -142,15 +142,14 @@ proc fits(s: Shape, part, v, b: Value): bool =
       if not fits(s, part.items[i], v.items[i], b): return false
     true
   of bDict:
-    part.entries.every(proc(e: (Value, Value)): bool =
+    part.entries.every(e => (block:
       let (key, item) = e
       if literal(s, key): key in v.dict and fits(s, item, v.dict[key], b)
-      else: v.entries.exists(proc(f: (Value, Value)): bool =
-        fits(s, key, f[0], b) and fits(s, item, f[1], b)))
+      else: v.entries.exists(f => fits(s, key, f[0], b) and fits(s, item, f[1], b))))
   of bSet:
-    part.members.every(proc(m: Value): bool =
+    part.members.every(m => (block:
       if literal(s, m): m in v.els
-      else: v.members.exists(Value -> fits(s, m, it, b)))
+      else: v.members.exists(x => fits(s, m, x, b))))
   else: part == v
 
 proc reaches(s: Shape, hole, part: Value): bool =
@@ -158,35 +157,34 @@ proc reaches(s: Shape, hole, part: Value): bool =
   ## nor inside another hole
   if s.wild == some(part): return false
   if part in s.holes: return part == hole
-  part.parts.exists(Value -> reaches(s, hole, it))
+  part.parts.exists(p => reaches(s, hole, p))
 
 proc bruteForce(s: Shape, v: Value, most = 20_000):
     Option[HashSet[seq[byte]]] =
   ## every filling, by trying every assignment of the value's parts to the
   ## holes: a hole binds what is in its place, so one of them, and of its
   ## own mark. None when there are more than `most` assignments to try
-  let holes = collect(s.holes.between(always, always))
-  if not initStream(holes).every(Value -> reaches(s, it, s.example)):
+  let holes = s.holes.between(always, always).toSeq
+  if not initStream(holes).every(h => reaches(s, h, s.example)):
     return some initHashSet[seq[byte]]()
-  let parts = collect(unique(v.walk))
+  let parts = v.walk.unique.toSeq
   var candidates: seq[seq[Value]]
   var tries = 1
   for h in holes:
     let mark = h.mark
-    candidates.add collect(initStream(parts).filter(Value -> it.mark == mark))
+    candidates.add initStream(parts).filters(it.mark == mark).toSeq
     tries *= max(candidates[^1].len, 1)
     if tries > most: return none(HashSet[seq[byte]])
   let found = new HashSet[seq[byte]]
-  proc assign(i: int, b: BDict) =
+  proc assign(i: int, b: Value) =
     if i == holes.len:
-      let binding = initDict(b)
-      if fits(s, s.example, v, binding): found[].incl binding.ce
+      if fits(s, s.example, v, b): found[].incl b.ce
       return
     for c in candidates[i]:
-      let next = b + newBDict()
+      var next = b.copy
       next[holes[i]] = c
       assign(i + 1, next)
-  assign(0, newBDict())
+  assign(0, initDict())
   some found[]
 
 proc small(r: var Rand, depth = 0): Value =
@@ -203,10 +201,8 @@ proc small(r: var Rand, depth = 0): Value =
     of 2:
       var entries: seq[(Value, Value)]
       for m in members: entries.add (r.small(depth + 2), m)
-      let d = newBDict()
-      for (k, x) in entries: d[k] = x
-      result = initDict(d)
-    else: result = initSet(toBTreeSet(members))
+      result = initDict(entries)
+    else: result = initSet(members)
   if r.rand(9) == 0: result.mark = true
 
 proc punch(r: var Rand, part: Value, holes: var seq[Value], depth = 0): Value =
@@ -224,9 +220,9 @@ proc punch(r: var Rand, part: Value, holes: var seq[Value], depth = 0): Value =
     for p in part.items.data: items.add r.punch(p, holes, depth + 1)
     if part.kind == bList: initList(items, part.mark) else: initRec(items, part.mark)
   of bDict:
-    let d = newBDict()
+    var d = initDict(part.mark)
     for k, x in part.dict: d[r.punch(k, holes, depth + 1)] = r.punch(x, holes, depth + 1)
-    initDict(d, part.mark)
+    d
   of bSet:
     var members: seq[Value]
     for m in part.els: members.add r.punch(m, holes, depth + 1)

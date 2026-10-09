@@ -22,12 +22,11 @@ let repo = v"""!{!(kind search-space) (identity repo) (holds {
 proc among(known: varargs[Value]): Search[Value, Value] =
   ## finds names among `known`, by their identities
   let ks = @known
-  newSearch[Value, Value](proc(n: Value): Stream[Value] =
-    initStream(ks).filter(proc(k: Value): bool = sharesIdentity(k, n)))
+  newSearch[Value, Value](n => initStream(ks).filters(sharesIdentity(it, n)))
 
 proc answers(q: Value, asked = none(Value), resolve: Search[Value, Value] = nil):
     seq[Value] =
-  collect(rows(q, asked, resolve).map(proc(r: Row): Value = r.answer))
+  rows(q, asked, resolve).maps(it.answer).toSeq
 
 proc sorted(xs: seq[Value]): seq[Value] = xs.sorted(cmp)
 
@@ -234,9 +233,8 @@ suite "subjects":
 
   test "a subject is read as fromValue reads a space, refusals passed over only when asked":
     proc ask(space: string, skipRefused = false): seq[Value] =
-      collect(rows(find(subjects = [v(space)], holes = vs("x"), wheres = vs("(n x)"),
-                        gives = vs("x")), skipRefused = skipRefused)
-        .map(proc(r: Row): Value = r.answer))
+      rows(find(subjects = [v(space)], holes = vs("x"), wheres = vs("(n x)"), gives = vs("x")),
+           skipRefused = skipRefused).maps(it.answer).toSeq
     refuses ask("!{!(kind search-space) !(kind frob) (holds {(n 1)})}")
     refuses ask("!{!(kind search-space) !(kind cat) !(kind alt) (parts [])}")
     refuses ask("!{!(kind search-space) !(kind merge) (parts [])}")
@@ -282,18 +280,19 @@ suite "subjects":
     check answers(q).sorted == vs("(why ok {!{(identity one)}})", "(why ok {!{(identity two)}})").sorted
 
   test "what each binding leads to takes turns, so an endless subject starves none":
-    let live = newSearch[Value, Value](proc(q: Value): Stream[Value] =
+    proc endless(q: Value): Stream[Value] =
       if q == v("n"): return initStream(vs("1", "2"))
       if q == v("2"): return just(v("two"))
       if q == v("1"):
         var i = 0
-        return proc(): Option[Value] =
+        return () => (block:
           inc i
-          some initRec(@[v("more"), num(i)])
-      empty Value)
+          some(initRec(@[v("more"), num(i)])))
+      empty Value
+    let live = newSearch[Value, Value](endless)
     let q = find(holes = vs("x", "y"), wheres = vs("(n x)", "(x y)"), gives = vs("(x y)"))
     check v("(2 two)") in rows(q, subjects = @[asSubject(live)])
-      .map(proc(r: Row): Value = r.answer).take(10)
+      .maps(it.answer).take(10)
 
   test "a gives is written only where the bindings bind every hole in it":
     let q = find(subjects = [repo], holes = vs("p", "f"), wheres = vs("(p !(any (has f) file))"),
@@ -301,11 +300,10 @@ suite "subjects":
     check answers(q).sorted == vs("(\"a\" \"a/x\")", "(\"a\" \"a/y\")").sorted
 
   test "a search running here answers only what is settled":
-    let live = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      if q == v("views"): initStream(vs("table", "board")) else: empty Value)
+    let live = newSearch[Value, Value](
+      q => (if q == v("views"): initStream(vs("table", "board")) else: empty(Value)))
     let q = find(holes = vs("x"), wheres = vs("(views x)"), gives = vs("x"))
-    check collect(rows(q, subjects = @[asSubject(live)]).map(
-      proc(r: Row): Value = r.answer)) == vs("table", "board")
+    check rows(q, subjects = @[asSubject(live)]).maps(it.answer).toSeq == vs("table", "board")
     let open = find(holes = vs("x", "y"), wheres = vs("(x y)"), gives = vs("y"))
     check rows(open, subjects = @[asSubject(live)])().isNone
 
@@ -328,7 +326,7 @@ suite "subjects":
                     gives = vs("a"), id = v("self"))
     let loop = v("!{!(kind search-space) !(kind alt) (identity loop2) (parts [self repo])}")
     check answers(self, resolve = among(self, loop, repo)) == vs("\"ask a path\"")
-    check collect(Search[Value, Value].fromValue(self, resolve = among(self, loop, repo))
+    check toSeq(Search[Value, Value].fromValue(self, resolve = among(self, loop, repo))
       .ask(null())) == vs("\"ask a path\"")
 
 suite "a find as a search":
@@ -337,17 +335,17 @@ suite "a find as a search":
                      id = v("listing"))
 
   test "binds what it is asked to its asked holes":
-    check collect(findSearch(listing, among(repo)).ask(v("\"a\""))) ==
+    check toSeq(findSearch(listing, among(repo)).ask(v("\"a\""))) ==
       vs("(\"a/x\" \"the x file\")", "(\"a/y\" \"the y file\")")
 
   test "reads back through fromValue, and composes like any space":
     let resolve = among(repo, listing)
     let s = Search[Value, Value].fromValue(listing, resolve = resolve)
-    check collect(s.ask(v("\"a\""))) ==
+    check toSeq(s.ask(v("\"a\""))) ==
       vs("(\"a/x\" \"the x file\")", "(\"a/y\" \"the y file\")")
     check s.toValue == listing
     let both = v("!{!(kind search-space) !(kind alt) (identity both) (parts [repo listing])}")
-    check collect(Search[Value, Value].fromValue(both, resolve = resolve).ask(v("\"a\""))).sorted ==
+    check toSeq(Search[Value, Value].fromValue(both, resolve = resolve).ask(v("\"a\""))).sorted ==
       vs("dir", "(has \"a/x\")", "(has \"a/y\")", "(\"a/x\" \"the x file\")",
          "(\"a/y\" \"the y file\")").sorted
 
@@ -360,7 +358,7 @@ suite "a find as a search":
     let s = v("!{!(kind search-space) (identity s) (holds {(r o)})}")
     let inner = v("!{!(kind search-space) !(kind find) (identity i) (hole [x]) (where ([x] v)) (gives [x])}")
     let q = find(subjects = [s], holes = vs("x"), wheres = vs("(r x)"), gives = [inner])
-    check answers(q) == @[initSet(collect(inner.members) & initRec(@[OfQ, s]), true)]
+    check answers(q) == @[initSet(toSeq(inner.members) & initRec(@[OfQ, s]), true)]
 
   test "a gives can carry a find, its own holes kept and the subjects named":
     let inner = find(holes = vs("f"), wheres = vs("(d (has f))"), gives = vs("f"), id = v("inner"))
@@ -369,12 +367,12 @@ suite "a find as a search":
     let nested = answers(q)[0].dict[v("files")]
     check Find.fromValue(nested).wheres == vs("(\"a\" (has f))")
     check Find.fromValue(nested).subjects == @[repo]
-    check collect(identities(nested)) == vs("[inner {d: \"a\"}]")
+    check toSeq(identities(nested)) == vs("[inner {d: \"a\"}]")
     # a name with a hole in it is filled, and still goes with every binding used
     let two = v("!{!(kind search-space) (identity two) (holds {(bind [same 1]) (bind [same 2])})}")
     let named = answers(find(subjects = [two], holes = vs("x", "y"), wheres = vs("(bind [x y])"),
       gives = vs("!{!(kind search-space) !(kind find) (identity x) (of nil) (where (q y))}")))
-    check collect(initStream(named).flatMap(proc(a: Value): Stream[Value] = identities(a))).sorted ==
+    check initStream(named).flatMap(identities).toSeq.sorted ==
       vs("[same {x: same y: 1}]", "[same {x: same y: 2}]").sorted
     check answers(nested) == vs("\"a/x\"", "\"a/y\"")
 
@@ -389,12 +387,12 @@ suite "more: a search asked again of its answers":
   test "nearest first, each once, and a walk that comes round again ends":
     let walk = v("!{!(kind search-space) !(kind more) (identity walk) (parts [down])}")
     let s = Search[Value, Value].fromValue(walk, resolve = resolve)
-    check collect(s.ask(v("root"))) == vs("a", "b", "b2", "c")
+    check toSeq(s.ask(v("root"))) == vs("a", "b", "b2", "c")
     check s.toValue == walk
 
   test "via answers the way each answer was reached":
     let walk = v("!{!(kind search-space) !(kind more) !(kind via) (identity walk) (parts [down])}")
-    check collect(Search[Value, Value].fromValue(walk, resolve = resolve).ask(v("root"))) ==
+    check toSeq(Search[Value, Value].fromValue(walk, resolve = resolve).ask(v("root"))) ==
       vs("(via [root] a)", "(via [root a] b)", "(via [root a] b2)", "(via [root a b] c)")
 
   test "a step is any search, a find of two clauses among them":
@@ -405,9 +403,9 @@ suite "more: a search asked again of its answers":
                       wheres = vs("(p (on b))", "(p (shows t))"), gives = vs("t"),
                       id = v("inside"))
     let walk = v("!{!(kind search-space) !(kind more) (identity walk) (parts [inside])}")
-    check collect(Search[Value, Value].fromValue(walk, resolve = among(board, inside))
+    check toSeq(Search[Value, Value].fromValue(walk, resolve = among(board, inside))
       .ask(v("top"))) == vs("inner", "note")
-    check collect(more(findSearch(inside, among(board))).ask(v("top"))) == vs("inner", "note")
+    check toSeq(more(findSearch(inside, among(board))).ask(v("top"))) == vs("inner", "note")
 
   test "a more is a subject a find can ask":
     let walk = v("!{!(kind search-space) !(kind more) (identity walk) (parts [down])}")

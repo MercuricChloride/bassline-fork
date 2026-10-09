@@ -5,12 +5,12 @@ import bl/[core, queries]
 import bl/lib/[blmacro, bvarfile, jam]
 import bl/lib/crypto/[clave, digest]
 
-proc listener(): (ref seq[Value], proc(v: Value): bool) =
+proc listener(): (ref seq[Value], (Value) -> bool) =
   ## a line's telling, kept to look at
   let told = new seq[Value]
-  (told, proc(v: Value): bool =
+  (told, (v: Value) => (block:
     told[].add v
-    true)
+    true))
 
 proc memoryJam(signedOnly = false): Jam =
   newJam(spaceVar[Value, Ranked[Value]](), signedOnly)
@@ -79,7 +79,7 @@ suite "a jam":
     check told[].len == 1 and told[0].items[0] == JamQ and told[0].items[1] == bl 0
     let me = told[0].items[2]
     check me.knownAs(bl jam)
-    check collect(me.identities).filterIt(it.kind == bBytes and it.bytes.len == 16).len == 1
+    check toSeq(me.identities).filterIt(it.kind == bBytes and it.bytes.len == 16).len == 1
     check me.answer(AtQ).isSome
     check not jam.hear(line, initRec(@[JamQ, bl "another jam"]))   # its own to say
     check told[].len == 1
@@ -93,7 +93,7 @@ suite "a jam":
     let (seen, watch) = listener()
     let watcher = jam.newLine(watch)
     var taking = true
-    let bob = jam.newLine(proc(v: Value): bool = taking)
+    let bob = jam.newLine(v => taking)
     check jam.hear(watcher, bl(gone()))
     check jam.hear(bob, initRec(@[HereQ, readValue("!{(by bob) (at 1)}")]))
     check jam.hear(bob, bl(general()))
@@ -136,7 +136,7 @@ suite "a jam":
     let local = spaceVar[Value, Ranked[Value]]()
     for r in valuesIn(path): discard local.keep(r)
     check local.who.len == 0
-    check collect(local.heardIn(GoneQ)).len == 1
+    check toSeq(local.heardIn(GoneQ)).len == 1
     discard again
 
   test "kept in a log, opened again it holds what it held, ranks going on":
@@ -175,7 +175,7 @@ suite "readers":
     check local.keep(bl(general(3, "hi"))).get.rank == 3
     check local.keep(bl(general(5, "again"))).isSome
     check local.keep(bl(general(x, "not a rank"))).isNone
-    check collect(local.heardIn(bl general).map(Heard -> it.said)) == @[bl "hi", bl "again"]
+    check local.heardIn(bl general).maps(it.said).toSeq == @[bl "hi", bl "again"]
 
   test "messages say who, what and when, and what they answer and whom they are for":
     let alice = Speaker(name: bl alice)
@@ -227,11 +227,16 @@ suite "readers":
     check local.wasHere(readValue("0x0a"), 9)
     check not local.wasHere(bl bob, 3)
 
+proc teaMsg(rank: int, d, prev: Value, at = 0): Value =
+  ## a jam's stamp for `rank`: its message that it heard the answer with
+  ## digest `d` in general
+  TeaMsg(ordinal: rank, at: at, prev: prev, value: initRec(@[bl general, d])).toValue
+
 proc stampTold(kp: Keypair, sq: Value, rank: int, d, prev: Value): (Value, Value) =
   ## a stamp for `rank` as a jam would tell it, signed by `kp`, and the
-  ## stamp record itself
-  let record = initRec(@[StampHead, bl general, toValue(rank), d, bl 0, prev])
-  (initRec(@[sq, toValue(rank), kp.signed(initRec(@[sq, record])).toValue]), record)
+  ## message itself
+  let record = teaMsg(rank, d, prev)
+  (initRec(@[sq, toValue(rank), kp.signed(record).toValue]), record)
 
 proc d(v: Value): Value = digest(v, Blake2bAlgo).toValue
 
@@ -248,12 +253,12 @@ suite "stamps":
     for q in [sq, bl(general), HereQ]: check jam.hear(line, initRec(@[q]))
     let local = spaceVar[Value, Ranked[Value]]()
     for v in told[]: discard local.keep(v)
-    let here = collect(local.heardIn(HereQ))
+    let here = toSeq(local.heardIn(HereQ))
     check here.len == 1 and here[0].vouched
     check here[0].said.answer(StampsQ) == some sq
-    let said = collect(local.heardIn(bl general))
+    let said = toSeq(local.heardIn(bl general))
     check said.mapIt(it.rank) == @[2, 3]
-    let ss = collect(local.stamps(sq, kp.pubkey))
+    let ss = toSeq(local.stamps(sq, kp.pubkey))
     check ss.mapIt(it.rank) == @[0, 1, 2, 3]       # jam, here, hi, again
     check ss[2].vouches(said[0]) and ss[3].vouches(said[1])
     check not ss[2].vouches(said[1])
@@ -273,13 +278,13 @@ suite "stamps":
     let (good, record) = stampTold(kp, sq, 0, d(bl "hi"), bl(nil))
     var forged = good
     let signed = good.items[2]
-    let changed = initRec(@[sq, initRec(@[StampHead, bl general, bl 0, d(bl "bye"), bl 0, bl(nil)])])
+    let changed = teaMsg(0, d(bl "bye"), bl(nil))
     forged = initRec(@[sq, bl 0, initRec(@[signed.items[0], changed, signed.items[2]])])
     discard local.keep(forged)
-    check collect(local.stamps(sq, kp.pubkey)).len == 0
+    check toSeq(local.stamps(sq, kp.pubkey)).len == 0
     discard local.keep(stampTold(seed(6), sq, 1, d(bl "hi"), d(record))[0])
-    check collect(local.stamps(sq, kp.pubkey)).len == 0
-    check collect(local.stamps(sq, seed(6).pubkey)).len == 1
+    check toSeq(local.stamps(sq, kp.pubkey)).len == 0
+    check toSeq(local.stamps(sq, seed(6).pubkey)).len == 1
 
   test "a stamp missing, reordered or signed twice for one rank breaks the chain":
     let (t0, r0) = stampTold(kp, sq, 0, d(bl "a"), bl(nil))
@@ -316,15 +321,33 @@ suite "stamps":
     check again.hear(line, initRec(@[sq]))
     let local = spaceVar[Value, Ranked[Value]]()
     for v in told[]: discard local.keep(v)
-    let ss = collect(local.stamps(sq, kp.pubkey))
+    let ss = toSeq(local.stamps(sq, kp.pubkey))
     check ss.mapIt(it.rank) == @[0, 1, 2, 3, 4, 5]   # jam, here, first, gone, here, second
     check local.unchained(sq, kp.pubkey).len == 0
+
+  test "a signed put of a tea-msg is that key's put, not its stamp":
+    let local = spaceVar[Value, Ranked[Value]]()
+    let put = kp.signed(initRec(@[sq, teaMsg(0, d(bl "a"), bl(nil))])).toValue
+    check local.keep(initRec(@[sq, bl 0, put])).isSome
+    check toSeq(local.stamps(sq, kp.pubkey)).len == 0
+
+  test "a log with a hole or a fork in a key's stamps is not that key's to go on with":
+    let (t0, r0) = stampTold(kp, sq, 0, d(bl "a"), bl(nil))
+    let (t2, _) = stampTold(kp, sq, 2, d(bl "c"), d(r0))
+    let (w0, _) = stampTold(kp, sq, 0, d(bl "other"), bl(nil))
+    let holed = spaceVar[Value, Ranked[Value]]()
+    for v in [t0, t2]: discard holed.keep(v)
+    expect BasslineError: discard newJam(holed, key = some kp)
+    let forked = spaceVar[Value, Ranked[Value]]()
+    for v in [t0, w0]: discard forked.keep(v)
+    expect BasslineError: discard newJam(forked, key = some kp)
+    discard newJam(holed)          # without the key it is any log
 
   test "a marked rank or clock is no rank: neither heard nor a stamp reads it":
     check heard(readValue("(general 3! hi)")).isNone
     check heard(readValue("(general 3 hi)")).isSome
-    let marked = initRec(@[StampHead, bl general, readValue("3!"), d(bl "a"), bl 0, bl(nil)])
+    let marked = initRec(@[sym"tea-msg", readValue("3!"), bl 0, bl(nil), initRec(@[bl general, d(bl "a")])])
     check stampOf(marked, kp.pubkey).isNone
-    let late = initRec(@[StampHead, bl general, bl 3, d(bl "a"), readValue("0!"), bl(nil)])
+    let late = initRec(@[sym"tea-msg", bl 3, readValue("0!"), bl(nil), initRec(@[bl general, d(bl "a")])])
     check stampOf(late, kp.pubkey).isNone
-    check stampOf(initRec(@[StampHead, bl general, bl 3, d(bl "a"), bl 0, bl(nil)]), kp.pubkey).isSome
+    check stampOf(teaMsg(3, d(bl "a"), bl(nil)), kp.pubkey).isSome

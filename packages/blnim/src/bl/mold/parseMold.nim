@@ -14,7 +14,7 @@
 ## `(NAME {FIELD: VALUE …})`, or as a record in field order,
 ## `(NAME VALUE …)`, and read back by name either way.
 
-import std/[tables, strutils, options, algorithm]
+import std/[tables, strutils, options, algorithm, sugar]
 import ../core
 import ./mold
 
@@ -265,7 +265,7 @@ proc parseStruct*(s: Value): Struct =
     result.shape.optional.add f.optional
     result.byName.add i
   let names = result.shape.names
-  result.byName.sort(proc(a, b: int): int = cmp(names[a], names[b]))
+  result.byName.sort((a, b) => cmp(names[a], names[b]))
 
 proc parseMold*(desc: Value): Context =
   ## one struct, or a set of them declared together
@@ -289,14 +289,14 @@ proc toValue*(t: Type): Value =
   ## the TYPE, written in its long form
   result = case t.kind
     of tkKind:
-      var p = newBSet()
+      var p = initSet()
       if t.len.isSome: p.incl initRec(@[sym"len", num(t.len.get)])
       if t.oneOf.len > 0:
         var r = @[sym"one-of"]
         for o in t.oneOf: r.add sym(o)
         p.incl initRec(r)
       if p.len == 0: sym($t.valueKind)
-      else: initRec(@[sym($t.valueKind), initSet(p)])
+      else: initRec(@[sym($t.valueKind), p])
     of tkAny: sym(if t.markFree: "any" else: "value")
     of tkStruct: sym(t.name)
     of tkList: initRec(@[sym"list", t.each.toValue])

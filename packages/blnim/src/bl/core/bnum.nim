@@ -83,6 +83,7 @@ binary `+`, BNum
 binary `-`, BNum
 binary `*`, BNum
 binary `div`, BNum
+binary `mod`, BNum
 
 binary `cmp`, int
 binary `<`, bool

@@ -23,11 +23,11 @@ proc toValue(p: Peer): Value =
 
 proc fromValue(T: typedesc[Peer], v: Value): Peer =
   ## rebuilds a peer from its value, connecting again
-  if v.kind != bRec or v.mark or v.items.len != 2 or v.head != bl(peer) or
-      v.items[1].kind != bDict or bl(address) notin v.items[1].dict:
+  if not v.isKind(bRec, unmarked) or v.items.len != 2 or v.head != bl(peer) or
+      not v.items[1].isKind(bDict) or bl(address) notin v.items[1].dict:
     raise newException(ValueError, "not a peer: " & $v)
   let address = v.items[1].dict[bl address]
-  if address.kind != bText:
+  if not address.isKind(bText):
     raise newException(ValueError, "an address is text: " & $v)
   inc connections
   Peer(address: address.text, connection: connections)
@@ -35,29 +35,29 @@ proc fromValue(T: typedesc[Peer], v: Value): Peer =
 suite "interpreting a space":
   test "a set space answers a query with every record headed by it":
     let s = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(s1), holds({alice(1), alice(2), bob(3), (carol)})})
-    check s.ask(bl alice).collect == @[bl 1, bl 2]
-    check s.ask(bl bob).collect == @[bl 3]
-    check s.ask(bl dave).collect.len == 0
+    check s.ask(bl alice).toSeq == @[bl 1, bl 2]
+    check s.ask(bl bob).toSeq == @[bl 3]
+    check s.ask(bl dave).toSeq.len == 0
 
   test "a query that is itself a record heads its records":
     let s = Search[Value, Value].fromValue readValue(
       "!{!(kind search-space) (identity s1) (holds {((f x) 1) ((f y) 2)})}")
-    check s.ask(bl f(x)).collect == @[bl 1]
-    check s.ask(bl f).collect.len == 0
+    check s.ask(bl f(x)).toSeq == @[bl 1]
+    check s.ask(bl f).toSeq.len == 0
 
   test "a question, (q) alone, sits with q's answers and isn't one":
     let s = Search[Value, Value].fromValue readValue(
       "!{!(kind search-space) (identity s1) (holds {(k 1) (k) (k 2) (j)})}")
-    check s.ask(bl k).collect == @[bl 1, bl 2]
-    check s.ask(bl j).collect.len == 0
+    check s.ask(bl k).toSeq == @[bl 1, bl 2]
+    check s.ask(bl j).toSeq.len == 0
     let ranked = Search[Value, Ranked[Value]].fromValue readValue(
       "!{!(kind search-space) !(kind ranked) (identity s2) (holds {(k 0 a) (k)})}")
-    check ranked.ask(bl k).collect.len == 1
+    check ranked.ask(bl k).toSeq.len == 1
 
   test "a dict space answers at most once":
     let s = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(s1), holds({k: v})})
-    check s.ask(bl k).collect == @[bl v]
-    check s.ask(bl j).collect.len == 0
+    check s.ask(bl k).toSeq == @[bl v]
+    check s.ask(bl j).toSeq.len == 0
 
   test "a ranked space answers lowest rank first, ranks read as numbers":
     let s = Search[Value, Ranked[Value]].fromValue bl(
@@ -85,7 +85,7 @@ suite "interpreting a space":
   test "several holds are all answered from, in turn":
     let s = Search[Value, Value].fromValue readValue(
       "!{!(kind search-space) (identity s) (holds {(a 1)}) (holds {(a 2)})}")
-    check s[bl a].collect == @[bl 1, bl 2]
+    check s[bl a].toSeq == @[bl 1, bl 2]
     check s.toValue == readValue(
       "!{!(kind search-space) (identity s) (holds {(a 1)}) (holds {(a 2)})}")
 
@@ -121,7 +121,7 @@ suite "refusals":
 
   test "a refused answer raises":
     let s = Search[Value, Peer].fromValue(space)
-    refuses s.ask(bl p).collect
+    refuses s.ask(bl p).toSeq
 
   test "skipRefused passes over it":
     let s = Search[Value, Peer].fromValue(space, skipRefused = true)
@@ -131,11 +131,11 @@ suite "refusals":
 
   test "a record the space can't hold is a refusal too":
     let odd = bl(!{!kind(`search-space`), identity(s), holds({k(1, 2), k(3)})})
-    refuses Search[Value, Value].fromValue(odd).ask(bl k).collect
+    refuses Search[Value, Value].fromValue(odd).ask(bl k).toSeq
     check Search[Value, Value].fromValue(odd, skipRefused = true).ask(
-      bl k).collect == @[bl 3]
+      bl k).toSeq == @[bl 3]
     let badRank = bl(!{!kind(`search-space`), !kind(ranked), identity(s), holds({k(-1, a), k(x, b), k(0, c)})})
-    refuses Search[Value, Ranked[Value]].fromValue(badRank).ask(bl k).collect
+    refuses Search[Value, Ranked[Value]].fromValue(badRank).ask(bl k).toSeq
     var got: seq[Value]
     for r in Search[Value, Ranked[Value]].fromValue(badRank,
         skipRefused = true).ask(bl k):
@@ -144,19 +144,18 @@ suite "refusals":
 
 suite "denoting":
   test "a search with no denotation refuses to be written down":
-    let s = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      initStream(@[q]))
+    let s = newSearch[Value, Value](q => initStream(@[q]))
     check not s.denotable
     refuses s.toValue
 
   test "an id is had without writing the search down":
     var written = 0
     let s = newSearch[Value, Value](
-      proc(q: Value): Stream[Value] = Value.empty,
-      proc(): Value =
+      q => Value.empty,
+      () => (block:
         inc written
-        bl(!{!kind(`search-space`), identity(p), holds({})}),
-      proc(): Value = bl p)
+        bl(!{!kind(`search-space`), identity(p), holds({})})),
+      () => bl p)
     check s.id == bl p
     check s.byId.toValue == bl p
     check cat([s.byId], id = bl c).toValue == bl(!{!kind(`search-space`), !kind(cat), identity(c), parts([p])})
@@ -166,11 +165,10 @@ suite "denoting":
 
   test "without an id proc, the id is read from the denotation":
     let s = newSearch[Value, Value](
-      proc(q: Value): Stream[Value] = Value.empty,
-      proc(): Value = bl(!{!kind(`search-space`), identity(p2), holds({})}))
+      q => Value.empty,
+      () => bl(!{!kind(`search-space`), identity(p2), holds({})}))
     check s.id == identity(bl p2)
-    let plain = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      empty Value)
+    let plain = newSearch[Value, Value](q => empty Value)
     refuses plain.id
 
 suite "a peer table":
@@ -180,9 +178,9 @@ suite "a peer table":
     proc live(q: Value): Stream[Peer] =
       initStream(if q == bl(peers): table else: @[])
     proc written(): Value =
-      var space = newBSet()
+      var space = initSet()
       for p in table: space.incl initRec(@[bl(peers), p.toValue])
-      describe([SearchSpaceKind], bl here, initRec(@[HoldsQ, initSet(space)]))
+      describe([SearchSpaceKind], bl here, initRec(@[HoldsQ, space]))
     let saved = newSearch[Value, Peer](live, written).toValue
     let before = connections
     var back: seq[Peer]
@@ -199,26 +197,26 @@ suite "composing":
 
   test "a scope answers first, then the scope around it":
     let scope = cat([child, parent], id = bl s)
-    check scope.ask(bl x).collect == @[bl 10, bl 1]  # the first is the shadow
+    check scope.ask(bl x).toSeq == @[bl 10, bl 1]  # the first is the shadow
     check scope.ask(bl x).next == some(bl 10)           # the consumer takes it
-    check scope.ask(bl y).collect == @[bl 2]
+    check scope.ask(bl y).toSeq == @[bl 2]
 
   test "the scope around is asked only once the inner one runs out":
     var asked = 0
-    let outer = newSearch[Value, Value](proc(q: Value): Stream[Value] =
+    let outer = newSearch[Value, Value](q => (block:
       inc asked
-      initStream(@[bl outer]))
+      initStream(@[bl outer])))
     let scope = cat([child, outer])
     check scope.ask(bl x).take(1) == @[bl 10]
     check asked == 0
-    check scope.ask(bl x).collect == @[bl 10, bl outer]
+    check scope.ask(bl x).toSeq == @[bl 10, bl outer]
     check asked == 1
 
   test "written down, it carries the scope around it whole":
     let scope = cat([child, parent], id = bl s)
     check scope.toValue == bl(!{!kind(`search-space`), !kind(cat), identity(s), parts([!{!kind(`search-space`), identity(c1), holds({x(10)})},
                                               !{!kind(`search-space`), identity(p1), holds({x(1), y(2)})}])})
-    check Search[Value, Value].fromValue(scope.toValue).ask(bl x).collect ==
+    check Search[Value, Value].fromValue(scope.toValue).ask(bl x).toSeq ==
       @[bl 10, bl 1]
 
   test "or names it, and a search of known spaces resolves the name":
@@ -228,31 +226,30 @@ suite "composing":
     refuses Search[Value, Value].fromValue(written)   # nothing to resolve p1
     let known = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(known), holds({p1: !{!kind(`search-space`), identity(p1), holds({x(1), y(2)})}})})
     let back = Search[Value, Value].fromValue(written, resolve = known)
-    check back.ask(bl x).collect == @[bl 10, bl 1]
-    check back.ask(bl y).collect == @[bl 2]
+    check back.ask(bl x).toSeq == @[bl 10, bl 1]
+    check back.ask(bl y).toSeq == @[bl 2]
     check back.toValue == written                   # still by name
 
   test "a name is resolved when asked, so it sees what is known by then":
     var spaces: seq[Value]
-    let known = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      initStream(if q == bl(p1): spaces else: @[]))
+    let known = newSearch[Value, Value](q => initStream(if q == bl(p1): spaces else: @[]))
     let back = Search[Value, Value].fromValue(
       bl(!{!kind(`search-space`), !kind(cat), identity(s), parts([!{!kind(`search-space`), identity(c1), holds({x(10)})}, !{identity(p1)}])}), resolve = known)
-    check back.ask(bl y).collect.len == 0
+    check back.ask(bl y).toSeq.len == 0
     spaces.add bl(!{!kind(`search-space`), identity(p1), holds({y(2)})})
     spaces.add bl(!{!kind(`search-space`), identity(p1b), holds({y(3)})})       # two spaces by one name
-    check back.ask(bl y).collect == @[bl 2, bl 3]
+    check back.ask(bl y).toSeq == @[bl 2, bl 3]
 
   test "an identity names a space by several names, any of which finds it":
     let id = identity(bl p1, bl `old-p1`, bl(digest(sha256, 0x00)))
     check id == bl(!{identity(p1), identity(`old-p1`), identity(digest(sha256, 0x00))})
-    check identities(id).collect.len == 3
-    check identities(bl p1).collect == @[bl p1]
+    check identities(id).toSeq.len == 3
+    check identities(bl p1).toSeq == @[bl p1]
     let known = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(known), holds({`old-p1`: !{!kind(`search-space`), identity(p1), holds({y(2)})}})})
     let back = Search[Value, Value].fromValue(
       describe([SearchSpaceKind, CatKind], bl s, initRec(@[PartsQ, initList(@[bl(!{!kind(`search-space`), identity(c1), holds({x(10)})}), id])])),
       resolve = known)
-    check back.ask(bl y).collect == @[bl 2]
+    check back.ask(bl y).toSeq == @[bl 2]
     check back.toValue.answer(PartsQ).get.items[1] == id   # still the names
 
   test "identities are sets: sameness is meeting, a new name is a union":
@@ -262,43 +259,42 @@ suite "composing":
     check not sharesIdentity(a, identity(bl other))
     check sharesIdentity(bl peers, a)             # a bare ID is a set of one
     let both = a.alsoKnownAs(b, bl `peers-v2`)
-    check identities(both).collect.len == 4
-    check both.isObject and both.kinds.collect.len == 0   # only names
+    check identities(both).toSeq.len == 4
+    check both.isObject and both.kinds.toSeq.len == 0   # only names
     check randomId().isObject
     check randomId() != randomId()
 
   test "names that lead round to themselves come to an end":
     let space = bl(!{!kind(`search-space`), identity(p3), holds({y(2)})})
-    let known = newSearch[Value, Value](proc(q: Value): Stream[Value] =
+    let known = newSearch[Value, Value](q => (block:
       if q == bl(p1): just(identity(bl p2))
       elif q == bl(p2): initStream(@[identity(bl p1), space])
-      else: empty Value)
+      else: empty(Value)))
     let back = Search[Value, Value].fromValue(identity(bl p1), resolve = known)
-    check back[bl y].collect == @[bl 2]
+    check back[bl y].toSeq == @[bl 2]
 
   test "an object of a kind that isn't a search is not names of one":
     refuses Search[Value, Value].fromValue(bl(!{!kind(send), !to(p)}))
 
   test "a space found under two names answers once":
     let space = bl(!{!kind(`search-space`), identity(p1), holds({y(2)})})
-    let known = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      initStream(@[space]))                          # every name finds it
+    let known = newSearch[Value, Value](q => initStream(@[space]))   # every name finds it
     let back = Search[Value, Value].fromValue(identity(bl a, bl b),
                                               resolve = known)
-    check back.ask(bl y).collect == @[bl 2]
+    check back.ask(bl y).toSeq == @[bl 2]
 
   test "alt takes turns":
     let a = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(a), holds({k(1), k(2), k(3)})})
     let b = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(b), holds({k(10), k(20)})})
-    check alt([a, b]).ask(bl k).collect == @[bl 1, bl 10, bl 2, bl 20, bl 3]
+    check alt([a, b]).ask(bl k).toSeq == @[bl 1, bl 10, bl 2, bl 20, bl 3]
 
   test "feed asks the second search about each answer of the first":
     let friends = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(f), holds({alice(bob), alice(carol)})})
     let scores = Search[Value, Value].fromValue bl(!{!kind(`search-space`), identity(g), holds({bob(1), carol(2), carol(3)})})
     let both = feed(friends, scores, id = bl fs)
-    check both.ask(bl alice).collect == @[bl 1, bl 2, bl 3]
+    check both.ask(bl alice).toSeq == @[bl 1, bl 2, bl 3]
     check both.toValue == bl(!{!kind(`search-space`), !kind(feed), identity(fs), parts([!{!kind(`search-space`), identity(f), holds({alice(bob), alice(carol)})}, !{!kind(`search-space`), identity(g), holds({bob(1), carol(2), carol(3)})}])})
-    check Search[Value, Value].fromValue(both.toValue).ask(bl alice).collect ==
+    check Search[Value, Value].fromValue(both.toValue).ask(bl alice).toSeq ==
       @[bl 1, bl 2, bl 3]
 
   test "merge interleaves ranked searches by rank":
@@ -317,11 +313,10 @@ suite "composing":
     refuses Search[Value, Value].fromValue(m.toValue)  # merge is for ranks
 
   test "a composite with a part that has no denotation has none":
-    let plain = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      initStream(@[q]))
+    let plain = newSearch[Value, Value](q => initStream(@[q]))
     check not cat([child, plain]).denotable
     check not feed(child, plain).denotable
-    check cat([child, plain]).ask(bl x).collect == @[bl 10, bl x]
+    check cat([child, plain]).ask(bl x).toSeq == @[bl 10, bl x]
 
 suite "fan-out":
   let
@@ -333,9 +328,8 @@ suite "fan-out":
     check setSpace.fanout == many
 
   test "a search made with one answer a query stops after the first":
-    let s = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      initStream(@[bl first, bl second]), fanout = one)
-    check s.ask(bl q).collect == @[bl first]
+    let s = newSearch[Value, Value](q => initStream(@[bl first, bl second]), fanout = one)
+    check s.ask(bl q).toSeq == @[bl first]
 
   test "composites: a feed of two single searches is single, the rest many":
     check feed(dict, dict).fanout == one
@@ -345,6 +339,5 @@ suite "fan-out":
     check dict.byId.fanout == one
 
   test "an id can be given as a value":
-    let s = newSearch[Value, Value](proc(q: Value): Stream[Value] =
-      empty(Value), id = bl named)
+    let s = newSearch[Value, Value](q => empty(Value), id = bl named)
     check s.id == bl named

@@ -72,9 +72,9 @@ proc toValue*(node: JsonNode): Value =
     "value.kind must be a string"
 
   let kind = block:
-    let k = parseKind k.str
-    guard k.isSome
-    k.get
+    let parsed = parseKind k.str
+    guard parsed.isSome, "invalid kind" & k.str
+    parsed.get
 
   var mark = false
   

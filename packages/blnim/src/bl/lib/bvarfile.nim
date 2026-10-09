@@ -48,11 +48,13 @@ proc appendValue*(path: string, v: Value): bool =
   except OSError, IOError:
     false
 
-proc valuesIn*(path: string): seq[Value] =
+proc valuesIn*(path: string, mend = true): seq[Value] =
   ## every value in the file at `path`, a bare concatenation of CE. A
   ## last value cut short, as by a crash partway through appending it,
-  ## is cut from the file, so what is appended next starts clean. Refuses
-  ## bytes that break the grammar
+  ## is cut from the file, so what is appended next starts clean, unless
+  ## `mend` is false: a reader that doesn't append to the file leaves it
+  ## as it is, since whoever does may be partway through. Refuses bytes
+  ## that break the grammar
   let bytes = readFile(path)
   var
     d = newDecoder(newBuffer(bytes.toOpenArrayByte(0, bytes.high)))
@@ -63,7 +65,7 @@ proc valuesIn*(path: string): seq[Value] =
       whole = v.offset + v.len
   except CodecError as e:
     refuse path & " is not a run of CE values: " & e.msg
-  if whole < bytes.len:
+  if mend and whole < bytes.len:
     writeFile(path, bytes[0 ..< whole])
 
 proc logVar*[Q, A](path: string, id = randomId(), skipRefused = false):
@@ -94,4 +96,4 @@ proc fileVar*[Q, A](path: string, fanout = many, id = randomId(),
       let v = spaceVar[Q, A](fanout, id, skipRefused)
       guard writeValue(path, v.search.toValue), "can't write " & path
       v
-  held.persist(proc(space: Value): bool = writeValue(path, space))
+  held.persist(space => writeValue(path, space))
