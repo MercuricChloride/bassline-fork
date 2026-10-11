@@ -1,8 +1,7 @@
 from std/bitops import countTrailingZeroBits
 from std/endians import littleEndian64
 import std/options
-import ../buffer
-export buffer
+export options
 
 const
   MaxDepth* {.intdefine.} = 64
@@ -19,6 +18,11 @@ const
 type
   BasslineError* = object of ValueError
   CodecError* = object of BasslineError
+  Frame* = ref object of RootObj
+
+# ================
+# Error utils
+# ================
 
 template refuseWith*(err) {.dirty.} =
   ## gives a module its own `refuse msg`, raising `err`, and `guard cond`,
@@ -32,7 +36,50 @@ template refuseWith*(err) {.dirty.} =
     if not(cond):
       refuse(msg)
 
-refuseWith CodecError
+# ================
+# Kind & tag parsing
+# ================
+
+type
+  Kind* = enum
+    bNil,
+    bNum, bText, bSym, bBytes,
+    bList, bRec, bDict, bSet
+
+func tag*(kind: Kind): byte =
+  byte(kind.ord + 1)
+
+func parseTag*(b: byte): Kind =
+  Kind(b - 1)
+
+func `$`*(kind: Kind): string =
+  case kind
+  of bNil: "nil"
+  of bNum: "number"
+  of bText: "text"
+  of bSym: "symbol"
+  of bBytes: "bytes"
+  of bList: "list"
+  of bRec: "record"
+  of bDict: "dict"
+  of bSet: "set"
+
+func parseKind*(s: string): Option[Kind] =
+  case s
+  of "nil": some bNil
+  of "number": some bNum
+  of "text": some bText
+  of "symbol": some bSym
+  of "bytes": some bBytes
+  of "list": some bList
+  of "record": some bRec
+  of "dict": some bDict
+  of "set": some bSet
+  else: none Kind
+
+# ================
+# String & bytes support
+# ================
 
 func toString*(a: openArray[byte]): string =
   result = newString(a.len)
@@ -41,6 +88,10 @@ func toString*(a: openArray[byte]): string =
 
 template toBytes*(a: string): openArray[byte] =
   a.toOpenArrayByte(0, a.high)
+
+# ================
+# CE comparisons
+# ================
 
 func cmpBytes*(a, b: openArray[byte]): int =
   let n = min(a.len, b.len)
@@ -57,6 +108,10 @@ func cmpShortlex*(x, y: openArray[byte]): int =
   result = cmp(x.len, y.len)
   if result != 0: return
   result = cmpBytes(x, y)
+
+# ================
+# Int & utf8 validation
+# ================
 
 func isValidInt*(bytes: openArray[byte]): bool =
   if bytes.len == 0: 
@@ -136,117 +191,3 @@ func isValidUtf8*(bytes: openArray[byte]): bool =
       return false
     inc i
   state == UTF8_ACCEPT
-
-type
-  Kind* = enum
-    bNil,
-    bNum, bText, bSym, bBytes,
-    bList, bRec, bDict, bSet
-  HeaderData* = tuple
-    kind: Kind
-    mark: bool
-    inlineLen: int
-
-  PartialValueKind* = enum
-    pvNil, pvAtom, pvOpenFrame, pvCloseFrame
-
-  PartialValue* = object
-    offset*: int
-    case kind*: PartialValueKind
-    of pvAtom:
-      payloadLen*: uint32
-    else: discard
-
-func `$`*(kind: Kind): string =
-  case kind
-  of bNil: "nil"
-  of bNum: "number"
-  of bText: "text"
-  of bSym: "symbol"
-  of bBytes: "bytes"
-  of bList: "list"
-  of bRec: "record"
-  of bDict: "dict"
-  of bSet: "set"
-
-func parseKind*(s: string): Option[Kind] =
-  case s
-  of "nil": some bNil
-  of "number": some bNum
-  of "text": some bText
-  of "symbol": some bSym
-  of "bytes": some bBytes
-  of "list": some bList
-  of "record": some bRec
-  of "dict": some bDict
-  of "set": some bSet
-  else: none Kind
-
-func tag*(kind: Kind): byte =
-  byte(kind.ord + 1)
-
-func skipLen*(payloadLen: uint32): int =
-  case payloadLen
-  of 0..6: 1
-  of 7..254: 2
-  else: 6
-
-func headerData*(b: byte): HeaderData =
-  let
-    tag = int(b shr 4)
-    mark = (b and MarkBit) != 0
-    len = int(b and 7)
-  guard tag in 1..9, ("invalid tag: " & $tag)
-  (Kind(tag - 1), mark, len)
-
-func partialKind*(b: byte): PartialValueKind =
-  if b == EndByte:
-    return pvCloseFrame
-  let h = headerData(b)
-  case h.kind
-  of bNum..bBytes: 
-    pvAtom
-  of bNil:
-    guard h.inlineLen == 0, "nil lenBits must be 0"
-    pvNil
-  of bList..bSet:
-    guard h.inlineLen == 0, "frame lenBits must be 0"
-    pvOpenFrame
-
-template bytes*(self: Buffer[byte]): openArray[byte] =
-  self.data.toOpenArray(0, self.data.high)
-
-iterator partialValues*(self: var Cursor[byte], maxBytes = MaxValueBytes): PartialValue =
-  template needs(n: Natural, msg: string) =
-    if (self.pos + n) > self.buf.len:
-      starved(msg)
-
-  while self.buf.len > self.pos:
-    let
-      b = self.buf[self.pos]
-      pk = b.partialKind
-    case pk
-    of pvNil, pvOpenFrame, pvCloseFrame:
-      yield PartialValue(kind: pk, offset: self.pos)
-      self.pos += 1
-    of pvAtom:
-      var len = b.headerData.inlineLen
-      if len == 7:
-        needs 2, "expected a length byte"
-        len = int self.buf[self.pos + 1]
-        guard len >= 7, "non minimal u8 length"
-        if len == 255:
-          needs 6, "expected 4 length bytes"
-          len = 0
-          for i in 2 .. 5:
-            len = (len shl 8) or int self.buf[self.pos + i]
-          guard len >= 255, "non minimal u32 length"
-      guard len <= maxBytes, "scalar payload exceeds the value-size cap"
-      let
-        skip = uint32(len).skipLen
-        total = skip + len
-      needs total, "expected atom payload"
-
-      let pv = PartialValue(kind: pvAtom, offset: self.pos, payloadLen: uint32(len))
-      self.pos += total
-      yield pv

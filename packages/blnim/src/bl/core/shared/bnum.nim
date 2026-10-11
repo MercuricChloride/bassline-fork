@@ -1,5 +1,6 @@
 import std/[strutils, options]
-import bigints, codec
+import bigints
+import ./shared
 
 refuseWith BasslineError
 

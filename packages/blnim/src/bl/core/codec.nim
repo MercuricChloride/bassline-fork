@@ -1,2 +1,2 @@
-import ./codec/[shared, encode, decode]
-export shared, encode, decode
+import ./codec/[partial, encode, decode]
+export encode, decode, partial

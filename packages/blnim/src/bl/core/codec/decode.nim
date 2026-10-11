@@ -1,4 +1,5 @@
-import ./shared
+import ../shared
+import ./partial
 
 # ================ Decoded Values ================
 

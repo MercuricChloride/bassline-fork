@@ -1,5 +1,7 @@
+import ./shared
+
 type
-  Buffer*[T] {.acyclic.} = ref object
+  Buffer*[T] {.acyclic.} = ref object of Frame
    data*: seq[T]
 
 func newBuffer*[T](len: Natural = 0): Buffer[T] =
@@ -83,6 +85,9 @@ proc reduce*[T, A](self: Buffer[T], init: A, fn: proc(acc: A, curr: T): A): A =
   result = init
   for item in self:
     result = fn(result, item)
+
+template bytes*(self: Buffer[byte]): openArray[byte] =
+  self.data.toOpenArray(0, self.data.high)
 
 # ================ Cursor ================
 

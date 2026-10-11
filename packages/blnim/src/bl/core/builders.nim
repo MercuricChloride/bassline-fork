@@ -1,5 +1,5 @@
 import std/[hashes, options]
-import ./[buffer, btree, codec, bnum]
+import ./[shared, codec]
 export btree, codec, bnum, options
 
 refuseWith BasslineError
@@ -7,7 +7,6 @@ refuseWith BasslineError
 type
   BSet* = BTreeSet[Value]
   BDict* = BTree[Value, Value]
-
   Value* = object
     mark*: bool
     case kind*: Kind
@@ -180,6 +179,25 @@ func `[]=`*(a: var Value, k, v: Value) =
 func incl*(a: var Value, v: Value) =
   a.expectKind(bSet)
   a.els.incl v
+
+iterator children*(self: Value): Value =
+  case self.kind
+  of bList, bRec:
+    for v in self.items: 
+      yield v
+  of bDict:
+    for k, v in self.dict:
+      yield k; yield v
+  of bSet:
+    for v in self.els:
+      yield v
+  else: discard
+
+iterator walk*(self: Value): Value {.closure.} =
+  yield self
+  for v in self.children:
+    for each in v.walk:
+      yield each
 
 # ================ Frame constructors ================
 

@@ -1,4 +1,5 @@
 import std/algorithm
+import ./shared
 
 const
   M {.intdefine.} = 64
@@ -23,11 +24,11 @@ type
       # separators: kids[i] < keys[i] <= kids[i+1]
       kids: seq[Node[K, V]]
 
-  BTree*[K, V] {.acyclic.} = ref object
+  BTree*[K, V] {.acyclic.} = ref object of Frame
     entries: int
     root: Node[K, V]
 
-  BTreeSet*[T] {.acyclic.} = ref object
+  BTreeSet*[T] {.acyclic.} = ref object of Frame
     entries: int
     root: Node[T, bool]
 
