@@ -1,12 +1,13 @@
 import std/[hashes, options]
 import ./[shared, codec]
-export btree, codec, bnum, options
+export btree, codec, options
 
 refuseWith BasslineError
 
 type
   BSet* = BTreeSet[Value]
   BDict* = BTree[Value, Value]
+  BSeq* = Buffer[Value]
   Value* = object
     mark*: bool
     case kind*: Kind
@@ -17,18 +18,24 @@ type
       text*: string
     of bBytes:
       bytes*: seq[byte]
-    of bList, bRec:
-      items*: Buffer[Value]
-    of bDict:
-      dict*: BDict
-    of bSet:
-      els*: BSet
+    of bList, bRec, bDict, bSet:
+      frame*: Frame
 
 func newBSet*(): BSet =
   newBTreeSet[Value]()
 
 func newBDict*(): BDict =
   newBTree[Value, Value]()
+
+func copy*(f: Frame): Frame =
+  if f of BSeq:
+    return BSeq(f).copy
+  elif f of BDict:
+    return BDict(f).copy
+  elif f of BSet:
+    return BSet(f).copy
+  else:
+    refuse "unknown frame"
 
 func null*(mark = false): Value =
   Value(kind: bNil, mark: mark)
@@ -52,16 +59,28 @@ func bytes*(b: openArray[byte], mark = false): Value =
   bytes(@b, mark)
 
 func initList*(mark = false): Value =
-  Value(kind: bList, items: newBuffer[Value](), mark: mark)
+  Value(kind: bList, frame: newBuffer[Value](), mark: mark)
 
 proc initRec*(head: Value, mark = false): Value =
-  Value(kind: bRec, items: newBuffer(@[head]), mark: mark)
+  Value(kind: bRec, frame: newBuffer(@[head]), mark: mark)
 
 func initDict*(mark = false): Value =
-  Value(kind: bDict, dict: newBTree[Value, Value](), mark: mark)
+  Value(kind: bDict, frame: newBTree[Value, Value](), mark: mark)
 
 func initSet*(mark = false): Value =
-  Value(kind: bSet, els: newBTreeSet[Value](), mark: mark)
+  Value(kind: bSet, frame: newBTreeSet[Value](), mark: mark)
+
+func items*(self: Value): BSeq =
+  guard self.frame of BSeq, "not a BSeq"
+  BSeq(self.frame)
+
+func dict*(self: Value): BDict =
+  guard self.frame of BDict, "not a BDict"
+  BDict(self.frame)
+
+func els*(self: Value): BSet =
+  guard self.frame of BSet, "not a BSet"
+  BSet(self.frame)
 
 # ================ Comparators ================
 
@@ -202,14 +221,14 @@ iterator walk*(self: Value): Value {.closure.} =
 # ================ Frame constructors ================
 
 func initList*(items: sink seq[Value], mark = false): Value =
-  Value(kind: bList, items: newBuffer(items), mark: mark)
+  Value(kind: bList, frame: newBuffer(items), mark: mark)
 
 func initList*(items: openArray[Value] = [], mark = false): Value =
   initList(@items, mark)
 
 func initRec*(items: sink seq[Value], mark = false): Value =
   doAssert items.len > 0, "a record needs a head"
-  Value(kind: bRec, items: newBuffer(items), mark: mark)
+  Value(kind: bRec, frame: newBuffer(items), mark: mark)
 
 func initRec*(head: Value, items: openArray[Value], mark = false): Value =
   var l = newSeqOfCap[Value](items.len + 1)
@@ -238,20 +257,20 @@ proc initDict*(entries: openArray[(Value, Value)], mark = false): Value =
 
 proc initRec*(items: Buffer[Value], mark = false): Value =
   guard items.len > 0, "record must have a head"
-  Value(kind: bRec, items: items, mark: mark)
+  Value(kind: bRec, frame: items, mark: mark)
 
 func initList*(items: Buffer[Value], mark = false): Value =
-  Value(kind: bList, items: items, mark: mark)
+  Value(kind: bList, frame: items, mark: mark)
 
 func initDict*(dict: BDict, mark = false): Value =
-  Value(kind: bDict, dict: dict, mark: mark)
+  Value(kind: bDict, frame: dict, mark: mark)
 
 func initSet*(els: BSet, mark = false): Value =
-  Value(kind: bSet, els: els, mark: mark)
+  Value(kind: bSet, frame: els, mark: mark)
 
 func head*(v: Value): lent Value =
   guard v.isKind({bList, bRec}): "head must be used with a list / record"
-  return v.items[0]
+  return v[0]
 
 template toBSet*(iter): BSet =
   var r = newBSet()

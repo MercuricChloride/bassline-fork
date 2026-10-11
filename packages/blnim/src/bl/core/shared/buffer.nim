@@ -16,6 +16,9 @@ func newBuffer*[T](data: openArray[T]): Buffer[T] =
 func newBufferOfCap*[T](cap: Natural): Buffer[T] =
   newBuffer(newSeqOfCap[T](cap))
 
+func copy*[T](self: Buffer[T]): Buffer[T] =
+  newBuffer(self.data)
+
 func len*(buf: Buffer): Natural =
   buf.data.len
 
