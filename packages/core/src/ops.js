@@ -2,8 +2,8 @@
 
 // Operations over values: walking, the mark predicates, structural rebuild,
 // dict / set access, structural similarity, CE-truncation prefixes, and
-// shapes with holes. A port of the Nim `lib/ops.nim`, plus the dict / set
-// helpers the JS side already had.
+// shapes with holes. A port of blnim's value operations (now in
+// `bl/queries`), plus the dict / set helpers the JS side already had.
 //
 // `similar` and `prefixes` dispatch on one value and match it against the
 // other; they are not visitors and stay plain functions. `walk` is the

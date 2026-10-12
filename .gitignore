@@ -27,9 +27,11 @@ __pycache__/
 .env.production.local
 
 .mcp.json
+!packages/jam-plugin/.mcp.json
 
 bin/
 !packages/blpy/bin/
+!packages/jam-plugin/bin/
 bench-data/
 # generated type declarations
 packages/*/types/
