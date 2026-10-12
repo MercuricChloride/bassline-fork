@@ -1,4 +1,5 @@
-export type Search<K, V> = (key: K | null) => Stream<V>
+import type { Search } from './search.ts'
+
 export type Send<K, V> = (key: K | null, val: V) => boolean
 export type BVar<K, V> = {
   search: Search<K, V>

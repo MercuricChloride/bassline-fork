@@ -27,6 +27,18 @@ function lowerBound<K>(keys: K[], key: K, cmp: Cmp<K>): number {
   return lo
 }
 
+/** The first index `atOrAfter` holds for, which then holds for every one after. */
+function firstOf<K>(keys: K[], atOrAfter: (k: K) => boolean): number {
+  let lo = 0
+  let hi = keys.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (atOrAfter(keys[mid]!)) hi = mid
+    else lo = mid + 1
+  }
+  return lo
+}
+
 function upperBound<K>(keys: K[], key: K, cmp: Cmp<K>): number {
   let lo = 0
   let hi = keys.length
@@ -140,6 +152,23 @@ export class BTree<K, V> {
     }
   }
 
+  /**
+   * Entries from the first key `atOrAfter` holds for, which must then hold
+   * for every key after it: a bound that needn't be a key. Found by
+   * bisecting, and in key order from there.
+   */
+  *entriesFrom(atOrAfter: (k: K) => boolean): Generator<[K, V]> {
+    // a separator is the least key of the child after it, so the first key
+    // `atOrAfter` holds for is in the child before the first separator it
+    // holds for, or else first in the leaf after
+    let n = this.#root
+    while (n instanceof Branch) n = n.kids[firstOf(n.keys, atOrAfter)]!
+    let i = firstOf(n.keys, atOrAfter)
+    for (let l: Leaf<K, V> | null = n; l !== null; l = l.next, i = 0) {
+      for (; i < l.keys.length; i++) yield [l.keys[i]!, l.vals[i]!]
+    }
+  }
+
   [Symbol.iterator]() {
     return this.entries()
   }
@@ -178,6 +207,14 @@ export class BTreeSet<T> {
 
   *values() {
     yield* this.#tree.keys()
+  }
+
+  /**
+   * Members from the first one `atOrAfter` holds for, which must then hold
+   * for every member after it, found by bisecting.
+   */
+  *from(atOrAfter: (item: T) => boolean): Generator<T> {
+    for (const [k] of this.#tree.entriesFrom(atOrAfter)) yield k
   }
 
   [Symbol.iterator]() {

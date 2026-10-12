@@ -49,6 +49,17 @@ A stream is a host iterator, a generator most often, so the platform's iterator 
 
 The platform's `take`, `some`, `every`, `find`, and a `for…of` that breaks, close the stream when they stop. `pull(s)` takes the next answer and `pull(s, n)` up to `n`, leaving the stream open to pull again.
 
+## Shapes
+
+`src/shape.ts` is a port of blnim's `queries/rewrite.nim`. A shape is an example value and a set of holes, written `(shape EXAMPLE {HOLE …})` or `(shape EXAMPLE {HOLE …} WILD)`; `shapes(factory)` gives `shape`, `shapeFrom` (reads one written down, refusing anything else with a `ShapeError`), `shapeValue` (writes one down), `fillings` and `inject`.
+
+- `fillings(shape, v, given?)` is a little unification search: every binding of the holes, `{HOLE: VALUE …}`, under which `v` fits the example, extending the bindings `given`, one per pull and nothing worked out ahead. A list or record fits with at least the example's members; a dict or set member with a hole or the wild in it is tried against each of the value's keys or members, and one without is looked up. A hole fits a value of its own mark, a hole met again fits only what it is bound to, every hole must be bound, and each filling is answered once.
+- The search for a frame takes its parts in the order blnim does: what the bindings already decide first, then what has one place to fit, then the part narrowest by its known leading members. A list or record member of a set is looked for only among those that begin with the members already known, found by bisecting (`ledBy`, over `ISet.from`).
+- `inject(shape, bindings)` goes the other way: the example with each bound hole filled in and the rest left as they are.
+- `v => fillings(shape, v)` is the shape as a search.
+
+The tests port blnim's `trewrite.nim`, including its check against a brute-force search that tries every assignment of a value's parts to the holes, over 400 random small values with holes punched anywhere. They also count how many set members a search pulls, so the ordering and the bisecting are checked as well as the answers.
+
 ## JSON
 
 `src/json/` is the kind-tagged JSON carrier, a port of `lib/json.nim` and of `@bassline/core/json`: each value is `{"kind": KIND, "mark"?: true, "value": …}`.
@@ -74,3 +85,15 @@ pnpm --filter @bassline/blts typecheck
 pnpm --filter @bassline/blts test
 pnpm --filter @bassline/blts build # emits dist/
 ```
+
+## Objects
+
+`src/object.ts` is a port of the second half of blnim's `queries/queries.nim`. An object is a marked set of records shaped as answers: an unmarked `(QUESTION ANSWER)` is something it answers, a marked `!(QUESTION ANSWER)` an order, such as its kinds `!(kind K)`. `isObject`, `toAnswer`, `headed` (a set's records under a head, found by bisecting), `answers` and `answer` (the first in CE order, for a reader that wants one), and `orders` read any object. `objects(factory)` gives what builds: `obj`, `answered`, `order`, `target`/`targets`, `kinds`, `hasKind`, and names: `identities`, `knownAs`, `sharesIdentity`, `identity`, `identityOf`, `randomId` (sixteen random bytes), `alsoKnownAs`, `describe`.
+
+## Searches
+
+`src/search.ts` is a port of blnim's `queries/search.nim`. A `Search` is what you ask: `ask(q)` hands back a stream, `first(q)` the first answer. One may write its space down (`toValue`) and say the ID it goes by (`id`) without writing it down; `byId` writes it down by its ID alone. A plain function `q => Iterable` asks like one (`asSearch`). `searches(factory)` gives `search`, `cat` (a part asked only once the one before has nothing more), `alt` (fair turns), `feed` (each answer asked on), `searchOver` (a set of records or a dict held now) and `fromValue`, which reads a denoted space back: `holds` sets and dicts, `cat`/`alt`/`feed` composites, and names resolved through a search of known spaces when asked, a name met again on its own way round passed over. Ranked spaces and `merge` are not read yet; `fanout` is not ported.
+
+## Scopes
+
+`src/scope.ts` holds the searches in reach where a question comes up. A question is named (`question<Q, A>('showing')`); the types ride along for TypeScript only, so two questions with one name are one. `put(q, search)` puts a search in a scope for a question; asking there (`ask`) asks every search in reach for it, nearest first: the scope's `nearer` scopes, reached when a question gets there, then its own in the order put, then its parent's. Searches are asked lazily, so the first answers come in that order; then each live stream gives one answer a round, so no endless one starves the rest. `first`, `reach` (each search with where it was found), `replay` (who answers, each with its first answer) and `search(q)` (the question as one search) build on it. Nothing is asked ahead of a pull, and a pull sees the scopes as they are then. `read` and `changed` are hooks for whatever watches a scope.

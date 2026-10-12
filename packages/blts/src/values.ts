@@ -179,6 +179,9 @@ class BSet implements Value<'set'> {
   has(k: Value) {
     return this.items.has(k)
   }
+  from(atOrAfter: (member: Value) => boolean) {
+    return this.items.from(atOrAfter)
+  }
   tree() {
     return this.items.clone()
   }

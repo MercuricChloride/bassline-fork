@@ -72,7 +72,7 @@ interface IValue<K extends ValueKind> {
   get length(): number
 }
 
-interface INil extends IValue<'nil'> {
+export interface INil extends IValue<'nil'> {
   readonly payload: null
 }
 
@@ -80,32 +80,32 @@ interface INil extends IValue<'nil'> {
  * An integer, held whole and in one host form: a number when it is a safe
  * integer, a bigint otherwise, so `payload === 5` means what it says.
  */
-interface INumber extends IValue<'number'> {
+export interface INumber extends IValue<'number'> {
   readonly payload: number | bigint
 }
 
 /** Text held as well-formed UTF-16, so it has a UTF-8 form: no lone surrogates. */
-interface IText extends IValue<'text'> {
+export interface IText extends IValue<'text'> {
   readonly payload: string
 }
 
 /** As text: well-formed, no lone surrogates. */
-interface ISymbol extends IValue<'symbol'> {
+export interface ISymbol extends IValue<'symbol'> {
   readonly payload: string
 }
 
-interface IBytes extends IValue<'bytes'> {
+export interface IBytes extends IValue<'bytes'> {
   readonly payload: Uint8Array
 }
 
-interface IList extends IValue<'list'> {
+export interface IList extends IValue<'list'> {
   readonly items: readonly Value[]
   /** The items, in order. */
   children(): Generator<Value>
 }
 
 /** A record always has a head. */
-interface IRecord extends IValue<'record'> {
+export interface IRecord extends IValue<'record'> {
   readonly items: readonly Value[]
   get head(): Value
   /** The items after the head. */
@@ -118,7 +118,7 @@ interface IRecord extends IValue<'record'> {
  * Keys are unique and held in canonical order, the order of their CE bytes;
  * the encoder and `cmp` read them in the order given here.
  */
-interface IDict extends IValue<'dict'> {
+export interface IDict extends IValue<'dict'> {
   /** Key, value, key, value, by key in canonical order. */
   children(): Generator<Value>
   /** Entries by key in canonical order. */
@@ -133,10 +133,16 @@ interface IDict extends IValue<'dict'> {
 }
 
 /** Members are unique and held in canonical order, the order of their CE bytes. */
-interface ISet extends IValue<'set'> {
+export interface ISet extends IValue<'set'> {
   /** Members in canonical order. */
   children(): Generator<Value>
   has(member: Value): boolean
+  /**
+   * Members in canonical order from the first one `atOrAfter` holds for,
+   * which must then hold for every member after it: a bound that needn't be
+   * a member, such as "every record headed by q". Found by bisecting.
+   */
+  from(atOrAfter: (member: Value) => boolean): Generator<Value>
   /**
    * The members as a tree of their own, to add to and build a new set from;
    * this set is untouched.
