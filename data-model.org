@@ -101,7 +101,7 @@ An *atom* is a value that has no value constituents.
 A *frame* is a value that forms a new value by arranging its
 constituents.
 
-Any value may be *actionable*, shifting its meaning from "something" to
+Any value may carry a *mark*, shifting its meaning from "something" to
 "something to do".
 
 All values form proper trees. Cycles cannot be expressed and MUST be
@@ -202,26 +202,26 @@ The canonical form of a set is sorted lexicographically by the CE bytes of
 its members, with the same caveat as dictionaries.
 
 
-** Actionable Values
+** Marked Values
 
-As we described in the start, any VALUE may be ACTIONABLE. An
-actionable value allows us to denote something which should be
-interpreted, and its contents are not semantically interesting on
-their own, but exist for an evaluator to use.
+As we described in the start, any VALUE may carry a MARK. A marked
+value allows us to denote something which should be interpreted, and
+its contents are not semantically interesting on their own, but exist
+for an evaluator to use.
 
-An actionable value is never equal to its non-actionable counterpart
-as it has a different =actionable= bit in its header.
+A marked value is never equal to its unmarked counterpart as it has a
+different =mark= bit in its header.
 
-A consequence of this is that any actionable value may be converted to
-its non-actionable counterpart by just flipping that single bit.
+A consequence of this is that any marked value may be converted to its
+unmarked counterpart by just flipping that single bit.
 
-The following sections give more info about actionable values:
+The following sections give more info about marked values:
 
 *** Why a header flag and not a record head?
 
 The most natural-looking simplification of this design is to spell out
-actionable values with a vocabulary construct such as a record:
-=(actionable foo)=, but we reject this notion.
+marked values with a vocabulary construct such as a record:
+=(mark foo)=, but we reject this notion.
 
 This is intentional as it makes checking if something is data or a
 program easily determined regardless of context with zero
@@ -233,12 +233,12 @@ can differentiate. Giving us an explicit instruction form for
 messages.
 
 
-*** Actionable evaluation is outside of values
+*** Evaluation of a marked value is outside of values
 
 Evaluation is not part of the data model, we simply have a way of
 expressing values that "want" evaluation but are still values. Any
-evaluation of an actionable value is totally disjoint from the value
-space and exits it.
+evaluation of a marked value is totally disjoint from the value space
+and exits it.
 
 
 * Canonical Binary Encoding
@@ -249,11 +249,11 @@ The canonical encoding is defined for all values.
 
 Every value begins with a single header byte:
 
-| tag (4 bits) | actionable flag (1 bit) | length (3 bits) |
+| tag (4 bits) | mark (1 bit) | length (3 bits) |
 
-The first 4 bits carry the type tag. The fifth bit is the actionable
-flag. The last three bits carry the payload length for scalars, and
-must be zero everywhere else.
+The first 4 bits carry the type tag. The fifth bit is the mark. The
+last three bits carry the payload length for scalars, and must be zero
+everywhere else.
 
 | tag     | kind      | body                    |
 |---------+-----------+-------------------------|
