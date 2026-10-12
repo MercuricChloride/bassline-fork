@@ -1,0 +1,205 @@
+#+title: Doing Marked Values
+
+* Overview
+
+A marked value is something to do. This document describes how a
+program here does one: what a call is, what is done before it, how
+what does it is found, and what doing it answers. It is the convention
+every evaluator in =bl/lang= shares; an evaluator with other rules is a
+dialect, entered as described under Dialects.
+
+Nothing here is the meaning of any head. Doing a value is a local act,
+and the same value may be done differently elsewhere.
+
+* What a value answers
+
+Doing a value answers a stream: zero or more values, pulled one at a
+time. Doing is a search like any other, asked a value, and composes
+with other searches as they compose with each other.
+
+- An unmarked value answers itself, whole. Nothing inside it is done,
+  so an unmarked frame holds the marked values in it as said.
+- A marked value answers what the doers within reach find it entails.
+
+Answering nothing means nothing here entails it. It is the answer for
+a call no doer can do, and it is never an error; a guard nothing here
+can do never succeeds. A reading that cannot hold a value refuses it.
+A refusal is raised where nothing else answers, and heard by the cx
+where something does.
+
+* Calls
+
+A call is a marked record, =!(HEAD ARG …)=. The record delimits it, so
+a program with no vocabulary finds every call in a value and every
+argument of each.
+
+The direct marked arguments of a call are done before it, whatever its
+head. Everything else is handed over as said. So the value alone tells
+what runs before any call, knowing nothing of the heads it names.
+
+Arguments are done left to right. A later argument is done once for
+each combination of answers of those before it, and not at all when
+they have none. The call is made once for each combination, the
+combinations taken in turns, so an argument with endless answers holds
+up none of the others.
+
+| written                                | answers                           |
+|----------------------------------------+-----------------------------------|
+| =!(add !(mul 2 3) 4)=                  | =10=                              |
+| =!(add !(in [1 2 3]) 10)=              | =11=, =12=, =13=                  |
+| =!(then !(lt 1 3) !(put log small))=   | =taken=, put once                 |
+| =!(then !(lt 5 3) !(put log small))=   | nothing, nothing put              |
+| =![[!(put log a)] !(put log b)]=       | =[[!(put log a)] taken]=, put once |
+
+A guard is an earlier argument. A function of values whose arguments
+have several answers has several answers itself.
+
+A marked head is done first, and its answer heads the call, so a
+function held in a variable is called as =!(f! 3)=. An unmarked head is
+only what doers are found by: a symbol, or, for a head that is itself
+a record such as a function, that record's own head.
+
+* Blocks
+
+A block is an unmarked list of forms. It is how code is handed to a
+call without being done first. A doer that must see whether something
+answers, take every answer, or choose when something runs takes a
+block, and does it when and where it chooses:
+
+#+begin_src
+!(if [!(lt x! 3)] [small] [big])
+!(else [!(ask (owner task))] [nobody])
+!(all [!(in xs!)])
+#+end_src
+
+A doer that needs values takes direct arguments. These are the only
+two kinds of parameter.
+
+A block's forms are done as a call's arguments are: each once for
+every answer of the one before, and not at all when it has none. The
+block answers what its last form answers, so a test block is a
+conjunction: =!(if [!(gt x! 0) !(lt x! 10)] [inside] [outside])=.
+
+* Doers
+
+A doer does some marked values. Doers are found by asking the searches
+in reach what may do a value. Keeping doers by a key the value carries
+is the plain way:
+
+| value             | key                                  |
+|-------------------+--------------------------------------|
+| a call            | its head, as under Calls             |
+| a marked set      | each of its =!(kind K)= orders       |
+| a marked symbol   | itself, once no variable binds it    |
+| any other         | =(frame KIND)=                       |
+
+A cx is where a value is done. It holds variables and doers, inside
+the cx around it. Doers are found nearest first. The first that fits
+the call, with its arguments done, and answers gives every answer it
+has. One that has nothing passes the call on, and so does one that
+refuses. If none answers and one refused, the refusal stands. A nearer
+doer stands in for those further out, so a cx can replace what it
+holds inside: a rule written here overrides one around it, and an
+override never answers alongside what it overrides.
+
+A refusal is about one call. Where a call is made once for each
+combination of answers, a combination that refuses has nothing, and
+the cx hears the refusal; the other combinations still answer:
+=!(all [!(div 12 !(in [1 0 2]))])= answers =[12 6]=. A refusal is
+raised only where no combination answers at all.
+
+Every answer of every doer that fits is a different question, asked
+by =!(readings [CALL])=. An act has no other readings: once a doer
+acts, no doer further out is asked. The readings of an unmarked value
+are the value.
+
+A doer that acts, rather than finds, says so as it acts and answers
+that it did: a send taking a value answers =taken=, which is local
+acceptance, never news of what happened elsewhere. An act happens
+when the answer it belongs to is pulled, and not before. From the
+moment a doer acts the call is its own. Nothing it answers or refuses after is
+passed on, so no second doer does the act again.
+
+* Binding
+
+A doer is given the call with its arguments done, and reads it as it
+likes. A native reads a call by a struct whose head is the call's: its
+fields are the parameters, read by position or by name as the struct's
+=rep= says, with optional and exact as the struct says. By name, a
+call is =!(HEAD !{NAME: ARG …})=: the dict is marked so that what is
+in it is worked out, and an unmarked one is handed over as said. A call the
+struct can't read is passed on to the next doer. =!(describe HEAD)=
+answers the description of each doer in reach for a head.
+
+A rule is =(rule (shape EXAMPLE {HOLE …}) BODY)=. A call fitting the
+example is done by the body, its holes bound. A shape can fit one call
+several ways, and each way is an answer. Each rule is a doer of its
+own, and the rules for a head are tried in the order given, as doers
+are: the first that answers gives its answers.
+
+#+begin_src
+(rule (shape !(fib 0) {}) [0])
+(rule (shape !(fib 1) {}) [1])
+(rule (shape !(fib n) {n}) [!(add !(fib !(sub n! 1)) !(fib !(sub n! 2)))])
+#+end_src
+
+* Variables and functions
+
+A variable is bound by a function's parameters or a =let=. =x!=
+answers the nearest binding of =x=. A =let='s bindings are a direct
+argument like any other: =!(let !{x: !(add 1 2)} BODY)= binds =x= to
+=3=, and an unmarked dict binds its values as said.
+
+=!(fn [PARAM …] BODY)= answers a function, =(fn [PARAM …] BODY
+CAPTURED)=, carrying the variables its body mentions. A function is a
+value: it can be stored, signed, and sent, and applied wherever it
+arrives. Its body sees its parameters and what it captured, nothing
+further out. The doers it calls are never captured; they are found
+where it is applied.
+
+* Other marked values
+
+Any other marked value is done by the doers found for it. In the base
+vocabulary a marked list, dict, or set without kinds is made with its
+direct marked parts done: =![1 !(add 1 2)]= answers =[1 3]=. A marked
+record is a call, so a record is made by =!(record HEAD ARG …)=.
+
+A marked set with =!(kind K)= orders is an object, brought about by
+the doers found for its kinds: a description with any number of
+answers to each question, in no order, that a doer reads as much of as
+it knows. A find is such an object, so doing one answers what it
+finds, and as an argument its answers cross with the others' like any
+argument's:
+
+#+begin_src
+!(add !{!(kind search-space) !(kind find) (of SPACE) (hole p) (hole a)
+        (where (p (age a))) (gives a)} 1)
+#+end_src
+
+* Dialects
+
+An interpreter with rules of its own is a doer that owns an unmarked
+frame: =!(rpn [2 3 add 4 mul])=. Nothing outside does anything in the
+frame.
+Inside it, a marked value is where the dialect hands back to the cx
+doing it, and each answer it gets back continues the dialect's own
+work, so a dialect has several answers wherever what it hands back
+does. A dialect reaches any doer in reach by making a call, as a value,
+and doing it.
+
+* Open
+
+- A reading that keeps what nothing here can do, to be done later or
+  elsewhere: =!(log !(add 1 2) [!(put log hi)] !(sensor x!))= kept as
+  =!(log 3 [!(put log hi)] !(sensor x!))=. A kept call is marked, so
+  in what such a reading answers it has to be told apart from marked
+  data.
+- A reading in which every step of doing is a value, so that doing can
+  stop anywhere and continue elsewhere.
+- Wrapping a doer: doing something before, after or around the doers
+  further out.
+- Shapes with holes on both sides.
+- How doers combine as a choice a cx is made with: the first that
+  answers is one way, beside taking turns and one after another, so an
+  override would be declared rather than read from a nearer doer
+  answering.

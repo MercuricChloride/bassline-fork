@@ -1,0 +1,24 @@
+; Groceries, as values: what to show, worked out from what has been
+; said, and actions that say more.
+;
+; Nothing holds "the list". A space has heard (want [ITEM AT]) and
+; (got [ITEM AT]), AT the occasion it was wanted, so a got answers the
+; want it names and wanting the same thing again is another want; the
+; view is asked again from what the space has heard after every action.
+; A widget is a record the renderer reads: (text T), (button LABEL ACTION),
+; (input LABEL ACTION), (row W ...), (column W ...), a list among them
+; standing for its members. An action is a function, a value like any
+; other, done with what the event gives it.
+[
+  (rule (shape !(to-buy) {})
+    [!(lacks !(all [!(ask got)]) !(ask want))])
+
+  (rule (shape !(item-row it) {it})
+    [!(row !(text !(get it! 0)) !(button "got it" !(fn [] [!(put got it!)])))])
+
+  (rule (shape !(groceries) {})
+    [!(column
+        !(text "Groceries")
+        !(all [!(item-row !(to-buy))])
+        !(input "add" !(fn [typed at] [!(put want ![typed! at!])])))])
+]
