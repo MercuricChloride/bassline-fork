@@ -182,8 +182,11 @@ func `[]=`*(a: var Value, i: BNum, val: Value) =
   a[i.toInt] = val
 
 func add*(a: var Value, el: sink Value) =
-  a.expectKind({bList, bRec})
-  a.items.add el
+  a.expectKind({bList, bRec, bSet})
+  if a.isKind({bList, bRec}):
+    a.items.add el
+  else:
+    a.els.incl el
 
 func pop*(a: var Value): Value =
   a.expectKind({bList, bRec})

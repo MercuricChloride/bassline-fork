@@ -27,7 +27,6 @@
 ## file. `memo` keeps a search's answers in a bvar and answers from them
 ## first.
 
-import std/options
 import std/sets except initSet
 import ../core
 import ./[search, send]
