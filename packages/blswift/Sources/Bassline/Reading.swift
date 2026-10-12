@@ -29,12 +29,7 @@ extension Value {
     /// Reads exactly one value from `text`, nested no deeper than `limits.maxDepth`.
     public init(reading text: String, limits: Limits = .default) throws(ReadError) {
         var reader = TextReader(text, maxDepth: limits.maxDepth)
-        let values = try reader.document()
-        guard values.count == 1 else {
-            throw reader.refusal("expected exactly one value, found \(values.count)",
-                                 at: reader.valueStarts.dropFirst().first ?? 0)
-        }
-        self = values[0]
+        self = try reader.one()
     }
 
     /// Reads every value in `text`, in order. Empty text is an empty document.
@@ -83,8 +78,6 @@ struct TextReader {
     private var position = 0
     /// Frames open at once, so deep text can't exhaust the call stack.
     let maxDepth: Int
-    /// Where each top-level value began.
-    private(set) var valueStarts: [Int] = []
 
     init(_ text: String, maxDepth: Int) {
         bytes = Array(text.utf8)
@@ -98,9 +91,20 @@ struct TextReader {
         while true {
             skipWhitespace()
             if atEnd { return values }
-            valueStarts.append(position)
             values.append(try value(depth: 0))
         }
+    }
+
+    /// The text is all there is, so it is incomplete only while the first value
+    /// is unfinished. Anything after it but whitespace and comments means the
+    /// text can never be one value, and it is refused unread.
+    mutating func one() throws(ReadError) -> Value {
+        skipWhitespace()
+        guard !atEnd else { throw refusal("no value") }
+        let first = try value(depth: 0)
+        skipWhitespace()
+        guard atEnd else { throw refusal("expected exactly one value; a second begins here") }
+        return first
     }
 
     // MARK: Values
@@ -355,7 +359,7 @@ struct TextReader {
         }
     }
 
-    func refusal(_ message: String, at offset: Int? = nil) -> ReadError {
+    private func refusal(_ message: String, at offset: Int? = nil) -> ReadError {
         error(message, at: offset ?? position, incomplete: false)
     }
 

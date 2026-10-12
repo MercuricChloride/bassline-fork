@@ -6,7 +6,7 @@ import Testing
 struct CorpusFileTests {
     @Test func binaryHoldsEveryRecord() throws {
         let records = try Corpus.records()
-        #expect(records.count == 143)
+        #expect(records.count == 150)
         #expect(records.allSatisfy { $0.kind == .record })
     }
 

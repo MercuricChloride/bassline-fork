@@ -4,7 +4,7 @@ import Testing
 
 /// The shared corpus in `bassline/corpus`, which every implementation tests against.
 ///
-/// The same 143 records exist three ways: `corpus.blb` (binary, read with our
+/// The same 145 records exist three ways: `corpus.blb` (binary, read with our
 /// decoder), `corpus.bl` (text, read with our reader) and `corpus.json` (read
 /// with Foundation, built by hand). The three are checked against each other,
 /// and the cases themselves come from the binary copy.

@@ -1,8 +1,8 @@
 # blswift
 
-A small Swift implementation of the [bassline data model](../../data-model.org): an in-memory `Value`, the canonical binary encoding (encoder plus streaming decoder), the textual syntax (reader and printer), shapes for matching and building values, a protocol for bridging your own Swift types, and an `AsyncSequence` adapter for byte streams.
+A small Swift implementation of the [bassline data model](../../data-model.org): an in-memory `Value`, the canonical binary encoding (encoder plus streaming decoder), the textual syntax (reader and printer), shapes for matching and building values, searches and oracles for asking about things, a protocol for bridging your own Swift types, and an `AsyncSequence` adapter for byte streams.
 
-It passes every case in the shared corpus (`../../corpus`): all 143, with the exact reason for each rejected input.
+It passes every case in the shared corpus (`../../corpus`): all 145, with the exact reason for each rejected input.
 
 ```swift
 import Bassline
@@ -246,6 +246,35 @@ Matching rules:
 - Dict keys and set members are looked up literally, and nothing inside them binds. Reaching one that is itself a hole throws (`hole-in-key`, `hole-in-member`), since those are found by equality rather than position.
 - `inject` throws `unbound-hole` unless every hole has a binding; bindings for other names are ignored. It fills every position, dict keys and set members included.
 
+### Searches and streams
+
+After blnim's `queries/stream.nim`. A search is what you ask, and a stream is what it answers. A search is anything that can be asked about something: a type conforming to `Search<Query, Answer>`, whose `ask(_:)` starts a stream (`Answers<Answer>`), or a closure wrapped in `AnySearch`. The stream gives one answer per pull and `nil` once it's complete. Answers are whatever the search makes of the query, from what it knows locally, and can be searches themselves.
+
+```swift
+let known = Facts()                                  // anything holding what's been learned
+let people = AnySearch { (shape: Shape) -> Answers<Value.Dict> in
+    var index = 0
+    return Answers {                                 // asked: nothing has been read yet
+        while index < known.values.count {
+            defer { index += 1 }
+            if let bindings = try? shape.extract(from: known.values[index]) { return bindings }
+        }
+        return nil                                   // complete
+    }
+}
+
+let names = people(personShape).map { $0[.symbol("name")] }   // or people.ask(personShape)
+names.next()                                         // one answer, pulled now
+names.take(10)                                       // up to ten more, pulling no further
+for name in names { … }                              // the rest
+```
+
+- **Pulling is the whole protocol.** The streams made here do nothing ahead of a pull. A consumer that has seen enough stops pulling; there is no close or cancel.
+- **Every pull is late bound.** It sees the search as it is when pulled, so what's learned after asking can still show up.
+- **Combinators:** `Answers.empty`, `Answers.just(_:)`, `map`, `filter`, `take`, `|>` (filters with a closure answering `Bool`, maps with any other), `alt` (fair turns, so an endless stream can't starve the others) and `cat` (one stream after another). `alt` and `cat` never pull a complete stream again. There's no `flatMap`: answers from several searches compose with `alt` or `cat`, and a search built from them can wrap the composition for reuse.
+- **Function combinators** for consumers: `compose`, `fold` (a running reduction), `scan`, `latch`, `split`, `count`.
+- **Streams are single-pass and not `Sendable`.** Copies share one position, and a stream belongs to whoever asked.
+
 ## Design notes
 
 These are the decisions that aren't obvious from the API, and why they went the way they did.
@@ -343,16 +372,25 @@ With the `.v26` floor, the decoder checks UTF-8 with `UTF8Span(validating:)`, wh
 
 ### Shapes, compared with blnim
 
-The semantics are `rewrite.nim`'s, with two fixes:
+`fillings(of:)` answers what blnim's `queries/rewrite.nim` `fillings` answers: every binding, one per pull, a hole in a dict key or set member tried against each actual key or member, a hole bound two ways no filling, and a value needing at least the example's members. The differences:
 
-- **A value shorter than the example doesn't match.** `rewrite.nim` compares list members pairwise up to the shorter length, so a value missing trailing members still passes; here the value needs at least the example's members, while extras are still ignored.
-- **Nothing inside a dict key or set member binds.** `rewrite.nim` binds each found key against itself (`ensureBind(k, k)`), so a hole nested in a key, like `x` in `{(k x): 1}`, got bound to itself.
+- **How the work is done.** blnim takes a frame's parts in the order the bindings make cheapest (what they already decide first) and finds a set member's candidates by bisecting on its known leading members; here parts are taken in canonical order and members are scanned. The fillings are the same.
+- **What it offers around them.** blnim's `fillings` can start from bindings already had, and `search(shape)` makes a shape a `Search`; here `fillings(in:)` walks many values. `extract`, the one-binding reading that throws on a hole in a key or member or a hole bound two ways, and `matches` / `~=` have no blnim counterpart, where a first filling is `shape.search ? value`.
 
-Its `Match` object and helpers (`maybeInject`, the `@` / `//` operators) aren't ported; `extract`, `inject` and `matches` cover them. blnim's earlier design, in the commented-out `tops.nim` tests, made every marked atom a hole instead of listing holes; that would make a literal `go!` impossible to match, and marked values are exactly what interpreters want to accept.
+Holes are listed rather than every marked atom being one, so a literal `go!` can still be matched; marked values are exactly what interpreters want to accept.
+
+### Searches, compared with blnim
+
+The semantics are `stream.nim`'s, with these differences:
+
+- **Names.** blnim's `Oracle` is `Search` here, the model's name for what you ask, and its `Stream` is `Answers`: Foundation already has a `Stream`, which wins over this one in type position wherever Foundation is imported, and SwiftData has a `Query`.
+- **`Search` is a protocol,** not a function type, so any object can be a search; `AnySearch` makes one from a closure, and `search(query)` calls `ask`.
+- **`alt` drops a stream once it's complete** rather than pulling it again every round. For a stream that stays complete, the order is the same.
+- **Not ported:** `nums`, `sum`, `minimum`, `maximum` and `average`, which the standard library covers (`stride`, `reduce`, `max`), and the `&` operator for `compose`, since overloading `&` for closures would slow type-checking of every `&` in client code. `initStream` is `Answers(_:)` from any `Sequence`, `items` is `Sequence` conformance, and `toSeq` is `Array(stream)`.
 
 ### Text reader
 
-- **`Value(reading:)` requires exactly one value.** It reads the whole document first and then insists on exactly one value, like the one-shot binary decode. So `go !` is _incomplete_ (the trailing `!` is waiting for a frame) while `1 2` is _refused_. `""` is refused as "not one value"; `readDocument("")` returns `[]`. Both take `limits:`, and refuse text nested past `maxDepth`.
+- **`Value(reading:)` requires exactly one value.** The text is all there is, like the one-shot binary decode. It is _incomplete_ only while the first value is unfinished (`[1 2`). Once that value is complete, anything after it but whitespace and comments is _refused_ without being read, since the text can never be one value: `1 2`, `1 [` and `go !` are all refused. `""` is refused as "no value"; `readDocument("")` returns `[]`. Both take `limits:`, and refuse text nested past `maxDepth`.
 - **It's a labelled initializer, not `LosslessStringConvertible`.** That protocol's `init?(_: String)` would take over `Value("hello")` from the bridging initializer and read `hello` as a symbol instead of text.
 - **String literals are text.** Swift has one kind of quoted literal and bassline has two, so use `Symbol` (`ExpressibleByStringLiteral`) wherever a name is meant. Record heads take a `Symbol`, which is why `.record("point", 1, 2)` reads naturally.
 
@@ -371,7 +409,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 
 What's covered:
 
-- **The corpus, three ways.** `corpus.blb` (read by our decoder), `corpus.bl` (read by our text reader) and `corpus.json` (built by hand with Foundation) must produce the same 143 records. Dict and set members from the JSON are inserted shuffled, so the collections have to sort them themselves.
+- **The corpus, three ways.** `corpus.blb` (read by our decoder), `corpus.bl` (read by our text reader) and `corpus.json` (built by hand with Foundation) must produce the same 145 records. Dict and set members from the JSON are inserted shuffled, so the collections have to sort them themselves.
 - **Re-encoding.** Encoding the records again must reproduce `corpus.blb` byte for byte.
 - **Binary cases.**
   - `ce` cases are checked whole and one byte at a time. Nothing may land before the last byte.
@@ -386,9 +424,10 @@ What's covered:
   - under random limits, the encoder refuses exactly the values the decoder refuses, with the same reason.
 - **The B-tree.** A randomized comparison against a sorted-array model at node sizes 3, 4, 5, 8 and 64, which forces splits, rotations and merges. A checker verifies every invariant: key order and bounds, node fill, uniform leaf depth and subtree counts. Packed builds are checked at every size from 0 to 400. Other tests check that copies share every node off the edited path, that an iterator keeps seeing the tree as it was, and that in-place edits keep value semantics.
 - **Shapes.** Unit cases for each matching rule and error, and laws on generated values: punch holes (each with the mark of what it replaced) into a random value, then extracting from the original must give back what was punched out, injecting it must rebuild the original, extras added throughout must not change the bindings, injecting without one of the bindings must throw, and the shape must survive being written as text and read back.
+- **Searches and streams.** Laziness (sources count their pulls), late binding, single pass, `filter` pulling past rejections, `take` pulling no more than it needs, fair turns in `alt` beside an endless stream, complete streams never pulled again, and searches over a set of facts that learns more after being asked.
 - **Edge cases.** NFC vs NFD, integer boundaries and big literals, length-tier edges (6/7/254/255), depth and size limits, a failed decoder staying failed, offsets across compaction, the async adapter, printer spellings, error line and column, and an exit test for the duplicate-literal trap.
 
-The tests were checked for teeth by deliberately breaking the code. Renaming a reject reason fails the `reject` tests. Flipping the "shorter frame sorts after" rule trips the decoder's ordering assertion. Moving the B-tree's split point, or dropping a count update in a rotation, fails the tree tests. Letting a repeated hole bind a second value, or letting a value shorter than the example match, fails the shape tests.
+The tests were checked for teeth by deliberately breaking the code. Renaming a reject reason fails the `reject` tests. Flipping the "shorter frame sorts after" rule trips the decoder's ordering assertion. Moving the B-tree's split point, or dropping a count update in a rotation, fails the tree tests. Letting a repeated hole bind a second value, or letting a value shorter than the example match, fails the shape tests. Letting `filter` end the stream at the first rejection fails three stream tests.
 
 ## Limitations and future work
 
