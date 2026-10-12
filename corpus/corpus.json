@@ -2775,6 +2775,71 @@
       },
       {
         "kind": "text",
+        "value": "{:'}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "!{:\"}"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{: [1"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{a: 1 b \""
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
+        "value": "{a: 1 b [1"
+      }
+    ]
+  },
+  {
+    "kind": "record",
+    "value": [
+      {
+        "kind": "symbol",
+        "value": "refuses"
+      },
+      {
+        "kind": "text",
         "value": "{1 1}"
       }
     ]

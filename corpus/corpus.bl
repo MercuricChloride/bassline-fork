@@ -181,6 +181,11 @@
 (refuses "{a: 1 b}")  ; member without a value
 (refuses "{: a}")  ; colon first
 (refuses "{a:}")  ; key without a value
+(refuses "{:'}")  ; a value can't follow '{:', so this is refused, not waiting on a quote
+(refuses "!{:\"}")  ; the same, marked, before a text that never ends
+(refuses "{: [1")  ; the same before a frame that never closes
+(refuses "{a: 1 b \"")  ; a dict wants ':' after its key, not a text that never ends
+(refuses "{a: 1 b [1")  ; the same before a frame that never closes
 (refuses "{1 1}")  ; duplicate member
 (refuses "{a: 1 a: 2}")  ; duplicate key
 (refuses "()")  ; record with no head
