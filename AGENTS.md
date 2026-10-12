@@ -1,1 +1,610 @@
-CLAUDE.md
+# Bassline
+
+A system for partial information programming. Programs work from
+whatever they have: they build local understanding by asking what
+values entail, act on it, and continue. Nothing outside a local
+perspective is assumed, and there is no fact of the matter about what a
+value means.
+
+CLAUDE.md is a symlink to this file. On layout and builds, the code wins
+when this file disagrees; fix this file. On the model, the code lags:
+stale code is being removed as the model settles, and
+`.claude/skills/bassline` describes the model as it stands.
+
+## Read this first
+
+- [data-model.org](data-model.org) defines values, the canonical
+  encoding (CE), and the textual syntax. Read it before touching
+  anything under `core`.
+- [.claude/skills/bassline/SKILL.md](.claude/skills/bassline/SKILL.md)
+  is the programming model: searches and streams, sends, the edge, and
+  the instincts that leak other systems in. Read it before designing
+  anything. The `bassline-zoo` skill covers other languages and format
+  doors; the `bassline-reviewer` agent reviews changes for leaks.
+
+## The model in one paragraph
+
+A value is an atom (nil, integer, text, symbol, bytes) or a frame
+(list, record, dict, set). Any value may carry a mark, a single header
+bit that says "this is something to do" rather than "something".
+Identity is the canonical encoding: two values are equal iff their CE
+bytes are equal, and dict keys and set members are ordered by their CE
+bytes. The grammar is closed and requires no shared vocabulary.
+Everything with meaning, from dates to protocols, is a dialect: an
+arrangement of values that some programs recognise.
+
+Programs find out what values entail by search. A search is what you
+ask; it hands back a stream that you pull, one answer at a time.
+Answers only accumulate, and none is final. What a value means can
+differ each time you ask: treat local knowledge as a conversation, not a
+variable, and never as one lookup table that everything is looked up
+in. Sending is local and one way: a send takes a value and may answer whether it was understood.
+There are no messages and no reply paths. Everything is local; there is
+no whole system and no server, only local things that know how to talk
+to others.
+
+## Layout
+
+The implementation is `packages/blnim` (Nim 2.2, ORC). The JavaScript
+packages implement the same data model and are kept in byte agreement.
+
+`packages/blnim/src/bl/core`
+
+- `codec/shared.nim` walks CE bytes as nil, atom, open, close events.
+  Starvation raises, so a decoder can resume when more bytes arrive.
+  `refuseWith Err` gives a module a `refuse`/`guard` pair that raises
+  `Err`, bound where they are written so a generic refuses with its own
+  module's error. Every refusal is a `BasslineError` (itself a
+  `ValueError`): `CodecError`, `ReadError`, `MoldError`, `JsonRefusal`,
+  and the plain `BasslineError` the other modules raise. `MaxDepth`
+  caps frame nesting; `MaxValueBytes` (both
+  `{.intdefine.}`) is the default cap on bytes buffered toward one
+  value, overridable per decoder via `newDecoder(maxValueBytes = …)`.
+- `codec/decode.nim` builds `ValueView` trees that borrow the buffer.
+  Validation is deferred and memoized per node. `compact` drops
+  already-decoded bytes so a long run of input stays bounded.
+- `codec/encode.nim` is the writer.
+- `builders.nim` is `Value`, the in-memory reading: an object variant
+  with `cmp` in CE order. A number is a `Num`: an int64 when the
+  spelling fits, otherwise the spelling itself, so every integer is
+  held and `toInt` is the reading that refuses. `ce(v)` is a value's
+  CE bytes.
+- `btree.nim` backs dicts and sets so canonical order holds by
+  construction. `itemsFrom`/`pairsFrom` take a bound as a key or as a
+  monotone predicate (a bound that needn't be a member, such as "every
+  record headed by q"), and bisect to it.
+- `reader.nim` reads and pretty-prints the textual syntax. `Reader`
+  (`add`, `items`, `finish`) reads text in pieces and yields each value
+  once nothing still to come can change it.
+- `buffer.nim` is the growable byte `Buffer` the codec shares.
+
+`packages/blnim/src/bl/store`
+
+- `store.nim` is an append-only, copy-on-write B+tree holding a
+  monotone set of CE byte strings. Key-only: an element's bytes are its
+  key, its value, and its identity. The store never interprets
+  elements. Because CE spells the record head first, a prefix scan is a
+  query for every value under a head.
+- `backends/` is the page arena interface with an mmap instance and an
+  in-memory instance that produce byte-identical pages.
+- `values.nim` is the value face over the store (`incl`, `contains`,
+  `under`, `low`, `high`), aggregated by `bl/store.nim`. `under` scans
+  by `frameKey`, the byte prefix that selects exactly the values a
+  value `prefixes`.
+
+`packages/blnim/src/bl/mold` (`bl/mold.nim` aggregates)
+
+- `parseMold.nim` reads a description into a tree, the same at compile
+  time and at runtime: `(struct NAME PRAGMAS? (FIELD PRAGMAS? TYPE) …)`,
+  or a set of structs declared together. PRAGMAS is a set of flags and
+  `(KEY VALUE …)` records: a struct takes `exact`, `(rep dict|record)`
+  and `(nim NAME)`; a field `optional` and `(nim NAME)`; `bytes` takes
+  `(len N)` and `symbol` `(one-of S …)`. A TYPE is a kind (marked by
+  `!`), `value`, `any`, a struct by name, `(list|set|record T)`,
+  `(dict K V)`, or the shorthand `[T]`, `{T}`, `{K: V}`. Nim names come
+  from bassline names (`new-chunks` is `newChunks`) unless `(nim …)`.
+  Each struct carries its `Shape`; a `Context` holds the structs by name.
+- `moldMacro.nim`: `moldable TEXT` (a literal, a const or a
+  `staticRead`) generates, for each struct, a public `Moldable` ref
+  type and all of its reading and writing: `moldFields`/`loadFields` by
+  name, `moldDict`/`loadDict` as `(NAME {FIELD: VALUE …})`,
+  `moldRec`/`loadRec` as `(NAME VALUE …)` in field order (nil where an
+  optional field has nothing), and `mold`/`load` in the form `rep`
+  names; and `shape`, the struct's head, mark, form, field names and
+  description. The description's mark is the value's. Reads leave
+  undescribed fields behind unless `exact`. Probes (`T.probe(v)`,
+  `probeDict`, `probeRec`, `probeFields`, and `T.fits(v)` for a yes or
+  no) check what the load would, refusing with the same words, and
+  build nothing. Two hooks are written by
+  hand, often on a subclass holding host-only state: `beforeMold` runs
+  before every write, `afterLoad` once, when a value is first read into
+  a new object (`T.load` and the like, conversion, Poly), and may
+  refuse; a probe builds no object, so what a hook refuses only a load
+  hears.
+- `mold.nim`: the `Moldable` base, `Shape` (whose `fieldsOf` and
+  `valueOf` read and write either form by name), the generic loaders by
+  type (`T.load`, `T.loadFields`), `convert` (by name, CLOS-style), and
+  base versions of every form, working from `shape`, for a Moldable
+  written by hand.
+- `poly.nim`: `Poly`, fields by name read through whichever Moldable
+  face is asked for; the live face's fields are written back wholly, so
+  a field it leaves out is left out.
+
+`packages/blnim/examples/archive.nim` is `blarc`, a content-addressed
+directory archiver whose values are all described in `archive.bl`.
+
+`packages/blnim/src/bl/queries` (`bl/queries.nim` aggregates
+`queries.nim`, `bvar.nim`, `rewrite.nim` and `find.nim`, and through
+them `stream`, `search` and `send`)
+
+- `rewrite.nim` (exports `queries`, `stream`): shapes, an example value with an
+  explicit set of holes, `(shape EXAMPLE {HOLE …} WILD)`. Filling one is
+  a little unification search: `fillings(shape, v, given)` answers every
+  binding of the holes under which v fits the example and that is
+  compatible with the bindings `given`, one per pull, nothing worked out
+  ahead. A hole in a dict key or set member is tried against each actual
+  key or member, and a hole met again fits only what it is bound to.
+  `search(shape)` (in `search.nim`) is the same as a `Search`; `inject`
+  fills the holes bound and leaves the rest. Each part of the example is
+  a search from bindings to their extensions, and a frame's are composed
+  one after another: first what the bindings already decide, then what
+  has one place to fit, then the part narrowest by its known leading
+  members, each list or record member looked for only in its `ledBy`
+  run. `fitting(shape, forms)` lets a dialect built on shapes read some
+  marked parts its own way.
+- `find.nim` (exports `rewrite`): the query language. A find is one more
+  kind of search space, `!{!(kind search-space) !(kind find) (of
+  SUBJECT) … (hole H) … (asked H) … (where CLAUSE) … (gives W) …}`:
+  each clause a shape's example fitted against a subject's records,
+  the bindings fed from clause to clause (those that only check first,
+  then those whose question is settled, which bisect, then scans), each
+  binding answered once as each gives with its holes filled. Clauses may
+  hold the forms `!(within P)`, `!(any P …)`, `!(all P …)`,
+  `!(as H P)` (binding H whatever its mark) and `!(quote V)`; `!(kind distinct)`, `!(kind count)` (running counts)
+  and `!(kind why)` add to it. A subject is a held space, a composite,
+  another find, an object (its own records), or names of one; a ranked
+  record (Q R A) fits a clause (Q A). `Find.fromValue` reads one, `find`
+  writes one, and `rows` (here over `Subject`s, in `search.nim` over a
+  find value with `resolve`) answers `Row`s with which part answered
+  each clause, and with which record. `search.nim` reads a find back like any space
+  (`findSearch`, `fromValue`), its `(asked H)` holes bound to what it is
+  asked, so finds compose with spaces through cat, alt, feed and merge.
+- `stream.nim`: the stream (`Stream[A] = () -> Option[A]`), `empty`
+  (allocates nothing), `just`, `lazy`, `next` (the next pull, an
+  `Option`), `k` (the constant proc), the combinators (`map`, `filter`,
+  `filterMap`, `tap`, `flatMap`/`catFrom`, `alt`, `altFrom` over a
+  stream of streams, `cat`, `merge` by an order, `first`, `take`, and
+  the sugar `|`, `&`), `exists` and `every`, and the `it` forms
+  (`maps`, `filters`, `filterMaps`, `flatMaps`, `taps`) for the
+  combinators whose result type comes from the lambda. It exports
+  `std/sugar`, so `x => body` lambdas, `(A) -> B` proc types and
+  `collect` are had everywhere streams are; a stream becomes a seq
+  with `toSeq`. A generic alias of a proc type (`Pred[A]`) stops `=>`
+  inferring its parameter, so signatures spell `(A) -> bool` out, and
+  a lambda in a generic proc types its parameter.
+- `search.nim` (exports `stream`): `Search[Q, A]`, a ref object that
+  closes over whatever it answers from (`newSearch`, `ask`, `s[q]` for
+  every answer as a stream, `s ? q` for the first, and `id`, from an id
+  proc or a value, so naming a search doesn't write it down).
+  Its `fanout` is `many` (set semantics) or `one` (dict semantics: at
+  most one answer a query); a dict space reads as `one`, and `memo`
+  keeps a dict for `one`, a set for `many`.
+- `queries.nim`: streams over values to compose from, and what objects
+  answer. A frame's `parts`, a depth-first `walk` through everything
+  inside a value, a set's `members`, a dict's `entries`, a set's members
+  `between` bounds (`ledBy`: its lists or records that begin with given
+  members; `headed`: its records under a head), found by bisecting, each pull resuming past the last value given; `unique`.
+  Predicates are plain functions taking the value first (`isKind`,
+  `hasWidth`, `isObject`, `always`; `prefixes`, whether one
+  value is what the other's CE yields when stopped early; `similar`, a
+  match by kind and mark all the way down, a frame in the exemplar
+  maybe shorter), used through `x => …` lambdas or the `it` forms;
+  `sameFamily` is whether two values share kind and mark, `map` makes a
+  frame over part by part, and
+  `toAnswer` reads a record as an `Answer`. An object
+  is a marked set of records shaped as answers: unmarked `(Q A)` is
+  answered, marked `!(Q A)` an order, such as its kinds `!(kind K)` or a
+  send's `!(to ID)`; `answers`, `orders`, `kinds`, `targets` are streams
+  over its run for a head, and `answer` takes the first. A thing's names
+  are its answers to `identity` (`identities`, `knownAs`,
+  `sharesIdentity`, `alsoKnownAs`, `identity`, `identityOf`,
+  `randomId`); `describe` writes an object; the shared kinds and
+  questions live here.
+- `send.nim`: `Send[Q, A]`, an object like `Search`: a send proc
+  (`send(q, a)`, runtime things as readily as values, answering whether
+  it was taken) and an optional denotation; a send has no name of its
+  own, it is told apart by what it sends to. Written down a send
+  is opaque, `!{!(kind send) !(to ID) …}` (`sendTo`): only that it is a send
+  and what it sends to, by identity. `tee` tells several, and writes
+  down as the union of their targets. Reading a send back is a search
+  from identities to sends: what an identity reaches depends on where
+  it is read.
+- `bvar.nim` (exports `search`, `send`): `BVar[Q, A]`, a program-level
+  place: a `Send` and a `Search` over it, written down when its halves
+  can be as `!{!(kind bvar) (identity ID) (send …) (search …)}` (a missing half
+  not answered), to put things
+  (the write half, `send(q, a)`, runtime things as readily as values)
+  and search what has been put (the read half, a `Search`; `read(v)`
+  asks nil). Either half may be nil; `access` (`none`, `r`, `w`, `rw`)
+  is computed from which it has, and `readOnly`/`writeOnly` drop one.
+  `spaceVar` holds a search set in memory (a dict for `one`: the first
+  answer stands), empty or a copy of a denoted space (a dict only when
+  it holds one dict, otherwise every record it holds); its send is
+  `!{!(kind send) !(to ID)}`, and a bvar pairing a space with a send to it
+  reads back (`BVar.fromValue`) as a live space var. `persist` hands
+  the space, written down, to a keeper on every send it takes.
+  `memo(s, into)` answers from what the bvar kept, then what `s` finds
+  that's new, keeping it; `memo(s, id)` keeps it in memory. `v[q]` and
+  `v ? q` read like a search's. `union` makes many places one: sends
+  tell all, reads alternate (a primary resolver is a union of many).
+  Streams over a space hold a value, not a place in the set, so the
+  space may grow while they are open. A search
+  may be denotable: its space written down as an object,
+  `!{!(kind search-space) (identity ID) (holds {(Q A) …})}` (a dict in
+  `holds` for one answer a query, `!(kind ranked)` for `(Q R A)` records), and
+  `Search[Q, A].fromValue` interprets one back into a search
+  whose answers are rebuilt by A's reading (`skipRefused` passes over
+  refusals). `toValue` writes one down; `searchOver` searches a set or
+  dict held now (written down as a copy). Searches compose into searches (`cat`, a scope
+  then the scope around it; `alt`; `feed`; `merge` by rank; `more`, one
+  search asked again of its answers, nearest first, each once, with
+  `!(kind via)` answering `(via [Q … PREVIOUS] A)`), written
+  down as `!{!(kind search-space) !(kind cat) (identity ID) (parts [PART …])}` and so
+  on, a part carried whole or
+  named by ID (`byId`) and resolved, when asked, through a search of
+  known spaces (`fromValue(…, resolve = …)`). An ID may be an identity
+  of several names; a name resolves through each of them, and a name met
+  again on its own way round is passed over. Several `holds` or `parts`
+  answers are joined as the kind joins its parts, merged by rank when
+  ranked.
+
+`packages/blnim/src/bl/lang` (`bl/lang.nim` aggregates): doing marked
+values. [packages/blnim/lang.org](packages/blnim/lang.org) is the
+convention, ideas only.
+
+- `kernel.nim`: `Cx`, where a value is done (variables, doers, the cx
+  around it; `within`, sealed for a function's body), `Doer` (`fits`,
+  `answers`, `describe`), and `eval`, answering a stream. An unmarked
+  value answers itself, whole. A marked record is a call: a marked head
+  is done first, then its direct marked arguments, left to right, each
+  later one once for each answer before it (crossed fairly, `fair`);
+  everything else is handed over as said. The bound call goes to the
+  doers found by its key (`keys`: a head, `(kind K)` for an object, a
+  marked symbol after its variable, `(frame KIND)`), nearest first: the
+  first that fits and answers gives its answers, nothing or a refusal
+  passes it on, and nothing fitting is heard by `unheard`. A refusal is
+  one branch's (`refused` hears it when passed over); a doer that acts
+  says `acted` and owns the call. `run` does a block (an unmarked list)
+  as arguments are done; `readings` is every doer's answers; `search`
+  is doing as a `Search[Value, Value]`.
+- `native.nim`: a marked moldable struct is a native's signature; its
+  probe is `fits`, `T.load` binds, `method run(c: T, cx: Cx)` does it.
+  Trailing optional positions may be left out.
+- `base.nim`: `base()` holds a vocabulary (do, if, else, then, case,
+  quote, all, first, count, take, in, let, fn and applying a function
+  value, record, rules, arithmetic refusing past int64, lt/le/gt/ge/eq/ne
+  answering their first argument or nothing, compare, range, len, has,
+  lacks, get, fill, inject, describe, readings); `install(send)` gives
+  `!(put Q A)`, answering `taken`, and `install(search)` `!(ask Q)`.
+  A function is a value, `(fn PARAMS BODY CAPTURED)`; a rule is
+  `(rule (shape EXAMPLE {HOLE …}) BODY)`, one doer each.
+- `reps.nim`: `Reading[T]`, what a value reads as in the host, kept
+  against its frame body, kind and mark (an atom's CE).
+- `numeric.nim`: `cx.numeric`: dot, vsum, vadd, vsub, vmul, scale and
+  matmul over whole lists, members read once (`Ints`, `Rows`).
+
+`packages/blnim/examples/lang`: `groceries.bl` and `ui.nim` (an app as
+values over a space, drawn in a terminal; a nearer rule changes it while
+it runs), `numeric.nim` (where the time goes; build with -d:release),
+`rpn.nim` (a dialect as one doer).
+
+`packages/blnim/src/bl/lib`
+
+- `blmacro.nim`: the `bl` macro reads Nim surface syntax as a value
+  literal. Its doc comment is the reference.
+- `json.nim`: the kind-tagged JSON carrier (`toJson` / `fromJson`).
+- `bvarfile.nim`: `fileVar`, a space var kept in a file holding one
+  value, its space written down, rewritten (fresh file, then rename) on
+  every send it takes; opened again it holds what it held. `valueIn`
+  and `writeValue` are the plain file halves. `logVar` keeps a space
+  var as a log instead: each record it takes is appended (`appendValue`),
+  so the file is a bare concatenation of records, and opened again it
+  holds them all (`valuesIn`, which cuts a record torn by a crash).
+- `blah.nim`: random values for tests (`randValue`, `randPrefix`).
+- `server.nim`: the edge for TCP sockets (unix sockets were dropped
+  2026-10-02 as not worth the macOS trouble). A connection is a bare
+  concatenation of CE values. `newListener` hands every value that
+  arrives, or its raw CE for a relay, to a local send; an optional
+  observer hears open, close, truncated, malformed and failed, with
+  the address, and nothing about the connection reaches program logic.
+  `connect` dials, `pump` reads a dialed connection, `sender(conn)` is
+  the outward send. `newListener(port, offer)` instead offers each
+  connection to the program as the send that tells it, and the program
+  answers a `Line`: where what arrives goes, and, once nothing more
+  arrives, whether to keep telling it (until a tell is refused).
+- `jam.nim`: a place to put answers and ask questions, shared at the
+  edge. The protocol is the arity convention: `(Q A)` puts, `(Q)` asks,
+  and a `Jam` tells each line that asks the record `(Q R A)` for every
+  answer, what it has and then as they come, R its own order heard. It
+  reads no meanings; signed values (`crypto/clave.nim`) are taken as
+  what they sign and kept signed; it answers `(jam)` with which jam it is,
+  `!{(identity NAME) (identity ID) (at MS)}`, put once when its log
+  begins and not put to by lines, so a client dialling its place again
+  hangs up on another jam served there since; it puts `(gone …)` for whoever a line said was
+  here once the line stops speaking or can't be reached, and, opened on
+  a log, for everyone the log says is here. Given a key, its order is
+  a tea-time order (`teatime.nim`): for every
+  answer it keeps it puts under `(stamps NAME)` its reflector's next
+  message, signed, `(tea-msg R T PREV (Q D))`, told at R, the rank it
+  stamps and the message's ordinal, D the digest `re` names, T its
+  clock, PREV the digest of the message before; a log whose ranks the
+  key hasn't all stamped is refused. `stampOf`, `vouches`, `stamps` and
+  `unchained` read them. The readers clients share: `heard` reads a told record, `keep`
+  puts it in a reader's own ranked space and `heardIn` searches it,
+  `who` reads presence and `wasHere` whether someone was here when the
+  jam heard a rank, `Speaker` puts, asks and writes messages
+  (objects answering `by`, `said`, `at`, `re`, `for`), and `isFor`
+  says whether one names someone, or `all`, everyone who hears the
+  room. Rooms are questions, `(for NAME)` is someone's own.
+- `teatime.nim`: one order over values, kept by one key. A `Reflector`
+  signs each value it is given with the next ordinal, its clock and the
+  digest of the message before, `(signed (tea-msg N AT PREV V) SIG)`,
+  PREV nil for the first; the key is the order's identity. A `History`
+  holds what a reader has of one order, each message once by ordinal,
+  checked as the key's (`add` answers `added`, `known` or
+  `conflicting`; two words for one slot, or a message whose PREV names
+  another word than the one held, are kept apart in `conflicts`, the
+  word held first kept); its `gaps` are `(tea-sync KEY LO HI)` asks
+  that any holder can answer by `replay`, `onward` the ask for
+  everything after the highest held, and `initReflector(kp, history)`
+  resumes an order from after it. Whoever acts on an order acts on what
+  a history holds, in ordinal order, their own messages once reflected.
+- `evidence.nim`: what an order entails, as values anyone can check,
+  each a `moldable` struct: `(root N D)`, a tree over a run of values
+  (leaf node the digest of `(leaf V)`, inner the digest of `(node L R)`,
+  split at the greatest power of two below n); `(in ROOT I LEAF [SIB …])`
+  and `(grows OLDER NEWER [SIB …])`, proofs of inclusion and growth that
+  `holds` checks in log n digests; `(checkpoint OVER Q R ROOT)`, a
+  reader's signed word on the answers it heard to Q from the order OVER
+  (the jam's identity, `jamOf`) through rank R, put under
+  `(checkpoints Q)` (`checkpoint`, `checkpointOf`); `(equivocation A B)`,
+  two signed puts by one key for one `slot` `(slot OVER Q R)` that
+  differ (`convicts`); and `(receipt (Q R A) STAMP)`, an answer as told
+  with the jam's stamp for it (`vouchedBy`). A set's members in CE
+  order are a tree too: `(opening ROOT RANGE I [LEAF …] [SIB …])` shows
+  exactly the members in a range, `(from LO HI)` closed by CE order or
+  `(under P)` (`opening`, `holds`, `members`, `absent`), and
+  `(changed OPENING OPENING)` the whole change of a range between two
+  roots (`scope`, `unchangedOutside`).
+- `hidden.nim`: a value by a digest of its own tree, so any part can be
+  shown to someone holding only the digest, or a signature over it.
+  The tree mirrors the value: a part hidden whole is a leaf, the digest
+  of `(leaf V)` or `(leaf V SALT)` (evidence's leaf node when unsalted);
+  a frame hidden by its parts is the digest of `(KIND (root N D))`,
+  marked as the frame is, with `(root N D)` the evidence tree over its
+  parts' nodes in `parts` order, so there is one value under a digest
+  by construction. `hide(v, apart, salted)`, both predicates over a
+  part, keeps the `Tree`;
+  `t.hidden` is `(hidden D)`, what a key signs; `t.shown(path)` is
+  `(shown (hidden D) [(KIND N I [SIB …]) …] NODE)`, checked by `holds`
+  in log N per frame passed, `part` the leaf's value, `frameOf` a
+  frame node's kind, mark and width, `way` the steps read (`Step`,
+  hand-read since its head is the frame's kind), `places` the way
+  without its siblings, `(KIND N I)` each. A set hidden by its
+  parts, its members whole and unsalted, is exactly the tree an
+  `opening` checks against.
+- `claims.nim`: evidence composed into one value a reader checks,
+  `(claim FIND {EVIDENCE …})`, FIND naming no subjects and counting
+  nothing. What evidence entails is `(Q A)` statements, only when the
+  evidence's own check holds: `(in …)` `((in ROOT I) LEAF)`,
+  `(grows …)` `((grew OLDER) NEWER)`, an opening `((opened ROOT RANGE)
+  {M …})` and `((member ROOT RANGE) M)`, a changed `((scope OLDER NEWER
+  RANGE) {added: … removed: …})` with `added`, `removed` and
+  `unchanged-outside`, `(signed V SIG)` `((signed KEY) V)` and, for a
+  put, `((put KEY Q) A)`, each with what V and A entail, a receipt
+  `((stamped KEY) (Q R A))`, an equivocation `((convicted KEY) SLOT)`,
+  a shown `((part (hidden D) [PLACE …]) V)` or `((frame …) NODE)`,
+  raw CE bytes the codec reads as exactly one value `((reads B) V)`,
+  claims within, and `((digest-of V) D)` answered on demand; a bare
+  `(Q A)` handed in entails nothing. `entails` is this module's
+  `Reading`; `entailments([…])` composes readings into one `Entails`
+  search that nested evidence is asked of too. `convinced(claim,
+  premises, entails)` asks the find of those statements and the
+  reader's premises together, a `Subject` from an object or a held
+  space (`premises`, `given`), and answers one `Conviction` per way
+  the find came to an answer, `(convinced ANSWER {ENTAILED …} {GIVEN
+  …})`, the records it rests on as held; `convincing` is the checker
+  as a `Search` asked claims. A find's hole fits only its own mark, so
+  a marked value such as a jam's identity is bound with `!(as H)`.
+  An opening's exactness rests on the committer's sort, which a
+  reader holds as its own premise.
+- `crypto/`: `digest.nim`, digests over a value's CE bytes (blake2b-256
+  and sha256 via nimcrypto), `clave.nim`, keypairs, signatures, and
+  signed values (EdDSA via vendored monocypher), and `crypto/types.nim`
+  for the types the two share. Each type is a `moldable` struct
+  (`Digest`, `Keypair`, `Signature`, `Signed`) with `{exact (rep
+  record)}`: unmarked, its head, no item more (one would ride along
+  unsigned), schemes and algorithms as `(symbol {(one-of …)})`, keys,
+  hashes and signatures as `(bytes {(len N)})`, and any value, marked
+  too, where a field holds one. A reading that doesn't fit refuses with
+  `MoldError`, a `BasslineError`.
+
+
+`corpus/corpus.bl` at the repo root is the shared corpus every
+implementation runs: values with their expected CE bytes, bytes a
+decoder must reject with a reason from a closed list, prefixes a
+decoder must wait on, and the reader's own cases. Every case is input
+given in total; input that runs out inside a value is kept apart from
+rule-breaking because a reader still being given more waits there
+instead. Its expected bytes come from the spec, never from an
+encoder. `corpus.json` (the same
+records in the JSON dialect) and `corpus.blb` (the same records as a
+bare concatenation of CE) are derived from it by running
+`packages/blnim/tests/corpus.nim` as a program; regenerate whenever
+the `.bl` changes. Imported, the same module is the loader the tests
+share: `cases`, and `filter` by case head. `tests/tcorpus.nim` runs
+every case against the Nim implementation, one suite per case head,
+and checks that the derived files still read back as the cases.
+
+`packages/core` (`@bassline/core`) mirrors the blnim `core` factoring:
+
+- `src/codec/` is the CE byte grammar with no value knowledge —
+  `header.js` (tags, mark bit, END, length tiers), `payload.js`
+  (canonical-int / UTF-8 predicates, byte orderings), `buffer.js`
+  (`ByteBuffer` growable store + `ByteCursor` + `Starved`), `events.js`
+  (`walkEvents`, the nil/atom/open/close walk), `encode.js`
+  (`Encoder`), `decode.js` (`ValueView`, lazy + memoized validation, and
+  the resumable `Decoder`).
+- `src/value/` is the in-memory reading: a `B`-prefixed class tree
+  (`BValue`→`BAtom`/`BFrame`→ the nine leaves) whose `compare`/`equals`
+  reproduce CE order structurally — nothing here encodes. `visitor.js`
+  is the `Visitor` base plus the iterative `walk`/`fold` drivers;
+  `build.js` the one construction surface plus the `fromForeign` hook;
+  `ce.js` the encoder as a `fold`; `view.js` the bytes→`BValue` bridge
+  and the one-shot `decode`/`decodeAll`.
+- `src/btree.js` is `BTree` / `BTreeSet` — the sorted collection behind
+  dicts and sets, presenting the `Map` / `Set` interface.
+- `src/text/` reads and pretty-prints the textual syntax through the
+  same builders; `src/ops.js` is a port of blnim's value operations (walk,
+  `similar`, `prefixes`, shapes); `src/lang/rewrite.js` is a rewrite
+  engine. `src/data.js` is the curated public surface.
+- `src/json.js` is the JSON dialect (`@bassline/core/json`), a port of
+  `lib/json.nim`: `toJSON` / `fromJSON` over kind-tagged objects
+  (`{kind, mark?, value}`), `toValue` for an already-parsed tree, and
+  `numberReviver` so `JSON.parse` recovers integers of any width from
+  the source. Never canonical, refuse-not-coerce; stricter than the Nim
+  door in that an unknown object key is refused. Needs Node ≥ 22.
+- `src/stream/` is the Node transport for CE bytes — a `Transform`
+  over core's `Decoder`, plus a small TCP adapter. It pulls in
+  `node:stream`/`node:net`, so it is the opt-in `@bassline/core/stream`
+  entry, kept out of the portable `@bassline/core/data` surface.
+- `test/corpus.test.js` runs the shared corpus (all seven case heads)
+  against this implementation and checks that `corpus.blb` and
+  `corpus.json` still read back as the cases.
+
+`packages/bassline-text-vscode`: editor support for `.bl`.
+
+`packages/blts` (`@bassline/blts`) is a TypeScript implementation:
+strict `tsc`, source Node runs directly (`.ts` imports, erasable syntax
+only), built to `dist/`, tested by vitest. It ports values, CE, text,
+streams, shapes (`shape.ts`), objects, searches (`search.ts`, whose
+names may resolve to live `Search`es) and finds (`query.ts`, the same
+query language as `find.nim`: `finds(f)` gives `readFind`, `find`,
+`evaluate` and `findSearch`). The web notebook links it.
+
+`packages/blswift` is the Swift implementation (values, CE, text,
+shapes, and searches as `Search`/`Answers`, with shape matching as a
+search in `ShapeSearch.swift`).
+
+## State as of 2026-10-02
+
+The core and the store compile and agree.
+
+- Messages are gone: `bl/msg` (`Msg`, the router, `pool.nim` with
+  `TaskPool` and `PubSub`) and `tests/tpool.nim` were deleted
+  2026-10-02, after the listener stopped using them. Search replaces
+  them for finding out what values entail, and a send is a proc over a
+  value. `queries/rewrite.nim` (once `ops/rewrite.nim`) was rebuilt 2026-10-03 as a search for
+  compatible bindings: shape filling as a composition of searches.
+- Ruled 2026-10-02: reading text as one value, text that has begun a
+  second value is refused however it ends (`1 [`, `go !`), and empty
+  text is refused; only text running out inside its one value is
+  incomplete. All four readers follow the corpus on this.
+- `Decoder.compact` now compacts while frames are open, so a long run of
+  input stays bounded whatever the read boundaries.
+- Removed 2026-10-02: `prop/` (lattices and cells), `lib/server/http.nim`,
+  `store/par.nim` with `malebolgia`, and `tests/tops.nim`.
+- The store is an exploration that will change; don't build on it now.
+- Crypto's host types, and `blarc`'s, are `moldable` structs; the old
+  hand-written readings and the description dialect before them are
+  gone.
+- Ruled and landed 2026-09-03: `Value` stays a value type. Atoms are
+  copied like the strings and integers they hold. Frames are the
+  shared part: `items` is a `Buffer[Value]` (a ref object over a
+  seq) and `BTree` is a ref object, so a copied frame shares one body,
+  like `ValueView` in the codec, and the mark stays per handle. Frame
+  members are reached through `v.items[i]` or `v.items.data`. A value
+  is not mutated after it leaves its builder; ops build new values.
+- `tests/` is std/unittest throughout: `tcorpus` runs the corpus
+  itself; `tcodec`, `treader`, `tstore`, `tjson` draw cases from it
+  through `corpus.filter` where the corpus speaks to their subject,
+  and add random values from `lib/blah`; `tbuilders`, `tblmacro`,
+  `tcrypto` are self-contained (`tcrypto` still pulls `randValue` from
+  `lib/blah`). `corpus.nim` also
+  carries the shared vocabulary (`ceBytes`, `land`,
+  `rejects`/`incomplete`/`refuses`). `tserver1` exercises the
+  listener over real TCP sockets. `tstream`, `tqueries`, `tsearch`,
+  `tsend`, `tbvar`, `trewrite`, `tfind`, `tjam`, `tmold` and `tlang`
+  cover streams, value queries, searches, sends, bvars, shapes, finds,
+  the jam, moldable structs (with Poly's laws on generated values) and
+  doing marked values; `tqueries` also checks
+  `prefixes` against `randPrefix`, and `trewrite` checks fillings
+  against a brute-force search.
+
+## Working here
+
+- `data-model.org` and the codec are load-bearing. Do not change either
+  without an explicit instruction; describe the change and its
+  consequences instead.
+- Every door that handles values handles marked values.
+- There are no booleans and no non-integer numbers. Those are
+  vocabulary: `(dec 15 -1)`, symbols, presence in a set.
+- A reading that cannot hold a value refuses it. Never coerce, truncate,
+  or normalise.
+- `cmp` on values is CE order: kind, then mark, then shortlex for
+  scalars, then members with a shorter frame sorting after a longer one
+  that it prefixes.
+- Prefer the stdlib to hand-rolled code (`parseBiggestInt`,
+  `lowerBound`). Constants come from C headers, not literals.
+- Benchmark release builds only (`-d:release` is not in `nim.cfg`;
+  pass it).
+- Do not import mental models from other systems. Values are not
+  objects, sends are not RPC, a search is not receiving, a connection is
+  not a peer protocol, a dialect is not a schema.
+- Lifecycle does not propagate. Closing is a local decision.
+- A foreign format (JSON, and whatever follows) is read into values
+  losslessly where the host grammar allows and refused where it does
+  not. Going out is lossy; bassline is the richer side. A foreign form
+  is never canonical: the only identity a value has is its CE bytes. On
+  the way in the door is `toValue`, so the `bl` macro splices through
+  every one of them.
+- Design documents carry ideas only, in the voice of `data-model.org`.
+  Prior art, comparisons, and sources stay in conversation.
+
+## Building
+
+```sh
+cd packages/blnim
+nim c -r tests/tcodec.nim                 # tests/config.nims adds src to the path
+nim c -r tests/tcorpus.nim                # the shared corpus, one test per case
+nim c -r tests/tstream.nim                # streams
+nim c -r tests/tqueries.nim               # value streams, objects, names
+nim c -r tests/tsearch.nim                # searches and denoted spaces
+nim c -r tests/tsend.nim                  # sends, and reading them back
+nim c -r tests/tbvar.nim                  # bvars, memo, file vars
+nim c -r tests/tjam.nim                   # the jam, and its readers
+nim c -r tests/tevidence.nim              # roots, proofs, checkpoints, receipts, equivocation
+nim c -r tests/thidden.nim                # a value by its tree's digest, any part shown
+nim c -r tests/tclaims.nim                # claims: what evidence entails, premises, convictions
+nim c -r tests/trewrite.nim               # shapes and their fillings
+nim c -r tests/tfind.nim                  # finds: the query language
+nim c -r tests/tmold.nim                  # structs, probes, Poly, hooks, and their laws
+nim c -r tests/tlang.nim                  # doing marked values: the convention, natives, functions, rules
+nim c -r tests/tlang_rpn.nim              # a dialect as one doer
+nim c -r -d:PageSize=256 src/bl/store/store.nim   # store self-test with deep trees
+nim c -r tests/corpus.nim                 # regenerate corpus.json and corpus.blb from corpus.bl
+```
+
+`nim.cfg` is checked in: atlas writes the dependency paths into its
+section (`atlas install`, into `deps/`, which is gitignored), and the
+lines outside it are the compiler flags (`-d:nimPreviewHashRef`,
+`--experimental:caseStmtMacros`). `vendor/monocypher` is checked in.
+
+```sh
+pnpm install && pnpm test        # the JavaScript packages, blts among them
+(cd packages/blswift && swift test)
+```
+
+## License
+
+AGPLv3
