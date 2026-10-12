@@ -1,0 +1,32 @@
+; A directory archive, as values. An archive file is a run of these
+; records, a bare concatenation of CE: chunks and directories, each once,
+; filed under the digest of its CE, and snapshots, each naming a root
+; directory by digest. A directory names the directories in it the same
+; way, so a tree that hasn't changed is written once however many
+; snapshots hold it. Packing again appends: snapshots accumulate and
+; share what they can.
+{
+  (struct digest {(rep record)} (algo symbol) (hash bytes))
+  (struct chunk {(rep record)} (bytes bytes))
+  (struct file {(rep record) (nim Entry)}
+    (name text) (mode number) (size number) (chunks [digest]))
+  (struct link {(rep record)} (name text) (target text))
+  (struct dir {(rep record)}
+    (name text) (mode number) (files {file}) (links {link}) (dirs {digest}))
+  (struct snapshot (root digest) (made {optional} number) (host {optional} text))
+
+  ; reading an archive: each record as found, and where it sits
+  (struct place {(rep record)} (at number) (len number))
+  (struct found {(rep record)} (value any) (digest digest) (place place))
+
+  ; what blarc says
+  (struct skipped {(rep record)} (path value) (why text))
+  (struct packed
+    (snapshot number) (id digest) (files number) (dirs number) (links number)
+    (bytes number) (chunks number) (new-chunks number) (new-dirs number)
+    (stored number) (skipped [skipped]))
+  (struct held
+    (n number) (place place) (id digest) (files number) (bytes number)
+    (made {optional} text))
+  (struct verified (records number) (snapshots number) (missing [digest]))
+}
