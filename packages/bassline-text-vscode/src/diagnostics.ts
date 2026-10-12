@@ -1,24 +1,18 @@
-// Diagnostics from the canonical reader: `read` throws a ReaderError with
-// pos/line/col, which becomes one squiggle. Catches structural errors the
-// TextMate grammar can't (unterminated literals, bad hex, empty records, …).
+// Diagnostics from the petit-parser reader: a failed read reports the
+// furthest position reached and what was expected there, which becomes
+// one squiggle. Catches what the TextMate grammar can't (unterminated
+// literals, bad hex, empty records, duplicate members, …).
 import * as vscode from 'vscode'
-import { read, ReaderError } from '@bassline/core/text'
+import { parseBassline } from './generated/reader.mjs'
 
 function diagnose(doc: vscode.TextDocument): vscode.Diagnostic[] {
-  try {
-    read(doc.getText())
-    return []
-  } catch (e) {
-    if (!(e instanceof ReaderError)) throw e
-    const pos = new vscode.Position(
-      Math.max(0, e.line - 1),
-      Math.max(0, e.col - 1)
-    )
-    const range = doc.getWordRangeAtPosition(pos) ?? new vscode.Range(pos, pos)
-    return [
-      new vscode.Diagnostic(range, e.message, vscode.DiagnosticSeverity.Error),
-    ]
-  }
+  const r = parseBassline(doc.getText())
+  if (r.error === undefined) return []
+  const pos = doc.positionAt(r.offset)
+  const range = doc.getWordRangeAtPosition(pos) ?? new vscode.Range(pos, pos)
+  return [
+    new vscode.Diagnostic(range, r.error, vscode.DiagnosticSeverity.Error),
+  ]
 }
 
 /** Wire up always-on, edit-driven diagnostics for bassline documents. */

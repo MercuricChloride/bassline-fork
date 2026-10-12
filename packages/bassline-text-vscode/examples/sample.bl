@@ -1,4 +1,5 @@
 ; a bassline document is any number of values
+!(evaluator jordans-machine)
 
 (entry "title" "hello bassline")
 
@@ -20,3 +21,7 @@ go!            ; a marked atom
 
 (digest sha256 0x00ff)
 nil
+
+(view something lang sexp [[
+  (heloo world)
+]])
