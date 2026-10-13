@@ -91,7 +91,7 @@ proc frameOf*[R](kind: Kind, inner: ValueParser[R], mark = anyMark): ValueParser
     if ctx.pos >= ctx.input.stop: return fail[Members, (bool, R)](want, ctx)
     let v = ctx.input.source[ctx.pos]
     if not v.isKind(kind, mark): return fail[Members, (bool, R)](want, ctx)
-    var r = next.parseOn(Context[Members](input: child(ctx.input, ctx.pos, v.members), pos: 0))
+    var r = next.parseOn(Context[Members](input: child(ctx.input, ctx.pos, v.toMembers), pos: 0))
     if not r.isSuccess: return failedAs((bool, R), r)
     succeed((v.mark, r.take), ctx.pos + 1))
 

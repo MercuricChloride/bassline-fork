@@ -94,7 +94,7 @@ type Members* = distinct BSeq
 func len*(m: Members): int = BSeq(m).len
 func `[]`*(m: Members, i: int): lent Value = BSeq(m).data[i]
 
-proc members*(v: Value): Members =
+proc toMembers*(v: Value): Members =
   ## A list or record hands over its own body. A set or dict is laid out
   ## once, in order.
   let f = v.frame
