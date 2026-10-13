@@ -62,30 +62,37 @@ proc extendedDocument*[V](make: Make[V], dialects: Dialects[V]): TextParser[seq[
 
 # Two dialects from petit-parser's own grammars, and the reference one
 
-proc sexpNode[V](make: Make[V], s: Sexp): V =
+proc sexpNode[V](make: Make[V], s: sink Sexp): V =
+  ## the tree's strings move into the value
   let n = case s.kind
     of skSymbol: make.atom(bSym, s.stringVal, false)
     of skString: make.atom(bText, s.stringVal, false)
     of skNumber: make.atom(bNum, $s.numberVal, false)
-    of skList: make.frame(bList, s.listVal.map((x: Sexp) => sexpNode(make, x)), false)
+    of skList:
+      var items: seq[V]
+      for x in s.listVal.mitems: items.add sexpNode(make, move x)
+      make.frame(bList, items, false)
   if s.quoted: make.frame(bRec, @[make.atom(bSym, "quote", false), n], false) else: n
 
 proc sexpDialect*[V](make: Make[V]): TextParser[V] =
   ## Symbols, numbers, text and lists as themselves, `'x` as `(quote x)`.
-  sexpParser().map((s: Sexp) => sexpNode(make, s))
+  sexpParser().map((s: sink Sexp) => sexpNode(make, s))
 
-proc jsonNode[V](make: Make[V], j: JsonValue): V =
+proc jsonNode[V](make: Make[V], j: sink JsonValue): V =
   case j.kind
   of jkNull: make.atom(bNil, "", false)
   of jkBool: make.atom(bSym, $j.boolVal, false)
   of jkString: make.atom(bText, j.stringVal, false)
   of jkNumber: make.atom(bNum, j.numberVal, false)
-  of jkArray: make.frame(bList, j.arrayVal.map((x: JsonValue) => jsonNode(make, x)), false)
+  of jkArray:
+    var items: seq[V]
+    for x in j.arrayVal.mitems: items.add jsonNode(make, move x)
+    make.frame(bList, items, false)
   of jkObject:
     var members: seq[V]
-    for k, v in j.objectVal.pairs:
+    for k, v in j.objectVal.mpairs:
       members.add make.atom(bText, k, false)
-      members.add jsonNode(make, v)
+      members.add jsonNode(make, move v)
     make.frame(bDict, members, false)
 
 proc integral(j: JsonValue): bool =
@@ -99,7 +106,7 @@ proc jsonDialect*[V](make: Make[V]): TextParser[V] =
   ## null is nil, true and false are symbols, strings are text, arrays
   ## are lists and objects are dicts keyed by text. A number that is not
   ## an integer is refused.
-  jsonParser().where(integral, "integers only").map((j: JsonValue) => jsonNode(make, j))
+  jsonParser().where(integral, "integers only").map((j: sink JsonValue) => jsonNode(make, j))
 
 proc standardDialects*[V](make: Make[V]): Dialects[V] =
   {"sexp": sexpDialect(make), "json": jsonDialect(make), "uri": uriParser(make)}.toTable

@@ -1,7 +1,7 @@
 // Types for reader.mjs, built from petit-parser's src/petit_parser/js.nim
 // by `pnpm reader`.
 export type BlKind =
-  | 'nil' | 'int' | 'text' | 'symbol' | 'bytes' | 'list' | 'record' | 'set' | 'dict'
+  | 'nil' | 'number' | 'text' | 'symbol' | 'bytes' | 'list' | 'record' | 'set' | 'dict'
 
 export interface BlValue {
   kind: BlKind

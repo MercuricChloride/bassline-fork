@@ -18,6 +18,8 @@ import ./bassline_text
 
 type
   Authority = (Option[string], string, Option[string])
+  Generic = (Option[string], (Option[Authority], seq[string]), Option[seq[(string, Option[string])]],
+             Option[string])   ## scheme, hierarchy, query, fragment, as read
   Ref = object
     scheme, user, name, port, which: Option[string]
     where: seq[string]
@@ -36,13 +38,13 @@ proc run(allowed: set[char], expected: string): TextParser[string] =
   ## A run of allowed characters and escapes, decoded. May be empty.
   (chars(allowed, expected).plus.flatten / escaped()).star.map(parts => parts.join)
 
-proc refined(r: Ref): Ref =
+proc refined(r: sink Ref): Ref =
   ## The schemes whose own syntax packs the party and the path into one
   ## segment.
   result = r
-  if r.scheme.isNone or r.name.isSome or r.where.len != 1: return
-  let s = r.where[0]
-  case r.scheme.get
+  if result.scheme.isNone or result.name.isSome or result.where.len != 1: return
+  let s = result.where[0]
+  case result.scheme.get
   of "did":
     let parts = s.split(':')
     if parts.len >= 2:
@@ -61,33 +63,38 @@ proc refined(r: Ref): Ref =
       result.where = @[]
   else: discard
 
-proc assemble[T](m: T): Ref =
-  let (auth, path) = m[1]
-  result = Ref(scheme: m[0], where: path, how: m[2], which: m[3])
-  if auth.isSome:
-    let (user, name, port) = auth.get
-    result.user = user
-    result.name = some name
-    result.port = port
+proc assemble(m: sink Generic): Ref =
+  var hier = move m[1]
+  result = Ref(scheme: m[0], where: hier[1], how: m[2], which: m[3])
+  if hier[0].isSome:
+    let auth = move hier[0].get
+    result.user = auth[0]
+    result.name = some auth[1]
+    result.port = auth[2]
   result = result.refined
 
-proc node[V](make: Make[V], r: Ref): V =
-  ## the five slots as a dict, each present only when said
+proc node[V](make: Make[V], r: sink Ref): V =
+  ## the five slots as a dict, each present only when said; what the
+  ## reference holds moves into the value
   template txt(x: string): V = make.atom(bText, x, false)
   template key(x: string): V = make.atom(bSym, x, false)
   var es, who: seq[V]
-  if r.scheme.isSome: es.add [key"scheme", make.atom(bSym, r.scheme.get, false)]
-  if r.user.isSome: who.add [key"user", txt(r.user.get)]
-  if r.name.isSome: who.add [key"name", txt(r.name.get)]
-  if r.port.isSome: who.add [key"port", make.atom(bNum, r.port.get, false)]
+  if r.scheme.isSome: es.add [key"scheme", make.atom(bSym, move r.scheme.get, false)]
+  if r.user.isSome: who.add [key"user", txt(move r.user.get)]
+  if r.name.isSome: who.add [key"name", txt(move r.name.get)]
+  if r.port.isSome: who.add [key"port", make.atom(bNum, move r.port.get, false)]
   if who.len > 0: es.add [key"who", make.frame(bDict, who, false)]
-  if r.where.len > 0: es.add [key"where", make.frame(bList, r.where.map((x: string) => txt(x)), false)]
+  if r.where.len > 0:
+    var segments: seq[V]
+    for x in r.where.mitems: segments.add txt(move x)
+    es.add [key"where", make.frame(bList, segments, false)]
   if r.how.isSome:
     var pairs: seq[V]
-    for (k, v) in r.how.get:
-      pairs.add make.frame(bRec, @[txt(k), if v.isSome: txt(v.get) else: make.atom(bNil, "", false)], false)
+    for kv in r.how.get.mitems:
+      pairs.add make.frame(bRec, @[txt(move kv[0]),
+                                   if kv[1].isSome: txt(move kv[1].get) else: make.atom(bNil, "", false)], false)
     es.add [key"how", make.frame(bList, pairs, false)]
-  if r.which.isSome: es.add [key"which", txt(r.which.get)]
+  if r.which.isSome: es.add [key"which", txt(move r.which.get)]
   make.frame(bDict, es, false)
 
 proc reference(): TextParser[Ref] =
@@ -101,10 +108,10 @@ proc reference(): TextParser[Ref] =
     authority = (str("//") & sequence(((user & ch('@')).pick(0).optional, host, port.optional))).pick(1)
     segment = run(PChar, "path character")
     slashed = (ch('/') & segment).pick(1).star
-    rootless = (segment.where(s => s.len > 0, "a path") & slashed).map(m => @[m[0]] & m[1])
-    hier = (authority & slashed).map(m => (some m[0], m[1])) /
-      rootless.map(p => (none(Authority), p)) /
-      slashed.map(p => (none(Authority), p))
+    rootless = (segment.where(s => s.len > 0, "a path") & slashed).map((m: sink (string, seq[string])) => m[0] & m[1])
+    hier = (authority & slashed).map((m: sink (Authority, seq[string])) => (some m[0], m[1])) /
+      rootless.map((p: sink seq[string]) => (none(Authority), p)) /
+      slashed.map((p: sink seq[string]) => (none(Authority), p))
     qchar = PChar + {'/', '?'}
     key = run(qchar - {'&', '='}, "query character")
     value = (ch('=') & run(qchar - {'&'}, "query character")).pick(1).optional
@@ -112,10 +119,10 @@ proc reference(): TextParser[Ref] =
     which = (ch('#') & run(qchar, "fragment character")).pick(1).optional
     generic = sequence(((scheme & ch(':')).pick(0).optional, hier, how, which)).map(assemble)
     scp = sequence((run(Unreserved + SubDelims, "user character"), ch('@'), host, ch(':'), rootless))
-      .map(m => Ref(user: some m[0], name: some m[2], where: m[4]))
+      .map((m: sink (string, char, string, char, seq[string])) => Ref(user: some m[0], name: some m[2], where: m[4]))
     address = sequence((run(Unreserved + SubDelims, "user character"), ch('@'), host))
-      .map(m => Ref(user: some m[0], name: some m[2]))
+      .map((m: sink (string, char, string)) => Ref(user: some m[0], name: some m[2]))
   scp / address / generic
 
 proc uriParser*[V](make: Make[V]): TextParser[V] =
-  reference().map((r: Ref) => node(make, r)).trim.complete
+  reference().map((r: sink Ref) => node(make, r)).trim.complete

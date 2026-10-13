@@ -68,10 +68,10 @@ proc ofKind*(k: Kind, mark = anyMark): ValueParser[Value] =
   valueWhere((v: Value) => v.isKind(k, mark), $k)
 
 proc nilValue*(mark = anyMark): ValueParser[Value] = ofKind(bNil, mark)
-proc number*(mark = anyMark): ValueParser[BNum] = ofKind(bNum, mark).map((v: Value) => v.num)
-proc textOf*(mark = anyMark): ValueParser[string] = ofKind(bText, mark).map((v: Value) => v.text)
-proc symbolOf*(mark = anyMark): ValueParser[string] = ofKind(bSym, mark).map((v: Value) => v.text)
-proc bytesOf*(mark = anyMark): ValueParser[seq[byte]] = ofKind(bBytes, mark).map((v: Value) => v.bytes)
+proc number*(mark = anyMark): ValueParser[BNum] = ofKind(bNum, mark).map((v: sink Value) => v.num)
+proc textOf*(mark = anyMark): ValueParser[string] = ofKind(bText, mark).map((v: sink Value) => v.text)
+proc symbolOf*(mark = anyMark): ValueParser[string] = ofKind(bSym, mark).map((v: sink Value) => v.text)
+proc bytesOf*(mark = anyMark): ValueParser[seq[byte]] = ofKind(bBytes, mark).map((v: sink Value) => v.bytes)
 
 proc symbol*(name: string, mark = unmarked): ValueParser[Value] =
   ## The one symbol `name`, unmarked unless said otherwise.

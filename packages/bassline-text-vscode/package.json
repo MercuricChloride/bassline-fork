@@ -36,7 +36,7 @@
     ]
   },
   "scripts": {
-    "reader": "nim js -d:nodejs -d:release --hints:off -o:src/generated/reader.mjs ${PETIT_PARSER:-../../../petit-parser}/src/petit_parser/js.nim",
+    "reader": "nim js -d:nodejs -d:release --hints:off -o:src/generated/reader.mjs ../blnim/src/bl/grammar/js.nim",
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit"
