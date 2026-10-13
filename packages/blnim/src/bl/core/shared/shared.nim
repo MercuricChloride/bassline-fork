@@ -1,5 +1,6 @@
 from std/bitops import countTrailingZeroBits
-from std/endians import littleEndian64
+when not defined(js):
+  from std/endians import littleEndian64
 import std/options
 export options
 
@@ -83,8 +84,14 @@ func parseKind*(s: string): Option[Kind] =
 
 func toString*(a: openArray[byte]): string =
   result = newString(a.len)
-  if a.len > 0:
-    copyMem(addr result[0], addr a[0], a.len)
+  when defined(js):
+    for i, b in a: result[i] = char b
+  else:
+    when nimvm:
+      for i, b in a: result[i] = char b
+    else:
+      if a.len > 0:
+        copyMem(addr result[0], addr a[0], a.len)
 
 template toBytes*(a: string): openArray[byte] =
   a.toOpenArrayByte(0, a.high)
@@ -95,13 +102,17 @@ template toBytes*(a: string): openArray[byte] =
 
 func cmpBytes*(a, b: openArray[byte]): int =
   let n = min(a.len, b.len)
-  when nimvm:
+  when defined(js):
     for i in 0 ..< n:
       if a[i] != b[i]: return int(a[i]) - int(b[i])
   else:
-    if n > 0:
-      let r = cmpMem(addr a[0], addr b[0], n)
-      if r != 0: return r
+    when nimvm:
+      for i in 0 ..< n:
+        if a[i] != b[i]: return int(a[i]) - int(b[i])
+    else:
+      if n > 0:
+        let r = cmpMem(addr a[0], addr b[0], n)
+        if r != 0: return r
   a.len - b.len
 
 func cmpShortlex*(x, y: openArray[byte]): int =
@@ -171,17 +182,18 @@ func isValidUtf8*(bytes: openArray[byte]): bool =
   let n = bytes.len
   while i < n:
     if state == UTF8_ACCEPT:
-      when nimvm:
-        discard
-      else:
-        while i + 8 <= n:
-          var w: uint64
-          littleEndian64(addr w, addr bytes[i])
-          let hi = w and 0x8080808080808080'u64
-          if hi != 0:
-            i += countTrailingZeroBits(hi) shr 3
-            break
-          i += 8
+      when not defined(js):
+        when nimvm:
+          discard
+        else:
+          while i + 8 <= n:
+            var w: uint64
+            littleEndian64(addr w, addr bytes[i])
+            let hi = w and 0x8080808080808080'u64
+            if hi != 0:
+              i += countTrailingZeroBits(hi) shr 3
+              break
+            i += 8
       while i < n and bytes[i] < 0x80:
         inc i
       if i >= n: break

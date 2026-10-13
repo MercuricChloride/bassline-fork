@@ -234,6 +234,26 @@ proc fromSorted*[K, V](entries: sink seq[Entry[K, V]]): BTree[K, V] =
   for e in entries.mitems:
     result[move e.key] = move e.val
 
+func nth[K, V](root: Node[K, V], i: int): lent Entry[K, V] =
+  ## the i-th entry in key order, walking the leaves
+  var
+    leaf = root.firstLeaf
+    i = i
+  while leaf != nil and i >= leaf.entries.len:
+    i -= leaf.entries.len
+    leaf = leaf.next
+  if leaf == nil: raise newException(IndexDefect, "entry index out of range")
+  leaf.entries[i]
+
+proc fromSortedSet*[T](items: sink seq[T]): BTreeSet[T] =
+  ## a set of items already strictly ascending, taken on trust
+  if items.len <= maxKeys:
+    var entries = newSeqOfCap[Entry[T, bool]](items.len)
+    for it in items.mitems: entries.add (move it, true)
+    return BTreeSet[T](entries: entries.len, root: Node[T, bool](kind: nkLeaf, entries: entries))
+  result = newBTreeSet[T]()
+  for it in items.mitems: result.incl move it
+
 proc copy*[K, V](t: BTree[K, V]): BTree[K, V] =
   ## a tree of its own with t's entries, built node for node
   var prev: Node[K, V]
@@ -255,6 +275,10 @@ func `[]`*[K, V](t: BTree[K, V], key: K): lent V =
   if t.root == nil:
     raise newException(KeyError, "key not found")
   return find(t.root, key)
+
+func nth*[K, V](t: BTree[K, V], i: int): lent Entry[K, V] =
+  ## the i-th entry in key order, by a walk along the leaves
+  t.root.nth(i)
 
 proc `[]=`*[K, V](t: BTree[K, V], key: sink K, val: sink V) =
   if t.root == nil:
@@ -423,6 +447,10 @@ func len*[T](t: BTreeSet[T]): int =
 
 func contains*[T](t: BTreeSet[T], val: T): bool =
   val in t.root
+
+func nth*[T](t: BTreeSet[T], i: int): lent T =
+  ## the i-th member in order, by a walk along the leaves
+  t.root.nth(i).key
 
 proc incl*[T](t: BTreeSet[T], val: sink T) =
   if t.root == nil:

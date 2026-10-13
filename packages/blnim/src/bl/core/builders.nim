@@ -82,6 +82,32 @@ func els*(self: Value): BSet =
   guard self.frame of BSet, "not a BSet"
   BSet(self.frame)
 
+# ================ Frames as sequences ================
+
+type Members* = distinct Frame
+  ## a frame read as one sequence of values, whatever it is: a list or
+  ## record's items, a set's members in order, a dict's keys and values
+  ## alternating. What a parser over values reads.
+
+func members*(v: Value): Members = Members(v.frame)
+
+func len*(m: Members): int =
+  let f = Frame(m)
+  if f of BSeq: BSeq(f).len
+  elif f of BSet: BSet(f).len
+  elif f of BDict: 2 * BDict(f).len
+  else: refuse "unknown frame"
+
+func `[]`*(m: Members, i: int): Value =
+  ## the i-th member; for a dict, keys at even places, values at odd
+  let f = Frame(m)
+  if f of BSeq: BSeq(f)[i]
+  elif f of BSet: BSet(f).nth(i)
+  elif f of BDict:
+    let e = BDict(f).nth(i div 2)
+    if i mod 2 == 0: e.key else: e.val
+  else: refuse "unknown frame"
+
 # ================ Comparators ================
 
 template diff(a, b) =
