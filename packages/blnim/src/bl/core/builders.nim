@@ -84,29 +84,32 @@ func els*(self: Value): BSet =
 
 # ================ Frames as sequences ================
 
-type Members* = distinct Frame
-  ## a frame read as one sequence of values, whatever it is: a list or
-  ## record's items, a set's members in order, a dict's keys and values
-  ## alternating. What a parser over values reads.
+type Members* = distinct BSeq
+  ## a frame's members as one sequence, what a parser over values reads:
+  ## a list or record's items, a set's members in order, a dict's keys
+  ## and values alternating. Distinct, not an alias, because Nim 2.2.12
+  ## cannot match a handler over `Parser[Buffer[Value], R]` inside a
+  ## generic proc.
 
-func members*(v: Value): Members = Members(v.frame)
+func len*(m: Members): int = BSeq(m).len
+func `[]`*(m: Members, i: int): lent Value = BSeq(m).data[i]
 
-func len*(m: Members): int =
-  let f = Frame(m)
-  if f of BSeq: BSeq(f).len
-  elif f of BSet: BSet(f).len
-  elif f of BDict: 2 * BDict(f).len
-  else: refuse "unknown frame"
-
-func `[]`*(m: Members, i: int): Value =
-  ## the i-th member; for a dict, keys at even places, values at odd
-  let f = Frame(m)
-  if f of BSeq: BSeq(f)[i]
-  elif f of BSet: BSet(f).nth(i)
+proc members*(v: Value): Members =
+  ## A list or record hands over its own body. A set or dict is laid out
+  ## once, in order.
+  let f = v.frame
+  if f of BSeq: return Members(BSeq(f))
+  var laid: BSeq
+  if f of BSet:
+    laid = newBufferOfCap[Value](BSet(f).len)
+    for m in BSet(f): laid.add m
   elif f of BDict:
-    let e = BDict(f).nth(i div 2)
-    if i mod 2 == 0: e.key else: e.val
+    laid = newBufferOfCap[Value](2 * BDict(f).len)
+    for k, val in BDict(f).pairs:
+      laid.add k
+      laid.add val
   else: refuse "unknown frame"
+  Members(laid)
 
 # ================ Comparators ================
 

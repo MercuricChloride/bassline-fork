@@ -54,7 +54,7 @@ proc newInput*(m: Members): Input[Members] =
 
 proc parse*[R](p: ValueParser[R], v: Value): Result[R] =
   ## `p` over one value, which it must take whole.
-  p.complete.parse(Members(Frame(newBuffer(@[v]))))
+  p.complete.parse(Members(newBuffer(@[v])))
 
 # ---------------------------------------------------------------------------
 # Leaves
