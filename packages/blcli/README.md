@@ -123,10 +123,11 @@ Each tool keeps the pipe rule from `cli.md`:
 ## Testing
 
 ```sh
-nim test
+nim test              # build, then every tests/t*.nim, saying at the end which failed
+nim test jam ws       # build, then only tests/tjam.nim and tests/tws.nim
 ```
 
-`tests/tcli.nim` drives the built binaries through a shell and as live child processes, with fakes (`bl-demo`, `bl-search-demo`, a non-executable `bl-clave`, and an `ssh` that runs its command locally) first on PATH:
+The tests are split by what they drive: `tbasics` (help, dispatch, cat and read, the pipe rule, hash, search, eval), `tplaces` (send and serve, names, the config, reach), `tclave`, `tjam` (serve, list, scan, the terminal's lines, mcp, share), `tplugin` (the jam plugin's launchers) and `tws`. `tests/cli.nim` is what they share. Within one, std/unittest takes test names, `bin/tjam "bl jam scan*"`. They drive the built binaries through a shell and as live child processes, with fakes (`bl-demo`, `bl-search-demo`, a non-executable `bl-clave`, and an `ssh` that runs its command locally) first on PATH:
 
 - every tool's `--help`, misuse and exit 2, the three long-option spellings;
 - dispatch to `bl-NAME` with arguments and exit status intact, `which`, `commands`;
