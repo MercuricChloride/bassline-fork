@@ -213,6 +213,14 @@ iterator walk*(self: Node): Node {.closure.} =
     for each in part.walk:
       yield each
 
+iterator regions*(self: Node, s: set[RegionKind]): Node =
+  for each in self.walk:
+    if each.region in s: 
+      yield each
+
+func atomValue*(self: Node): lent Value =
+  self.atom
+
 # ---------------------------------------------------------------------------
 # Opening a value
 
@@ -236,6 +244,11 @@ proc toNode*(v: sink Value): Node =
     for m in result.cache.els: hold toNode(m)
   else:
     for k, val in result.cache.dict: hold entryOf(toNode(k), toNode(val))
+
+proc toNodes*(vals: sink seq[Value]): seq[Node] =
+  result = newSeq[Node](vals.len)
+  for i, each in vals:
+    result[i] = each.toNode
 
 proc copy*(self: Node): Node =
   ## A loose node holding what `self` holds, edits not yet finished among
@@ -454,6 +467,7 @@ when isMainModule:
     root = toNode rv"""{
       [a! b]
       a!
+      !(log bar)
       [c d set! mark!]
     }"""
 
