@@ -469,10 +469,29 @@ suite "send and serve":
     check s.arrived(want.len) == want
     check s.stop.count("-- open ") == 5
 
-  test "with no place, send and serve meet at 127.0.0.1:8455":
+  test "a name is the place it names, the first of several that takes a connection":
+    let homed = "HOME=" & quoteShell(tmp / "names-home") & " "
+    let s = serve("127.0.0.1:0")
+    # nothing answers at the first, so the second is the place
+    check sh(homed & "bl name here 10.255.255.1:1 " & s.place).code == 0
+    check sh(homed & "bl name | bl cat").output ==
+      "(place here \"10.255.255.1:1\" \"" & s.place & "\")\n"
+    let r = sh(homed & "bl send here", blb("(by-name)"))
+    check r.code == 0 and r.errors == "-- sent 1 value(s) to " & s.place & "\n"
+    check s.arrived(blb("(by-name)").len) == blb("(by-name)")
+    check sh(homed & "bl name there here").code == 2       # a name names places, not names
+    check sh(homed & "bl name 9lives :1").code == 2         # not a name
+    check sh(homed & "bl name there ssh://far").code == 2   # TCP places only
+    check sh(homed & "bl name --forget here").code == 0
+    check sh(homed & "bl name").output == ""
+    let gone = sh(homed & "bl send here", blb("(x)"))
+    check gone.code == 2 and "no place is named here" in gone.errors
+    discard s.stop
+
+  test "with no place, serve listens on every interface and send meets it at 127.0.0.1:8455":
     let p = startProcess(bin / "bl", args = ["serve"], options = {})
     let said = p.errorStream.readLine
-    if said != "-- listening on 127.0.0.1:8455":
+    if said != "-- listening on 0.0.0.0:8455":
       skip()
       discard kill(Pid(p.processID), SIGTERM)
     else:
@@ -864,6 +883,19 @@ suite "jam":
     jam = jamServe(@[], home = home)                 # the default, made when missing
     check text(sh(homed & "bl jam list").output).mapIt(it.items[1]) == @[sym"jam", sym"tea"]
     discard jam.stop
+
+  test "bl jam scan finds where something takes a connection, and what a jam says it is":
+    let jam = jamServe()
+    let asked = text(sh("bl jam scan --no-sign --net 127.0.0.1 " & jam.port).output)
+    check asked.len == 1 and asked[0].items[0] == sym"found"
+    check asked[0].items[1] == toValue("127.0.0.1:" & jam.port)
+    check asked[0].items[2].items[0] == sym"jam"
+    check sh("bl jam scan --silent --net 127.0.0.1 " & jam.port & " | bl cat").output ==
+      "(found \"127.0.0.1:" & jam.port & "\")\n"
+    discard jam.stop
+    let closed = sh("bl jam scan --silent --net 127.0.0.1 " & jam.port)
+    check closed.code == 0 and closed.output == "" and "0 place(s)" in closed.errors
+    check sh("bl jam scan --net 10.0.0.0/8").code == 2      # too wide to look at
 
   test "an agent stays with its jam: another served at its place is hung up on":
     let home = tmp / "jams-home"

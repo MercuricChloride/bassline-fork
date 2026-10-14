@@ -42,9 +42,10 @@ else
   done
 fi
 
-# a bl-jam running from bin, a jam or an agent's line, would be built over
+# a bl-jam already running from bin, a jam or an agent's line, keeps the
+# build it began with until it is started again
 if ps -axo command= | grep -F "$root/packages/" | grep -q "blcli/bin/bl-jam"; then
-  die "a bl-jam built here is running (a jam, or an agent on one): stop it, then run this again"
+  say "a bl-jam built here is running: it keeps its build until it is started again"
 fi
 say "building $bin/bl, bl-clave and bl-jam"
 (cd "$root/packages/blcli" && nim --hints:off build)
@@ -76,12 +77,14 @@ at=$(ipconfig getifaddr en0 2>/dev/null || true)
 cat >&2 <<EOF
 To keep a jam others on this network can reach:
 
-  bl jam serve 0.0.0.0:8456 --as NAME --new --clave   (later, without --new)
+  bl jam serve --as NAME --new --clave   (later, without --new)
 
 and tell them this machine's address, ${at:-from ipconfig getifaddr en0}:8456.
 To join a jam on another machine:
 
-  export JAM_AT=ADDRESS:8456
+  bl jam scan | bl cat    the jams on this network
+  bl name NAME ADDRESS:8456
+  export JAM_AT=NAME
   bl jam                  a terminal
   claude-jam NAME         Claude Code, going by NAME
   codex-jam NAME          Codex

@@ -98,7 +98,7 @@ The implementation is `packages/blnim` (Nim 2.2, ORC). The JavaScript packages i
 
 `packages/blswift` is the Swift implementation (values, CE, text, shapes, and searches as `Search`/`Answers`, with shape matching as a search in `ShapeSearch.swift`).
 
-`packages/blcli` is the Nim `bl` toolkit over blnim: `cat`, `read`, `send`, `serve`, `reach`, `ws`, `hash`, `search` and `eval`, each a small tool over bare concatenations of CE on stdin and stdout. Signing is apart in `bl-clave`. The jam is apart in `bl-jam`: `bl jam serve` serves a jam kept by name in `~/.bl/jams/NAME.blb` (`--as NAME`, `--new` to begin one, `--clave` for signed values only, `--key` for a tea-time order), `bl jam list` says what each kept jam holds, `bl jam` is a terminal on one, `bl jam mcp` puts an agent on one and `bl jam share` shares a search space on one. Tools from any implementation join by being `bl-NAME` on PATH. Its `nim.cfg` is checked in and names `../blnim/src` and the dependencies in `../blnim/deps`. `tests/tcli.nim` drives the built tools.
+`packages/blcli` is the Nim `bl` toolkit over blnim: `cat`, `read`, `send`, `serve`, `reach`, `ws`, `hash`, `search` and `eval`, each a small tool over bare concatenations of CE on stdin and stdout. Signing is apart in `bl-clave`. The jam is apart in `bl-jam`: `bl jam serve` serves a jam kept by name in `~/.bl/jams/NAME.blb`, listening on every interface unless given a place (`--as NAME`, `--new` to begin one, `--clave` for signed values only, `--key` for a tea-time order), `bl jam list` says what each kept jam holds, `bl jam scan` finds what answers on this machine's networks, `bl jam` is a terminal on one, `bl jam mcp` puts an agent on one and `bl jam share` shares a search space on one. `bl name` keeps names for places in `~/.bl/places.bl`, and a name is the place it names wherever a place is taken. Tools from any implementation join by being `bl-NAME` on PATH. Its `nim.cfg` is checked in and names `../blnim/src` and the dependencies in `../blnim/deps`. `tests/tcli.nim` drives the built tools.
 
 `packages/blpy` (import `bassline`) is the Python implementation. It provides `bl-magic`, the format converter, and its levers as `bl-search-NAME`.
 
@@ -172,7 +172,7 @@ pnpm install && pnpm test              # the JavaScript packages, blts among the
 (cd packages/blswift && swift test)
 ```
 
-`nim build` writes over `packages/blcli/bin/bl-jam`, so don't run it or `nim test` while a jam is being served from that binary.
+A `bl-jam` already running, a jam or an agent's line, keeps the build it began with when `nim build` replaces `packages/blcli/bin/bl-jam`, until it is started again.
 
 ## License
 

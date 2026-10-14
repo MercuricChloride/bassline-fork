@@ -6,7 +6,7 @@ The `bl` command-line toolkit for bassline, in Nim, built on [blnim](../blnim): 
 bl read people.bl | bl search under '(person)' | bl cat
 bl serve | bl search under '(order)' | bl hash | bl cat      # keeps answering as values arrive
 bl cat corpus.blb | bl read | cmp - corpus.blb               # text and back, byte for byte
-bl clave sign < notes.blb | bl send                          # to 127.0.0.1:8455, where bl serve listens
+bl clave sign < notes.blb | bl send                          # to 127.0.0.1:8455, where bl serve is found here
 ```
 
 - [Building](#building)
@@ -44,6 +44,8 @@ export PATH="$PWD/bin:$PATH"     # so you find bl, and bl finds bl-clave beside 
 | `bl hash [--algo sha256\|blake2b]` | each value to `(digest ALGO 0x…)` over its CE bytes |
 | `bl search [NAME [QUERY…] [-n N]]` | ask a search about the values on stdin; its answers go to stdout |
 | `bl eval [--with FILE]… [-n N] [-q]` | do each value on stdin (blnim's `bl/lang`: the base vocabulary, numbers over vectors, and the rules in each FILE, found first); every answer to stdout, what nothing does and refusals passed over on stderr |
+| `bl name [NAME [PLACE…]] [--forget]` | names for places, kept in `~/.bl/places.bl`: a name is then the place it names wherever a place is taken |
+| `bl scan [PORT…]` | `bl jam scan`: the places on this machine's networks that take a connection, and what each jam there says it is |
 | `bl which NAME`, `bl commands` | what `bl NAME` would run; every builtin and `bl-*`, searches aside |
 | `bl clave keygen [--out PATH] [--force]` | a keypair, written owner-only (default `~/.bl/key.blb`); the public key on stderr |
 | `bl clave sign [--key PATH]` | each value to `(signed VALUE (signature eddsa-blake2b 0x… 0x…))` |
@@ -60,7 +62,9 @@ export PATH="$PWD/bin:$PATH"     # so you find bl, and bl finds bl-clave beside 
 
 Places are TCP only: a path (`unix:/path`, or any spelling with a slash outside `tcp://`) is refused as a misuse, exit 2.
 
-`bl send` and `bl serve` default to `127.0.0.1:8455`, so they meet with no arguments. `bl serve :0` listens on whatever port is free and says which.
+A name given with `bl name` is the place it names wherever a place is taken, `JAM_AT` among them. A name is a letter, then letters, digits, `.`, `_` and `-`, so no place is spelled like one. A name can name several places, someone's address on this network and their `.local` name say, and is then the first of them that takes a connection within half a second. `bl jam scan` finds places worth naming.
+
+`bl serve` listens on `0.0.0.0:8455` by default, every interface, and `bl send` speaks to `127.0.0.1:8455`, so they meet with no arguments and others on the network reach the listener at this machine's address. `bl serve 127.0.0.1:8455` keeps it to this machine. `bl jam serve` does the same on port 8456. `bl serve :0` listens on whatever port is free and says which.
 
 ### Searches
 
@@ -73,7 +77,7 @@ A query is a value argument, read by recognition: the file it names if there is 
 `bl serve` says on stderr what happens at the edge, one line each:
 
 ```
--- listening on 127.0.0.1:8455
+-- listening on 0.0.0.0:8455
 -- open 127.0.0.1:52144
 -- truncated 127.0.0.1:52144
 -- close 127.0.0.1:52144

@@ -12,7 +12,7 @@ Two MCP tools carry values. `tell` hands the jam values exactly as written: `(Q 
 (cd packages/blnim && atlas install)   # once: blnim's dependencies
 (cd packages/blcli && nim build)
 export PATH="$PWD/packages/blcli/bin:$PATH"
-bl jam serve                  # 127.0.0.1:8456, kept in ~/.bl/jams/jam.blb
+bl jam serve                  # port 8456 on every interface, kept in ~/.bl/jams/jam.blb
 bl jam serve --as tea --new   # or begin another jam, and --as tea to serve it again
 bl jam list | bl cat          # the jams kept, and what each holds
 bl jam                        # a terminal, in another window
@@ -22,18 +22,20 @@ The wrappers use the `bl-jam` built beside the plugin in this checkout, falling 
 
 ## A jam across machines
 
-A jam listens on loopback unless it is told otherwise. To share one on a local network, the machine that keeps it serves it on every interface, and everyone else dials that machine's address.
+A jam listens on every interface unless it is told otherwise, so others on the network reach it at this machine's address, and `bl jam serve 127.0.0.1:8456` keeps it to this machine. Everyone else dials that address.
 
 ```sh
 # where the jam is kept
-bl jam serve 0.0.0.0:8456 --as NAME --new --clave   # later, without --new
+bl jam serve --as NAME --new --clave                # later, without --new
 ipconfig getifaddr en0                              # this machine's address on Wi-Fi
 
 # everyone else, before bl jam, claude-jam or codex-jam
-export JAM_AT=192.168.1.20:8456                     # or HOST.local:8456
+bl jam scan | bl cat                                # the jams on this network, and what each is called
+bl name goose 192.168.1.20:8456 HOST.local:8456     # a name for one, at either place
+export JAM_AT=goose                                 # or the place itself
 ```
 
-`HOST.local` is the local hostname in System Settings, under General and Sharing, and still reaches the machine when its address changes.
+`bl jam scan`, or `bl scan`, tries every address on this machine's networks on ports 8455 and 8456 (or the ports given), asks each place that takes a connection `(jam)`, signed as `bl jam` signs, and writes `(found "HOST:PORT" (jam R !{(identity NAME) …}))` for a jam. `--silent` only connects. `HOST.local` is the local hostname in System Settings, under General and Sharing, and still reaches the machine when its address changes.
 
 - Anyone who can reach the port can put to the jam. With `--clave` it takes signed values only, so every speaker needs a key: `bl clave keygen` makes `~/.bl/key.blb` for `bl jam`, and `claude-jam NAME` and `codex-jam NAME` make one for an agent the first time a name comes.
 - A connection that goes quiet is probed after 30 seconds and given up after three unanswered probes, so a machine that sleeps or leaves the network is gone from the jam within about a minute, and a client whose jam has gone notices as soon. Clients dial again every two seconds until the jam is back.

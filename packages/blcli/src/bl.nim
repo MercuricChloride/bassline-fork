@@ -6,7 +6,7 @@
 
 import std/[os, strutils, terminal]
 import harness, banner
-import bl_cat, bl_read, bl_send, bl_serve, bl_reach, bl_hash, bl_search, bl_ws, bl_eval
+import bl_cat, bl_read, bl_send, bl_serve, bl_reach, bl_hash, bl_search, bl_ws, bl_eval, bl_name
 
 proc builtins(): seq[Tool]
 
@@ -48,6 +48,14 @@ proc runCommands(t: Tool, a: Args) =
 let
   whichTool = Tool(name: "which", args: "NAME",
                    summary: "what `bl NAME` would run", run: runWhich)
+  scanTool = Tool(name: "scan", args: "[PORT…]",
+                  summary: "the places on this machine's networks that answer: bl jam scan",
+                  raw: proc(argv: seq[string]) =
+                    # the jam's scan, which signs its ask, so it runs where signing is
+                    let exe = lookTool("bl-jam")
+                    if exe.len == 0:
+                      fail "bl scan is bl jam scan, and there is no bl-jam beside bl or on PATH"
+                    execTool @[exe, "scan"] & argv)
   commandsTool = Tool(name: "commands",
                       summary: "the builtins and every bl-NAME; " &
                                "`bl search` lists the searches",
@@ -55,7 +63,7 @@ let
 
 proc builtins(): seq[Tool] =
   @[bl_cat.tool, bl_read.tool, bl_send.tool, bl_serve.tool, bl_reach.tool,
-    bl_ws.tool, bl_hash.tool, bl_search.tool, bl_eval.tool, whichTool,
+    bl_ws.tool, bl_hash.tool, bl_search.tool, bl_eval.tool, bl_name.tool, scanTool, whichTool,
     commandsTool]
 
 proc usage(): string =

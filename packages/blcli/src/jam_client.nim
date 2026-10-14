@@ -8,7 +8,10 @@ import bl/lib/[server, jam]
 import bl/lib/crypto/clave
 
 const JamPlace* = "127.0.0.1:8456"
-  ## where `bl jam serve` listens, and its clients look, by default
+  ## where the jam's clients look by default
+const JamListen* = "0.0.0.0:8456"
+  ## where `bl jam serve` listens by default: every interface, so the
+  ## clients here find it at JamPlace and others reach it on the network
 
 type
   Client* = ref object

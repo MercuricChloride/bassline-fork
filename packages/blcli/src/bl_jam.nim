@@ -8,7 +8,7 @@
 ## shares a search space on one; any program joins through `bl reach`.
 
 import std/[options, os, strutils, sugar]
-import harness, jam_client, jam_kept, jam_tui, jam_mcp, jam_share
+import harness, jam_client, jam_kept, jam_tui, jam_mcp, jam_share, jam_scan
 import bl/[core, queries]
 import bl/lib/[bvarfile, jam, server]
 import bl/lib/crypto/clave
@@ -16,7 +16,7 @@ import bl/lib/crypto/clave
 proc serve(t: Tool, a: Args) =
   if a.positional.len > 1:
     t.misuse "takes one place at most"
-  let spelled = if a.positional.len == 1: a.positional[0] else: JamPlace
+  let spelled = if a.positional.len == 1: a.positional[0] else: JamListen
   let place =
     try: parsePlace(spelled, allowZero = true)
     except ValueError as e: t.misuse e.msg
@@ -98,7 +98,10 @@ when it is there: --key signs with another, --no-sign with none.""",
   Tool(name: "jam serve", args: "[PLACE]",
        summary: "a jam: keep every answer put, tell whoever asks",
        about: """
-PLACE is as for bl serve; the default is """ & JamPlace & """. Over a
+PLACE is as for bl serve. The default is """ & JamListen & """, every
+interface, so clients here find it at """ & JamPlace & """ and others
+reach it on the network, and 127.0.0.1:8456 keeps it to this machine.
+Anyone who can reach it can put to it unless --clave. Over a
 connection, (Q A) puts A as an answer to the question Q and (Q) asks Q.
 The jam tells each line that asks Q the record (Q R A) for every answer
 to Q, what it has and then each as it comes, R the order the jam heard
@@ -150,6 +153,28 @@ earliest and latest `at` its answers carry, and served where it is
 served now, if it is. `bl jam list | bl cat` reads it; `bl jam serve
 --as NAME` serves one.""",
        opts: @[], run: jam_kept.list),
+  Tool(name: "jam scan", args: "[PORT…]",
+       summary: "the places on this machine's networks that answer, and what each jam says it is",
+       about: """
+Tries every address on each network this machine is on, its own among
+them, on each PORT (default 8455 and 8456). A network wider than /24 is
+looked at only in the /24 around this machine's address on it; --net
+names networks instead, A.B.C.D/N or one address, as many times as
+wanted. Where a connection is taken it is asked (jam), signed as bl jam
+signs (your own key, ~/.bl/key.blb, when it is there), and the place is
+written as (found "HOST:PORT"), with the first value said back when one
+comes within --wait ms: a jam tells (jam R !{(identity NAME) …}).
+--silent only connects, and asks nothing: a place that isn't a jam, bl
+serve's among them, hears the ask as one more value. `bl jam scan |
+bl cat` reads what was found, and bl name names a place.""",
+       opts: @[Opt(long: "net", arg: "A.B.C.D/N",
+                   help: "a network to look on instead of this machine's own"),
+               Opt(long: "wait", arg: "MS",
+                   help: "how long a place is given to connect, and to answer (default 500)"),
+               Opt(long: "silent", help: "only connect: ask nothing"),
+               Opt(long: "key", arg: "PATH", help: "sign the ask with this keypair"),
+               Opt(long: "no-sign", help: "ask unsigned")],
+       run: jam_scan.run),
   Tool(name: "jam mcp", args: "[ROOM…]",
        summary: "a jam as tools for an agent, over MCP on stdio",
        about: """

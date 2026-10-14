@@ -6,6 +6,7 @@
 import std/[algorithm, nativesockets, options, os, osproc, parseopt, posix,
             sets, strutils, tables, unicode, sugar]
 import std/streams except Stream
+from std/net import nil
 import bl/core
 import bl/queries
 export options, core, stream, Port
@@ -376,7 +377,10 @@ type
       remote*: string  ## the TCP place `bl reach` is given on the far side
 
 const DefaultPlace* = "127.0.0.1:8455"
-  ## where `bl serve` listens and `bl send` speaks, given no place
+  ## where `bl send` speaks, given no place
+const DefaultListen* = "0.0.0.0:8455"
+  ## where `bl serve` listens, given no place: every interface, so `bl
+  ## send` meets it here at DefaultPlace and others reach it on the network
 
 proc `$`*(p: Place): string =
   case p.kind
@@ -423,19 +427,98 @@ proc parseTcp(s: string, allowZero: bool): Place =
     bad "tcp:// wants host:port"
   Place(kind: tcpPlace, host: host, port: parsePort(portText, allowZero))
 
+# ================ names ================
+
+const ProbeMs = 500
+  ## how long a name with several places waits on each for a connection
+
+proc placesFile*(): string =
+  ## where this person's names for places are kept: the textual syntax,
+  ## (place NAME PLACE …) for each name, each PLACE a TCP place as text
+  getHomeDir() / ".bl" / "places.bl"
+
+proc isName*(s: string): bool =
+  ## whether `s` spells a name rather than a place: a letter, then
+  ## letters, digits, '.', '_' and '-'. No place is spelled so, a TCP
+  ## place having a port and an ssh place its scheme
+  s.len > 0 and s[0] in Letters and s.allCharsInSet(Letters + Digits + {'.', '_', '-'})
+
+proc naming*(v: Value): Option[(string, seq[string])] =
+  ## a (place NAME PLACE …) record, read: the name and its places
+  if not v.isKind(bRec, unmarked) or v.items.len < 3 or v.head != sym"place":
+    return
+  let name = v.items[1]
+  if not name.isKind({bSym, bText}):
+    return
+  var places: seq[string]
+  for p in v.items.data[2 .. ^1]:
+    if not p.isKind(bText):
+      return
+    places.add p.text
+  some (name.text, places)
+
+proc keptNames*(): seq[Value] =
+  ## every value placesFile holds, in order; nothing when there is no file
+  let path = placesFile()
+  if not fileExists(path):
+    return
+  try: readDocument(readFile(path))
+  except IOError as e: fail "can't read " & path & ": " & e.msg
+  except ValueError as e: fail path & " doesn't read: " & e.msg
+
+proc placesNamed*(name: string): seq[string] =
+  ## the places `name` names, in the order they were given
+  for v in keptNames():
+    let n = naming(v)
+    if n.isSome and n.get[0] == name:
+      return n.get[1]
+
+proc takes(p: Place, ms: int): bool =
+  ## whether something at the TCP place `p` takes a connection within `ms`
+  let s = net.newSocket(buffered = false)
+  defer: net.close(s)
+  try:
+    net.connect(s, p.host, p.port, ms)
+    true
+  except CatchableError:
+    false
+
+proc parsePlace*(s: string, allowZero = false): Place
+
+proc reached(name: string, places: seq[string]): Place =
+  ## the place a name names: its one place, or, of several, the first
+  ## that takes a connection, else the first
+  var ps: seq[Place]
+  for spelled in places:
+    if isName(spelled):
+      raise newException(ValueError, name & " names another name, " & spelled &
+                         ", in " & placesFile())
+    ps.add parsePlace(spelled)
+  if ps.len > 1:
+    for p in ps:
+      if p.kind == tcpPlace and p.takes(ProbeMs):
+        return p
+  ps[0]
+
 proc parsePlace*(s: string, allowZero = false): Place =
   ## `tcp://host:port`, `host:port`, `:port` or a bare port: TCP, the host
   ## 127.0.0.1 unless given (an IPv6 host goes in brackets).
   ## `ssh://host/PLACE`: `bl reach PLACE` run on the far side, PLACE a TCP
   ## place as the far side reads it; `ssh://host` alone reaches the far
-  ## side's DefaultPlace. Port 0 (whatever is free) only with
-  ## `allowZero`, and never on the far side. A spelling that is none of
-  ## these, a unix socket path among them, raises ValueError with the
-  ## reason.
+  ## side's DefaultPlace. A name (`bl name` gives one) is the place it
+  ## names, the first of several that takes a connection. Port 0
+  ## (whatever is free) only with `allowZero`, and never on the far side.
+  ## A spelling that is none of these, a unix socket path among them,
+  ## raises ValueError with the reason.
   template bad(why: string) =
     raise newException(ValueError, why)
   if s.len == 0:
     bad "a place can't be empty"
+  if isName(s):
+    let places = placesNamed(s)
+    if places.len == 0:
+      bad "no place is named " & s & " (bl name " & s & " HOST:PORT names one)"
+    return reached(s, places)
   if not s.startsWith("ssh://"):
     try: return parseTcp(s, allowZero)
     except ValueError as e: bad "not a place: " & s & " (" & e.msg & ")"
