@@ -45,7 +45,7 @@ export PATH="$PWD/bin:$PATH"     # so you find bl, and bl finds bl-clave beside 
 | `bl search [NAME [QUERY…] [-n N]]` | ask a search about the values on stdin; its answers go to stdout |
 | `bl eval [--with FILE]… [-n N] [-q]` | do each value on stdin (blnim's `bl/lang`: the base vocabulary, numbers over vectors, and the rules in each FILE, found first); every answer to stdout, what nothing does and refusals passed over on stderr |
 | `bl name [NAME [PLACE…]] [--forget]` | names for places, kept in the config: a name is then the place it names wherever a place is taken |
-| `bl config [Q [A…]] [--add] [--forget]` | your own answers, `(Q A)` records in `~/.bl/config.bl`, where the tools look for what their command line and environment don't say: `at`, `as`, `send`, `serve`, `listen`, `(place NAME)` |
+| `bl config [Q [A…]] [--add] [--forget]` | your own answers, `(Q A)` records in `~/.bl/config.bl`, where the tools look for what their command line and environment don't say: `at`, `as`, `send`, `serve`, `listen`, `(place NAME)`, and `bl config defaults TOOL… OPTION…` for the options a tool is given by default (`--no-defaults` leaves them out) |
 | `bl scan [PORT…]` | `bl jam scan`: the places on this machine's networks that take a connection, and what each jam there says it is |
 | `bl which NAME`, `bl commands` | what `bl NAME` would run; every builtin and `bl-*`, searches aside |
 | `bl clave keygen [--out PATH] [--force]` | a keypair, written owner-only (default `~/.bl/key.blb`); the public key on stderr |

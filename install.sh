@@ -77,7 +77,8 @@ at=$(ipconfig getifaddr en0 2>/dev/null || true)
 cat >&2 <<EOF
 To keep a jam others on this network can reach:
 
-  bl jam serve --as NAME --new --clave   (later, without --new)
+  bl config defaults jam serve --clave   (once: signed values only)
+  bl jam serve --as NAME --new           (later, without --new)
 
 and tell them this machine's address, ${at:-from ipconfig getifaddr en0}:8456.
 To join a jam on another machine:

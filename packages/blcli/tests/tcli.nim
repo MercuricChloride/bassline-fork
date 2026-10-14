@@ -917,6 +917,21 @@ suite "jam":
     check closed.code == 0 and closed.output == "" and "0 place(s)" in closed.errors
     check sh("bl jam scan --net 10.0.0.0/8").code == 2      # too wide to look at
 
+  test "the config gives a tool options by default, and --no-defaults leaves them out":
+    let home = tmp / "defaults-home"
+    let homed = "HOME=" & quoteShell(home) & " "
+    check sh(homed & "bl config defaults jam serve --clave").code == 0
+    check sh(homed & "bl config defaults | bl cat").output == "((defaults jam serve) clave)\n"
+    var jam = jamServe(home = home)
+    check jam.put(blb("(general unsigned)")).code == 0
+    check "refused (general unsigned)" in jam.stop
+    jam = jamServe(@["--memory", "--no-defaults"], home = home)
+    check jam.put(blb("(general unsigned)")).code == 0
+    check "refused" notin jam.stop
+    check sh(homed & "bl config defaults jam serve --bogus").code == 0
+    let r = sh(homed & "bl jam serve :0 --memory")
+    check r.code == 1 and "which it doesn't take" in r.errors
+
   test "an agent stays with its jam: another served at its place is hung up on":
     let home = tmp / "jams-home"
     var one = jamServe(@["--as", "one", "--new"], home = home)

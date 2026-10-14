@@ -26,7 +26,8 @@ A jam listens on every interface unless it is told otherwise, so others on the n
 
 ```sh
 # where the jam is kept
-bl jam serve --as NAME --new --clave                # later, without --new
+bl config defaults jam serve --clave                # once: every jam served here takes signed values only
+bl jam serve --as NAME --new                        # later, without --new
 ipconfig getifaddr en0                              # this machine's address on Wi-Fi
 
 # everyone else, before bl jam, claude-jam or codex-jam
