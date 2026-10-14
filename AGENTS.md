@@ -159,6 +159,8 @@ nim c -r tests/corpus.nim                 # regenerate corpus.json and corpus.bl
 
 `nim.cfg` is checked in: atlas writes the dependency paths into its section (`atlas install`, into `deps/`, which is gitignored), and the lines outside it are the compiler flags (`-d:nimPreviewHashRef`, `--experimental:caseStmtMacros`). `vendor/monocypher` is checked in.
 
+`install.sh` builds the bl toolkit and sets up the jam on a fresh checkout: it checks for Nim and atlas, fetches blnim's dependencies, builds blcli, links the jam plugin into `~/.claude/skills/jam` and makes `~/.bl/key.blb`. By hand:
+
 ```sh
 (cd packages/blnim && atlas install)   # once: blnim's dependencies, into packages/blnim/deps
 (cd packages/blcli && nim build)       # bin/bl, bin/bl-clave and bin/bl-jam

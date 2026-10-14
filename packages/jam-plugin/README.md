@@ -6,6 +6,8 @@ Two MCP tools carry values. `tell` hands the jam values exactly as written: `(Q 
 
 ## Build and run the jam
 
+`./install.sh` at the root of the repository does the building and setting up below in one go, and says what to put on PATH.
+
 ```sh
 (cd packages/blnim && atlas install)   # once: blnim's dependencies
 (cd packages/blcli && nim build)
