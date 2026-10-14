@@ -6,11 +6,11 @@ refuseWith BasslineError
 
 type
   BNum* = object
-    case isBig: bool
+    case isBig*: bool
     of false:
-      small: int
+      small*: int
     of true:
-      big: BigInt
+      big*: BigInt
 
 func initNum*(n: BigInt): BNum = 
   BNum(isBig: true, big: n)

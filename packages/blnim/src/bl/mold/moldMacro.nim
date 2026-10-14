@@ -96,10 +96,6 @@ proc markedAs(v: Value, mark: bool, name: string): lent Value =
     name & (if mark: " must be marked" else: " must be unmarked")
   v
 
-func withMark(v: sink Value): Value =
-  result = v
-  result.mark = true
-
 proc copied(d: BDict): BDict =
   d.copy
 

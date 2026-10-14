@@ -189,6 +189,13 @@ func expectKind*(a: Value, k: set[Kind], mark = anyMark) =
 func expectKind*(a: Value, k: Kind, mark = anyMark) =
   expectKind(a, {k}, mark)
 
+func withMark*(v: sink Value): Value =
+  result = v
+  result.mark = true
+
+func `!`*(v: sink Value): Value =
+  v.withMark
+
 func `[]`*(a: Value, i: Natural): lent Value =
   a.expectKind {bList, bRec}
   a.items[i]
