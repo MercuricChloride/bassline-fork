@@ -14,7 +14,7 @@ requires "nimcrypto >= 0.6.2"
 requires "checksums >= 0.2.2"
 requires "benchy >= 0.1.0"
 requires "https://github.com/nim-lang/bigints"
-requires "petit_parser"
+requires "https://github.com/Bassline-Org/petit-parser-nim"
 # Tasks
 
 import std/[os, strutils]

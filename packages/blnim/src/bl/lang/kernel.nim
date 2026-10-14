@@ -56,8 +56,7 @@
 ## where it is applied.
 
 import std/[options, tables]
-import ../core
-import ../queries
+import ../[core, queries]
 export core, queries
 
 refuseWith BasslineError

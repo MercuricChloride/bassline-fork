@@ -1,0 +1,13 @@
+# The Python in this repository as one uv workspace: one lock file and
+# one environment at the root, shared by blpy and jam-plugin.
+#
+#   uv sync
+#   uv run python -m unittest discover -s packages/blpy/tests
+#   uv run python -m unittest discover -s packages/jam-plugin/tests
+
+[tool.uv.workspace]
+members = ["packages/blpy", "packages/jam-plugin"]
+
+# PyYAML is optional for blpy. It is here so the YAML door's tests run.
+[dependency-groups]
+dev = ["PyYAML>=6"]

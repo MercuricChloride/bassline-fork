@@ -1,0 +1,9 @@
+#!/bin/sh
+# codex-jam [NAME] [CODEX-ARGS...]: prepare and launch a jam-enabled Codex.
+set -eu
+here=$(cd -P "$(dirname "$0")" && pwd)
+launcher=$here/../scripts/codex_launch.py
+# uv names a Python that meets the launcher's own requires-python. It is
+# run directly, so nothing of uv's stays between the terminal and Codex.
+python=$(uv python find --script "$launcher")
+exec "$python" "$launcher" "$@"

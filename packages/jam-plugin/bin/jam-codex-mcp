@@ -1,0 +1,17 @@
+#!/bin/sh
+# Codex uses the same jam tools, with Claude channel notifications off.
+# A launcher may opt into the bridge; a tool call binds its local thread.
+# Keep an explicit name across starts; otherwise this process gets its
+# own name, so unrelated Codex sessions do not speak as one participant.
+set -eu
+if [ -z "${JAM_NAME:-}" ]; then
+  suffix=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+  [ -n "$suffix" ] || { echo "jam-codex-mcp: couldn't make a name" >&2; exit 1; }
+  JAM_NAME="codex-$suffix"
+  export JAM_NAME
+fi
+here=$(cd -P "$(dirname "$0")" && pwd)
+if [ "${JAM_CODEX_PUSH:-}" = 1 ]; then
+  exec "${JAM_CODEX_PYTHON:-python3}" "$here/../scripts/codex_bridge.py" --mcp "$@"
+fi
+exec "$here/jam-mcp" "$@" --push none

@@ -1,0 +1,12 @@
+#!/bin/sh
+# bl-jam mcp: the one built beside this plugin in the repo, if there is
+# one, else whichever bl-jam is on PATH. It signs with the key kept for
+# its name, ~/.bl/keys/$JAM_NAME.blb, when there is one (claude-jam makes it)
+here=$(cd -P "$(dirname "$0")" && pwd)
+case "$JAM_NAME" in
+  ""|.*|*[!A-Za-z0-9._-]*) ;;
+  *) [ -r "$HOME/.bl/keys/$JAM_NAME.blb" ] && set -- --key "$HOME/.bl/keys/$JAM_NAME.blb" "$@" ;;
+esac
+built="$here/../../blcli/bin/bl-jam"
+[ -x "$built" ] && exec "$built" mcp "$@"
+exec bl-jam mcp "$@"

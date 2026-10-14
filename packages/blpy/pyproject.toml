@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bassline"
+version = "0.1.0"
+description = "Bassline values in Python: the canonical encoding, the textual syntax, searches, the edge, and format doors"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+]
+
+# Command-line tools follow the bl toolkit's conventions: `bl NAME` runs
+# `bl-NAME` from PATH, and `bl search NAME` runs `bl-search-NAME`. Every
+# lever is also a search. bin/ holds the same tools as shims that run from
+# this checkout without installing.
+[project.scripts]
+bl-magic = "bassline.magic:main"
+bl-search-keys-as-symbols = "bassline.levers:main_keys_as_symbols"
+bl-search-numbers = "bassline.levers:main_numbers"
+bl-search-header = "bassline.levers:main_header"
+bl-search-drop-keys = "bassline.levers:main_drop_keys"
+bl-search-typed-records = "bassline.levers:main_typed_records"
+bl-search-entries = "bassline.levers:main_entries"
+bl-search-drop-whitespace = "bassline.levers:main_drop_whitespace"
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

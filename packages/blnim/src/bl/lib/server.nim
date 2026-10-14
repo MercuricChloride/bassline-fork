@@ -21,6 +21,20 @@ const
   RecvChunk = 16 * 1024
   ## how much to pull from the socket at once; the decoder buffers the
   ## rest, and refuses a value past `MaxValueBytes`
+  KeepIdle = 30
+  ## seconds a connection goes unheard before the other end is probed
+  KeepInterval = 10
+  ## seconds between probes
+  KeepProbes = 3
+  ## probes unanswered before the connection is given up
+
+var
+  TCP_KEEPINTVL {.importc, header: "<netinet/tcp.h>".}: cint
+  TCP_KEEPCNT {.importc, header: "<netinet/tcp.h>".}: cint
+when defined(macosx):
+  var TCP_KEEPIDLE {.importc: "TCP_KEEPALIVE", header: "<netinet/tcp.h>".}: cint
+else:
+  var TCP_KEEPIDLE {.importc, header: "<netinet/tcp.h>".}: cint
 
 type
   EdgeKind* = enum
@@ -97,8 +111,23 @@ template closingOnError(socket: AsyncSocket, body: untyped) =
 proc tell(conn: Conn, kind: EdgeKind, error: ref Exception = nil) =
   conn.observe.tell(conn.address, kind, error)
 
+proc keepAlive(socket: AsyncSocket) =
+  ## Probes the other end once the connection has gone quiet, so an end
+  ## that went away without closing (a machine asleep, a network left)
+  ## ends the connection within a minute or so instead of holding it
+  ## open. The other end may be gone already, so a socket that won't
+  ## take the options is left as it is.
+  try:
+    socket.setSockOpt(OptKeepAlive, true)
+    let fd = socket.getFd
+    fd.setSockOptInt(toInt(IPPROTO_TCP), TCP_KEEPIDLE, KeepIdle)
+    fd.setSockOptInt(toInt(IPPROTO_TCP), TCP_KEEPINTVL, KeepInterval)
+    fd.setSockOptInt(toInt(IPPROTO_TCP), TCP_KEEPCNT, KeepProbes)
+  except OSError: discard
+
 proc newConn(socket: AsyncSocket, address: string, observe: Observer,
              maxValueBytes = MaxValueBytes): Conn =
+  socket.keepAlive()
   result = Conn(socket: socket, address: address,
                 decoder: newDecoder(maxValueBytes = maxValueBytes), observe: observe)
   result.tell edgeOpen

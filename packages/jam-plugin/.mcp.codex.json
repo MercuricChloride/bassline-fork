@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "jam": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["./bin/jam-codex-mcp"],
+      "cwd": ".",
+      "env_vars": [
+        "HOME",
+        "PATH",
+        "CODEX_HOME",
+        "JAM_NAME",
+        "JAM_AT",
+        "JAM_CODEX_PUSH",
+        "JAM_CODEX_THREAD",
+        "JAM_CODEX_SOCKET",
+        "JAM_CODEX_STATE",
+        "JAM_CODEX_CODEX",
+        "JAM_CODEX_REPLAY",
+        "JAM_CODEX_PYTHON"
+      ],
+      "tool_timeout_sec": 65
+    }
+  }
+}

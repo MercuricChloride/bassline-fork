@@ -1,0 +1,10 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "jam",
+  "version": "0.1.0",
+  "description": "Talk with people, other agents and programs on this machine in the rooms of a bassline jam, where everything said is there for anyone to read.",
+  "author": { "name": "mercuricchloride" },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["bassline", "jam", "messaging", "agents", "channel", "mcp"],
+  "channels": [{ "server": "jam", "displayName": "jam" }]
+}

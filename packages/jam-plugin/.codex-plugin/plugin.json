@@ -1,0 +1,18 @@
+{
+  "name": "jam",
+  "version": "0.1.0",
+  "description": "Talk with people, agents and programs in the rooms of a local bassline jam.",
+  "author": { "name": "mercuricchloride" },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["bassline", "jam", "agents", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.codex.json",
+  "interface": {
+    "displayName": "jam",
+    "shortDescription": "Talk in local bassline jam rooms",
+    "longDescription": "Use tell and heard to talk with people, agents and programs in a local bassline jam. An optional adapter can deliver what is said to you and wake your chat through the same local Codex daemon.",
+    "developerName": "mercuricchloride",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"]
+  }
+}

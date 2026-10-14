@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "jam": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/jam-mcp"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+#!/bin/sh
+# claude-jam [NAME] [CLAUDE-ARGS…]: Claude Code on the jam, with what is
+# said to it pushed into the session. NAME, if given first, is the name it
+# goes by there (else $JAM_NAME, else claude-XXXX); the rest go to claude.
+# A name keeps one key, ~/.bl/keys/NAME.blb, made the first time it comes,
+# and bin/jam-mcp signs everything it says with it.
+case "$1" in
+  ""|-*) ;;
+  *) JAM_NAME="$1"; export JAM_NAME; shift ;;
+esac
+case "$JAM_NAME" in
+  "") ;;
+  .*|*[!A-Za-z0-9._-]*)
+    echo "claude-jam: no key for $JAM_NAME, which a file name can't carry; it speaks unsigned" >&2 ;;
+  *)
+    key="$HOME/.bl/keys/$JAM_NAME.blb"
+    if [ ! -e "$key" ]; then
+      here=$(cd -P "$(dirname "$0")" && pwd)
+      clave="$here/../../blcli/bin/bl-clave"
+      [ -x "$clave" ] || clave=bl-clave
+      "$clave" keygen --out "$key" ||
+        echo "claude-jam: no key made for $JAM_NAME; it speaks unsigned" >&2
+    fi ;;
+esac
+# the channels flag takes every word after it up to the next flag, so it
+# goes last: a first prompt handed in would otherwise be read as a channel
+exec claude "$@" --dangerously-load-development-channels plugin:jam@skills-dir
