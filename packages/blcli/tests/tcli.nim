@@ -475,7 +475,7 @@ suite "send and serve":
     # nothing answers at the first, so the second is the place
     check sh(homed & "bl name here 10.255.255.1:1 " & s.place).code == 0
     check sh(homed & "bl name | bl cat").output ==
-      "(place here \"10.255.255.1:1\" \"" & s.place & "\")\n"
+      "((place here) \"10.255.255.1:1\")\n((place here) \"" & s.place & "\")\n"
     let r = sh(homed & "bl send here", blb("(by-name)"))
     check r.code == 0 and r.errors == "-- sent 1 value(s) to " & s.place & "\n"
     check s.arrived(blb("(by-name)").len) == blb("(by-name)")
@@ -486,6 +486,26 @@ suite "send and serve":
     check sh(homed & "bl name").output == ""
     let gone = sh(homed & "bl send here", blb("(x)"))
     check gone.code == 2 and "no place is named here" in gone.errors
+    discard s.stop
+
+  test "the config answers what a tool isn't told, and a tool's own word comes first":
+    let homed = "HOME=" & quoteShell(tmp / "config-home") & " "
+    let s = serve("127.0.0.1:0")
+    check sh(homed & "bl config send " & s.place).code == 0
+    check sh(homed & "bl send", blb("(configured)")).code == 0
+    check s.arrived(blb("(configured)").len) == blb("(configured)")
+    check sh(homed & "bl config send | bl cat").output == "(send \"" & s.place & "\")\n"
+    let other = serve("127.0.0.1:0")
+    check sh(homed & "bl send " & other.place, blb("(said)")).code == 0   # the place given wins
+    check other.arrived(blb("(said)").len) == blb("(said)")
+    discard other.stop
+    check sh(homed & "bl config at nowhere:x").code == 2     # not a place, nor a name
+    check sh(homed & "bl config --add '(note)' one && " & homed & "bl config --add '(note)' two").code == 0
+    check sh(homed & "bl config '(note)' | bl cat").output == "((note) one)\n((note) two)\n"
+    check sh(homed & "bl config --forget '(note)' one").code == 0
+    check sh(homed & "bl config | bl cat").output ==
+      "(send \"" & s.place & "\")\n((note) two)\n"
+    check sh(homed & "bl config --forget '(note)' one").code == 1
     discard s.stop
 
   test "with no place, serve listens on every interface and send meets it at 127.0.0.1:8455":

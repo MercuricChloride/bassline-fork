@@ -53,7 +53,7 @@ proc overSsh(place: Place): Outward =
 proc run(t: Tool, a: Args) =
   if a.positional.len > 1:
     t.misuse "takes one place at most"
-  let spelled = if a.positional.len == 1: a.positional[0] else: DefaultPlace
+  let spelled = if a.positional.len == 1: a.positional[0] else: configured("send", DefaultPlace)
   let place =
     try: parsePlace(spelled)
     except ValueError as e: t.misuse e.msg
@@ -86,9 +86,9 @@ let tool* = Tool(
 PLACE is tcp://host:port, host:port, :port or a bare port (host
 127.0.0.1), or ssh://host/PLACE to run `bl reach --source PLACE` there,
 PLACE being a TCP place on the far side (ssh://host alone reaches the
-far side's """ & DefaultPlace & """). The default is """ &
-    DefaultPlace & """, where
-`bl serve` listens by default.
+far side's """ & DefaultPlace & """). The default is the config's send
+(`bl config send PLACE`), else """ & DefaultPlace & """, where `bl serve`
+listens by default. A name from `bl name` is the place it names.
 
 The place is reached when the first value arrives, and the values go
 as CE, byte for byte as they came. Empty input sends nothing and says

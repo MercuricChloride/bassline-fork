@@ -6,7 +6,8 @@
 
 import std/[os, strutils, terminal]
 import harness, banner
-import bl_cat, bl_read, bl_send, bl_serve, bl_reach, bl_hash, bl_search, bl_ws, bl_eval, bl_name
+import bl_cat, bl_read, bl_send, bl_serve, bl_reach, bl_hash, bl_search, bl_ws, bl_eval, bl_name,
+       bl_config
 
 proc builtins(): seq[Tool]
 
@@ -63,7 +64,7 @@ let
 
 proc builtins(): seq[Tool] =
   @[bl_cat.tool, bl_read.tool, bl_send.tool, bl_serve.tool, bl_reach.tool,
-    bl_ws.tool, bl_hash.tool, bl_search.tool, bl_eval.tool, bl_name.tool, scanTool, whichTool,
+    bl_ws.tool, bl_hash.tool, bl_search.tool, bl_eval.tool, bl_name.tool, bl_config.tool, scanTool, whichTool,
     commandsTool]
 
 proc usage(): string =

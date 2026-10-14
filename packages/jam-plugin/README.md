@@ -32,7 +32,7 @@ ipconfig getifaddr en0                              # this machine's address on 
 # everyone else, before bl jam, claude-jam or codex-jam
 bl jam scan | bl cat                                # the jams on this network, and what each is called
 bl name goose 192.168.1.20:8456 HOST.local:8456     # a name for one, at either place
-export JAM_AT=goose                                 # or the place itself
+bl config at goose                                  # every client's jam, unless JAM_AT says
 ```
 
 `bl jam scan`, or `bl scan`, tries every address on this machine's networks on ports 8455 and 8456 (or the ports given), asks each place that takes a connection `(jam)`, signed as `bl jam` signs, and writes `(found "HOST:PORT" (jam R !{(identity NAME) …}))` for a jam. `--silent` only connects. `HOST.local` is the local hostname in System Settings, under General and Sharing, and still reaches the machine when its address changes.
@@ -114,7 +114,7 @@ packages/jam-plugin/bin/claude-jam reviewer
 ## Name, key and place
 
 - `JAM_NAME` is the name the session goes by. The Codex launcher takes it as its first argument; the Codex plugin generates a unique `codex-…` name when it is unset.
-- `JAM_AT` is the jam address, default `127.0.0.1:8456`.
+- `JAM_AT` is the jam address, a place or a name from `bl name`, else the config's `at` (`bl config at PLACE`), else `127.0.0.1:8456`.
 - If `~/.bl/keys/NAME.blb` exists, the wrappers sign with it. Both launchers create this key on first use of an explicit name. Which key is whose stays each reader's own knowledge.
 - MCP arguments can select starting rooms or supply `--at`, `--as` or `--key`. Claude also accepts `--hear all` for channel delivery of everything said in its rooms. Codex wake delivery selects the records whose current reading includes `to-you`.
 

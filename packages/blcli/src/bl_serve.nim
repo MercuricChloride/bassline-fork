@@ -7,7 +7,7 @@ import bl/lib/server
 proc run(t: Tool, a: Args) =
   if a.positional.len > 1:
     t.misuse "takes one place at most"
-  let spelled = if a.positional.len == 1: a.positional[0] else: DefaultListen
+  let spelled = if a.positional.len == 1: a.positional[0] else: configured("serve", DefaultListen)
   let place =
     try: parsePlace(spelled, allowZero = true)
     except ValueError as e: t.misuse e.msg
@@ -45,7 +45,8 @@ PLACE is tcp://host:port, host:port, :port or a bare port (host
 127.0.0.1; port 0 takes whatever is free). The default is
 """ & DefaultListen & """, every interface, so `bl send` meets it here at
 """ & DefaultPlace & """ and others reach it on the network.
-127.0.0.1:PORT keeps it to this machine.
+127.0.0.1:PORT keeps it to this machine. `bl config serve PLACE` makes
+PLACE the default instead.
 
 Each value goes out byte for byte as it arrived, never re-encoded.
 Nothing is spoken back down a connection. What happens at the edge goes

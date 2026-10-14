@@ -4,7 +4,7 @@
 ## bassline-zoo skill's cli.md.
 
 import std/[algorithm, nativesockets, options, os, osproc, parseopt, posix,
-            sets, strutils, tables, unicode, sugar]
+            sequtils, sets, strutils, tables, unicode, sugar]
 import std/streams except Stream
 from std/net import nil
 import bl/core
@@ -355,9 +355,20 @@ proc intOpt*(t: Tool, a: Args, long: string, default: int, lo = 0): int =
   if result < lo:
     t.misuse "--" & long & " is at least " & $lo & ", got " & s
 
+proc toolDefaults(t: Tool): seq[string]
+
 proc start*(t: Tool, argv: seq[string]) =
-  if t.raw != nil: t.raw(argv)
-  else: t.run(t, t.parse(argv))
+  ## runs the tool on `argv`, after the options the config gives it by
+  ## default, so its command line has the last word. `--no-defaults`,
+  ## before any `--`, leaves the config's out
+  if t.raw != nil:
+    t.raw(argv)
+    return
+  let cut = argv.find("--")
+  let plain = (if cut >= 0: argv[0 ..< cut] else: argv).find("--no-defaults")
+  var given = argv
+  if plain >= 0: given.delete(plain)
+  t.run(t, t.parse((if plain >= 0: @[] else: t.toolDefaults) & given))
 
 # ================ places ================
 
@@ -427,15 +438,16 @@ proc parseTcp(s: string, allowZero: bool): Place =
     bad "tcp:// wants host:port"
   Place(kind: tcpPlace, host: host, port: parsePort(portText, allowZero))
 
-# ================ names ================
+# ================ config ================
 
 const ProbeMs = 500
   ## how long a name with several places waits on each for a connection
 
-proc placesFile*(): string =
-  ## where this person's names for places are kept: the textual syntax,
-  ## (place NAME PLACE …) for each name, each PLACE a TCP place as text
-  getHomeDir() / ".bl" / "places.bl"
+proc configFile*(): string =
+  ## where this person's own answers are kept: the textual syntax, a
+  ## (Q A) record for each answer, a question answered as often as it has
+  ## answers
+  getHomeDir() / ".bl" / "config.bl"
 
 proc isName*(s: string): bool =
   ## whether `s` spells a name rather than a place: a letter, then
@@ -443,35 +455,120 @@ proc isName*(s: string): bool =
   ## place having a port and an ssh place its scheme
   s.len > 0 and s[0] in Letters and s.allCharsInSet(Letters + Digits + {'.', '_', '-'})
 
-proc naming*(v: Value): Option[(string, seq[string])] =
-  ## a (place NAME PLACE …) record, read: the name and its places
-  if not v.isKind(bRec, unmarked) or v.items.len < 3 or v.head != sym"place":
-    return
-  let name = v.items[1]
-  if not name.isKind({bSym, bText}):
-    return
-  var places: seq[string]
-  for p in v.items.data[2 .. ^1]:
-    if not p.isKind(bText):
-      return
-    places.add p.text
-  some (name.text, places)
-
-proc keptNames*(): seq[Value] =
-  ## every value placesFile holds, in order; nothing when there is no file
-  let path = placesFile()
+proc configValues*(): seq[Value] =
+  ## every value the config holds, in order; nothing when there is no file
+  let path = configFile()
   if not fileExists(path):
     return
   try: readDocument(readFile(path))
   except IOError as e: fail "can't read " & path & ": " & e.msg
   except ValueError as e: fail path & " doesn't read: " & e.msg
 
+proc answerOf*(v: Value): Option[(Value, Value)] =
+  ## a (Q A) record, read: its question and its answer
+  if v.isKind(bRec, unmarked) and v.items.len == 2:
+    return some (v.items[0], v.items[1])
+
+proc configured*(q: Value): seq[Value] =
+  ## the config's answers to `q`, in the order kept
+  for v in configValues():
+    let qa = answerOf(v)
+    if qa.isSome and qa.get[0] == q:
+      result.add qa.get[1]
+
+proc configured*(q, default: string): string =
+  ## the config's first answer to the question `q`, a symbol, that is a
+  ## symbol or text, else `default`
+  for answer in configured(sym(q)):
+    if answer.isKind({bSym, bText}):
+      return answer.text
+  default
+
+proc keepConfig*(values: seq[Value]) =
+  ## configFile written whole: a fresh file beside it, then a rename
+  let path = configFile()
+  try:
+    createDir(path.parentDir)
+    let fresh = path & ".new-" & $getpid()
+    var text = ""
+    for v in values:
+      text.add pretty(v) & "\n"
+    writeFile(fresh, text)
+    moveFile(fresh, path)
+  except OSError, IOError:
+    fail "can't write " & path & ": " & getCurrentExceptionMsg()
+
+proc configure*(q: Value, answers: seq[Value], adding = false) =
+  ## `answers` become the config's answers to `q`, in place of those it
+  ## had unless `adding`, where the first of those stood
+  let kept = configValues()
+  var next: seq[Value]
+  var put = false
+  for v in kept:
+    let qa = answerOf(v)
+    if qa.isNone or qa.get[0] != q or adding:
+      next.add v
+    elif not put:
+      for answer in answers: next.add initRec(@[q, answer])
+      put = true
+  if not put:
+    for answer in answers: next.add initRec(@[q, answer])
+  keepConfig next
+
+proc forget*(q: Value, answer = none(Value)): bool {.discardable.} =
+  ## takes away the config's answers to `q`, or only `answer`, answering
+  ## whether there were any
+  let kept = configValues()
+  var next: seq[Value]
+  for v in kept:
+    let qa = answerOf(v)
+    if qa.isSome and qa.get[0] == q and (answer.isNone or qa.get[1] == answer.get):
+      result = true
+    else:
+      next.add v
+  if result: keepConfig next
+
+proc defaultsQ*(tool: string): Value =
+  ## the question a tool's defaults answer, (defaults WORD …), the words of
+  ## its name: (defaults jam serve)
+  initRec(@[sym"defaults"] & strutils.splitWhitespace(tool).mapIt(sym(it)))
+
+proc toolDefaults(t: Tool): seq[string] =
+  ## the options the config gives `t` ahead of its command line: a symbol
+  ## for a flag, (NAME VALUE) for an option and its value, `~` in a value
+  ## this person's home
+  for answer in configured(defaultsQ(t.name)):
+    var name: string
+    var value: Option[string]
+    if answer.isKind(bSym, unmarked):
+      name = answer.text
+    elif answer.isKind(bRec, unmarked) and answer.items.len == 2 and
+         answer.head.isKind(bSym, unmarked):
+      name = answer.head.text
+      let v = answer.items[1]
+      value = some(if v.isKind({bSym, bText}): v.text.expandTilde else: pretty(v))
+    else:
+      fail "the config's " & pretty(defaultsQ(t.name)) & " has " & pretty(answer) &
+        ", which is neither a flag nor (OPTION VALUE)"
+    let declared = t.opts.filterIt(it.long == name)
+    if declared.len == 0:
+      fail "the config gives " & t.name & " --" & name & ", which it doesn't take " &
+        "(bl config defaults " & t.name & " sets what it gives)"
+    if (declared[0].arg.len > 0) != value.isSome:
+      fail "the config gives " & t.name & " --" & name &
+        (if value.isSome: " with a value, and it is a flag" else: " without " & declared[0].arg & ", which it needs")
+    result.add "--" & name
+    if value.isSome: result.add value.get
+
+proc placeQ*(name: string): Value =
+  ## the question a name answers: (place NAME)
+  initRec(@[sym"place", sym(name)])
+
 proc placesNamed*(name: string): seq[string] =
   ## the places `name` names, in the order they were given
-  for v in keptNames():
-    let n = naming(v)
-    if n.isSome and n.get[0] == name:
-      return n.get[1]
+  for answer in configured(placeQ(name)):
+    if answer.isKind({bSym, bText}):
+      result.add answer.text
 
 proc takes(p: Place, ms: int): bool =
   ## whether something at the TCP place `p` takes a connection within `ms`
@@ -492,7 +589,7 @@ proc reached(name: string, places: seq[string]): Place =
   for spelled in places:
     if isName(spelled):
       raise newException(ValueError, name & " names another name, " & spelled &
-                         ", in " & placesFile())
+                         ", in " & configFile())
     ps.add parsePlace(spelled)
   if ps.len > 1:
     for p in ps:

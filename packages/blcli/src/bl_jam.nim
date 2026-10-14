@@ -16,7 +16,7 @@ import bl/lib/crypto/clave
 proc serve(t: Tool, a: Args) =
   if a.positional.len > 1:
     t.misuse "takes one place at most"
-  let spelled = if a.positional.len == 1: a.positional[0] else: JamListen
+  let spelled = if a.positional.len == 1: a.positional[0] else: configured("listen", JamListen)
   let place =
     try: parsePlace(spelled, allowZero = true)
     except ValueError as e: t.misuse e.msg
@@ -101,6 +101,7 @@ when it is there: --key signs with another, --no-sign with none.""",
 PLACE is as for bl serve. The default is """ & JamListen & """, every
 interface, so clients here find it at """ & JamPlace & """ and others
 reach it on the network, and 127.0.0.1:8456 keeps it to this machine.
+`bl config listen PLACE` makes PLACE the default instead.
 Anyone who can reach it can put to it unless --clave. Over a
 connection, (Q A) puts A as an answer to the question Q and (Q) asks Q.
 The jam tells each line that asks Q the record (Q R A) for every answer

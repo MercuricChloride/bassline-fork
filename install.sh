@@ -82,9 +82,9 @@ To keep a jam others on this network can reach:
 and tell them this machine's address, ${at:-from ipconfig getifaddr en0}:8456.
 To join a jam on another machine:
 
-  bl jam scan | bl cat    the jams on this network
+  bl scan | bl cat        the jams on this network
   bl name NAME ADDRESS:8456
-  export JAM_AT=NAME
+  bl config at NAME       the jam every client looks for, unless JAM_AT says
   bl jam                  a terminal
   claude-jam NAME         Claude Code, going by NAME
   codex-jam NAME          Codex

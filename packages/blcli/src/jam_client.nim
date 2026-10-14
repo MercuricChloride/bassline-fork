@@ -42,7 +42,7 @@ proc speakerFrom*(t: Tool, a: Args, signs = false): Speaker =
   ## who speaks, from --as, --key, --sign and --no-sign: a name, and a key
   ## if signing. Where `signs`, the person's own key signs when it is
   ## there, unless --no-sign
-  let name = a.get("as", getEnv("JAM_NAME", getEnv("USER", "someone")))
+  let name = a.get("as", getEnv("JAM_NAME", configured("as", getEnv("USER", "someone"))))
   result.name = sym(name)
   if a.has("key"): result.key = some loadKeypair(a.get("key"))
   elif a.has("sign"): result.key = some loadKeypair(defaultKey())
@@ -50,13 +50,15 @@ proc speakerFrom*(t: Tool, a: Args, signs = false): Speaker =
     result.key = some loadKeypair(defaultKey())
 
 proc placeFrom*(t: Tool, a: Args): Place =
-  let spelled = a.get("at", getEnv("JAM_AT", JamPlace))
+  let spelled = a.get("at", getEnv("JAM_AT", configured("at", JamPlace)))
   result = try: parsePlace(spelled) except ValueError as e: t.misuse e.msg
   if result.kind != tcpPlace: t.misuse "a jam is reached over tcp"
 
 let speakingOpts* = @[
-  Opt(long: "at", arg: "PLACE", help: "the jam (default " & JamPlace & ")"),
-  Opt(long: "as", arg: "NAME", help: "the name to go by (default $USER)"),
+  Opt(long: "at", arg: "PLACE", help: "the jam (default $JAM_AT, else the config's at, else " &
+                                     JamPlace & ")"),
+  Opt(long: "as", arg: "NAME", help: "the name to go by (default $JAM_NAME, else the config's as, " &
+                                     "else $USER)"),
   Opt(long: "key", arg: "PATH", help: "sign everything with this keypair"),
   Opt(long: "sign", help: "sign everything with ~/.bl/key.blb"),
   Opt(long: "no-sign", help: "sign nothing (bl jam signs with ~/.bl/key.blb " &
