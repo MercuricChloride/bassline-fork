@@ -1,7 +1,8 @@
 ## jam: answers put and questions asked, told to whoever asks
 
-import std/[options, os, sequtils, unittest]
+import std/[options, os, sequtils, sets, unittest]
 import bl/[core, queries]
+import bl/queries/rewrite
 import bl/lib/[blmacro, bvarfile, jam]
 import bl/lib/crypto/[clave, digest]
 
@@ -12,8 +13,9 @@ proc listener(): (ref seq[Value], (Value) -> bool) =
     told[].add v
     true))
 
-proc memoryJam(signedOnly = false): Jam =
-  newJam(spaceVar[Value, Ranked[Value]](), signedOnly)
+proc memoryJam(signedOnly = false, passes: openArray[string] = []): Jam =
+  newJam(spaceVar[Value, Ranked[Value]](), signedOnly,
+         passes = passes.mapIt(rewrite.Shape.fromValue(rv(it))))
 
 proc seed(n: byte): Keypair =
   var s: Seed
@@ -351,3 +353,54 @@ suite "stamps":
     let late = initRec(@[sym"tea-msg", bl 3, readValue("0!"), bl(nil), initRec(@[bl general, d(bl "a")])])
     check stampOf(late, kp.pubkey).isNone
     check stampOf(teaMsg(3, d(bl "a"), bl(nil)), kp.pubkey).isSome
+
+suite "passing through":
+  const digests = "(shape ((digest a h) v) {a h v})"
+
+  test "what fits a shape it passes is told to whoever asks now, as (Q nil A), and kept nowhere":
+    let jam = memoryJam(passes = [digests])
+    let (now, a) = listener()
+    let (later, b) = listener()
+    let (alice, bob) = (jam.newLine(a), jam.newLine(b))
+    check jam.hear(alice, rv"((digest blake2b 0x01))")
+    check jam.hear(bob, rv"((digest blake2b 0x01) 0xbeef)")
+    check now[] == @[rv"((digest blake2b 0x01) nil 0xbeef)"]
+    check jam.hear(bob, rv"((digest blake2b 0x01))")
+    check later[].len == 0                       # nobody asking later is told it
+    check jam.hear(bob, rv"(general hi)")        # what fits no shape is kept
+    check jam.hear(bob, rv"(general)")
+    check later[] == @[rv"(general 1 hi)"]       # and takes the next rank
+
+  test "it tells what it passes the same way, and no line puts to it":
+    let jam = memoryJam(passes = [digests, "(shape (typing w) {w})"])
+    let (told, t) = listener()
+    let line = jam.newLine(t)
+    check jam.hear(line, rv"(passes)")
+    check told[].len == 2 and told[].allIt(it.items[0] == PassesQ and it.items[1] == rv"nil")
+    check told[].mapIt(it.items[2]).toSet == @[rv(digests), rv"(shape (typing w) {w})"].toSet
+    check not jam.hear(line, rv"(passes (shape (general w) {w}))")
+    check told[].len == 2
+    check memoryJam().hear(line, rv"(passes)")   # none, for a jam that keeps everything
+
+  test "a signed answer passes as it was put, and only a signature that holds":
+    let kp = seed(9)
+    let jam = newJam(spaceVar[Value, Ranked[Value]](), signedOnly = true,
+                     passes = [rewrite.Shape.fromValue(rv(digests))])
+    let (told, t) = listener()
+    let line = jam.newLine(t)
+    let alice = Speaker(name: rv"alice", key: some kp)
+    check jam.hear(line, alice.ask(rv"(digest blake2b 0x02)"))
+    let said = alice.put(rv"(digest blake2b 0x02)", rv"0xcafe")
+    check jam.hear(line, said)
+    check not jam.hear(line, rv"((digest blake2b 0x02) 0xcafe)")   # unsigned
+    check told[] == @[initRec(@[rv"(digest blake2b 0x02)", rv"nil", said])]
+    let p = passedOf(told[0]).get
+    check p.said == rv"0xcafe" and p.signer == some(kp.pubkey) and p.answer == said
+    check heard(told[0]).isNone                  # it has no rank to be heard at
+
+  test "a reader keeps no passed answer in its ranked space":
+    let local = spaceVar[Value, Ranked[Value]]()
+    check local.keep(rv"(q nil a)").isNone
+    check local.heardIn(rv"q").toSeq.len == 0
+    check passedOf(rv"(q nil a)").get.said == rv"a"
+    check passedOf(rv"(q 1 a)").isNone

@@ -43,6 +43,16 @@
 ## - an ID is a name, or an object of names, a key among them for
 ##   whoever signs: !{(identity alice) (identity 0x…)}.
 ##
+## A jam may be given shapes it passes through, for what is too bulky or
+## too brief to keep, such as file content its keepers hold. An answer
+## whose (Q A) fits one of them is taken and checked as any put is, and
+## told to each line asking Q at that moment as (Q nil A), nil where the
+## rank goes, A as it was put, signed if it came signed. It is kept
+## nowhere: it has no place in the jam's order, isn't stamped, and
+## nobody who asks Q later is told it. Asked (passes), a jam tells each
+## shape it passes the same way, (passes nil SHAPE); a line may ask
+## (passes) and not put to it. A jam given no shapes keeps everything.
+##
 ## A jam given a key keeps its order as a tea-time order
 ## (`bl/lib/teatime`). It goes by a name and that key, says so in its own
 ## (here !{(by ID) (at MS) (stamps (stamps NAME))}), and for every answer
@@ -60,6 +70,7 @@
 
 import std/[algorithm, options, sequtils, sysrand]
 import ../[core, queries]
+import ../queries/rewrite
 import ./teatime
 import ./crypto/[clave, digest]
 export teatime
@@ -78,6 +89,7 @@ let
   ReQ* = sym"re"        ## the digest of what it answers
   AtQ* = sym"at"        ## when, by the speaker's clock, in milliseconds
   StampsQ* = sym"stamps"  ## (stamps NAME): where a jam named NAME puts its stamps
+  PassesQ* = sym"passes"  ## the shapes of what a jam passes through, unkept
   SignedHead = sym"signed"
 
 proc opened*(v: Value): Option[tuple[said: Value, signer: Option[Key]]] =
@@ -113,6 +125,7 @@ type
     askings: seq[Asking]
     reflector: Reflector             ## signs its stamps; nil for a jam that doesn't
     stampsQ: Value                   ## where it puts them
+    passes: seq[rewrite.Shape]       ## what it tells and doesn't keep
 
 proc who*(local: BVar[Value, Ranked[Value]]): seq[Value]
 proc put(jam: Jam, line: JamLine, q, kept, said: Value): bool
@@ -132,16 +145,16 @@ proc stamp(jam: Jam, q, kept: Value, rank: int): Ranked[Value] =
   jam.kept.incl initRec(@[jam.stampsQ, signed])
 
 proc newJam*(log: BVar[Value, Ranked[Value]], signedOnly = false,
-             key = none(Keypair), name = sym"jam"): Jam =
+             key = none(Keypair), name = sym"jam", passes: openArray[rewrite.Shape] = []): Jam =
   ## a jam keeping what is put in `log`, which may hold some already,
   ## and which jam it is with it; a log holding none is a jam beginning,
   ## going by `name`. Whoever it says is here is gone: no line reaches
   ## them yet. Given a key, it stamps what it keeps, going by `name` and
   ## the key, its order going on from the stamps the log holds; a log
   ## whose ranks that key hasn't all stamped, once each and in one
-  ## chain, is refused
+  ## chain, is refused. What fits `passes` it passes through, unkept
   result = Jam(log: log, kept: initSet(), signedOnly: signedOnly,
-               stampsQ: initRec(@[StampsQ, name]))
+               stampsQ: initRec(@[StampsQ, name]), passes: @passes)
   let jam = result
   for r in log.search.toValue.answers(HoldsQ).flatMaps(it.members):
     jam.kept.incl initRec(@[r.items[0], r.items[2]])
@@ -178,11 +191,23 @@ proc told(q: Value, r: Ranked[Value]): Value =
   ## an answer to `q` as a line is told it, (Q R A)
   initRec(@[q, toValue(r.rank), r.answer])
 
-proc tell(jam: Jam, q: Value, r: Ranked[Value]) =
-  ## every line asking `q` told an answer just kept; a line that refuses
-  ## is dropped
+proc passed(q, a: Value): Value =
+  ## an answer to `q` as a line is told it when the jam passes it
+  ## through, (Q nil A)
+  initRec(@[q, null(), a])
+
+proc tell(jam: Jam, q, record: Value) =
+  ## every line asking `q` told `record`; a line that refuses is dropped
   for a in jam.askings.filterIt(it.q == q):
-    if a.line.open and not a.line.tell(told(q, r)): jam.drop(a.line)
+    if a.line.open and not a.line.tell(record): jam.drop(a.line)
+
+proc tell(jam: Jam, q: Value, r: Ranked[Value]) =
+  ## every line asking `q` told an answer just kept
+  jam.tell(q, told(q, r))
+
+proc passes(jam: Jam, said: Value): bool =
+  ## whether the jam passes `said`, a (Q A), through
+  jam.passes.anyIt(it.fillings(said).next.isSome)
 
 proc put(jam: Jam, line: JamLine, q, kept, said: Value): bool =
   ## keeps `kept` as an answer to `q`, `said` being what it says
@@ -206,6 +231,11 @@ proc ask(jam: Jam, line: JamLine, q: Value): bool =
   ## tells the line every answer to `q` it has, and then each as it is
   ## kept
   if jam.askings.anyIt(it.line == line and it.q == q): return true
+  if q == PassesQ:
+    for s in jam.passes:
+      if not line.tell(passed(q, s.toValue)):
+        jam.drop(line)
+        return true
   for r in jam.log[q]:
     if not line.tell(told(q, r)):
       jam.drop(line)
@@ -223,9 +253,13 @@ proc hear*(jam: Jam, line: JamLine, v: Value): bool =
   case said.items.len
   of 1: jam.ask(line, said.items[0])
   of 2:
-    if said.items[0] == JamQ or (jam.reflector != nil and said.items[0] == jam.stampsQ):
+    if said.items[0] in [JamQ, PassesQ] or
+       (jam.reflector != nil and said.items[0] == jam.stampsQ):
       return false
     let kept = if o.get.signer.isSome: v else: said.items[1]
+    if jam.passes(said):
+      jam.tell(said.items[0], passed(said.items[0], kept))
+      return true
     jam.put(line, said.items[0], kept, said.items[1])
   else: false
 
@@ -265,29 +299,50 @@ type
     said*: Value            ## the answer itself
     signer*: Option[Key]    ## the key that signed it, if it came signed
 
+  Passed* = object
+    ## an answer a jam passed through, told as it came and kept nowhere,
+    ## so it has no rank
+    q*: Value               ## the question it answers
+    answer*: Value          ## as put: the answer, or the signed (Q A)
+    said*: Value            ## the answer itself
+    signer*: Option[Key]    ## the key that signed it, if it came signed
+
   Speaker* = object
     ## someone speaking to a jam: the name they go by, and a key to sign
     ## with, if they sign
     name*: Value
     key*: Option[Keypair]
 
+proc reading(q, a: Value): Option[tuple[said: Value, signer: Option[Key]]] =
+  ## what an answer to `q` says, as a jam told it. An answer that came
+  ## signed says nothing unless its signature holds and it answers `q`,
+  ## or is a reflector's own message, (tea-msg …), which says what it is
+  let o = opened(a)
+  if o.isNone or o.get.signer.isNone: return o
+  let inner = o.get.said
+  if TeaMsg.fits(inner): return o
+  if inner.isKind(bRec) and inner.items.len == 2 and inner.items[0] == q:
+    return some (inner.items[1], o.get.signer)
+  none(tuple[said: Value, signer: Option[Key]])
+
 proc heard*(record: Value): Option[Heard] =
-  ## (Q R A) as a jam tells it. An answer that came signed is passed over
-  ## unless its signature holds and it answers this question, or is a
-  ## reflector's own message, (tea-msg …), which says what it is
+  ## (Q R A) as a jam tells it, read as `reading` reads A; nothing for
+  ## an answer passed through, (Q nil A), which has no rank
   if not record.isKind(bRec) or record.items.len != 3: return none(Heard)
   let (q, r, a) = (record.items[0], record.items[1], record.items[2])
   if not r.isKind(bNum, unmarked) or not r.num.isInt or r.num.toInt < 0: return none(Heard)
-  let o = opened(a)
+  let o = reading(q, a)
   if o.isNone: return none(Heard)
-  var h = Heard(q: q, rank: r.num.toInt, answer: a, said: a)
-  if o.get.signer.isSome:
-    let inner = o.get.said
-    if TeaMsg.fits(inner): h.said = inner
-    elif inner.isKind(bRec) and inner.items.len == 2 and inner.items[0] == q: h.said = inner.items[1]
-    else: return none(Heard)
-    h.signer = o.get.signer
-  some h
+  some Heard(q: q, rank: r.num.toInt, answer: a, said: o.get.said, signer: o.get.signer)
+
+proc passedOf*(record: Value): Option[Passed] =
+  ## (Q nil A), an answer a jam passed through, read as `reading` reads A
+  if not record.isKind(bRec) or record.items.len != 3 or
+     not record.items[1].isKind(bNil, unmarked): return none(Passed)
+  let (q, a) = (record.items[0], record.items[2])
+  let o = reading(q, a)
+  if o.isNone: return none(Passed)
+  some Passed(q: q, answer: a, said: o.get.said, signer: o.get.signer)
 
 proc keep*(local: BVar[Value, Ranked[Value]], record: Value): Option[Heard] =
   ## keeps what a jam told in a reader's own ranked space, answering what

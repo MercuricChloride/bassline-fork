@@ -1,0 +1,14 @@
+; Files as values, as bl/lib/fs.nim reads and writes them. Content is
+; asked by its digest, (digest blake2b H), and a digest's answer is read
+; by what it is: a bytes atom is a whole file, a chunks record a file in
+; parts, a chunk one part, a tree a directory. A tree names what is in
+; it, so a directory under another name keeps its digest.
+{
+  (struct chunk {exact (rep record)} (bytes bytes))
+  (struct chunks {exact (rep record)} (size number) (parts [digest]))
+  (struct file {(rep record) (nim FileEntry)}
+    (content digest) (size number) (mode number))
+  (struct dir {(rep record) (nim DirEntry)} (tree digest) (mode number))
+  (struct link {(rep record) (nim LinkEntry)} (target text))
+  (struct tree {(rep record) (nim FsTree)} (entries {text: value}))
+}
