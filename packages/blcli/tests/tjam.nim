@@ -1,6 +1,22 @@
 ## bl jam: serve, list, scan, the terminal's lines, mcp and share
 
+import std/sugar
 import cli
+
+proc bridge(args: seq[string]): Process =
+  ## `bl jam bridge ARGS`, once it says it is bridging
+  result = startProcess(bin / "bl-jam", args = @["bridge"] & args, options = {})
+  let said = result.errorStream.readLine
+  doAssert said.startsWith("-- bridging "), said
+
+proc isSigned(v: Value): bool = v.isKind(bRec) and v.head == sym"signed"
+
+proc stopBridge(p: Process): string =
+  ## its chatter, once it has gone
+  discard kill(Pid(p.processID), SIGTERM)
+  discard p.waitForExit
+  result = p.errorStream.readAll
+  p.close()
 
 suite "jam":
   test "a jam tells whoever asks what was put, and then what comes":
@@ -152,6 +168,114 @@ suite "jam":
     check heard[0].items[2].items[1] == decoded(blb("(general signed)"))[0]
     line.close()
     check "refused (general unsigned)" in jam.stop
+
+  test "bl jam bridge puts on each jam what the other tells it, signed as it was said":
+    let key = tmp / "bridgekey.blb"
+    discard sh("bl clave keygen --out " & key)
+    let (a, b) = (jamServe(), jamServe())
+    check a.put(blb("(rooms general)")).code == 0
+    let br = bridge(@[":" & a.port, ":" & b.port])
+    check sh("bl clave sign --key " & key & " | bl reach --source :" & a.port,
+             blb("(general !{(by bob) (said \"hi\")})")).code == 0
+    check b.put(blb("(general !{(by carol) (said \"hey\")})")).code == 0
+    var (onA, onB) = (newSeq[Value](), newSeq[Value]())
+    let (lineA, lineB) = (a.asking(blb("(general)")), b.asking(blb("(general)")))
+    lineA.hearUntil(onA, vs => vs.len >= 2)
+    lineB.hearUntil(onB, vs => vs.len >= 2)
+    onA.add lineA.told
+    onB.add lineB.told
+    check onA.len == 2 and onB.len == 2          # each once, nothing gone round
+    check onA.mapIt(it.items[2]).sorted == onB.mapIt(it.items[2]).sorted
+    let signed = onB.filterIt(it.items[2].isSigned)
+    check signed.len == 1 and heard(signed[0]).get.signer.isSome
+    check b.asking(blb("(rooms)")).told.mapIt(it.items[2]) == @[sym"general"]
+    lineA.close()
+    lineB.close()
+    discard br.stopBridge
+    check sh("bl jam bridge :" & a.port & " :" & a.port).errors.contains("are the same jam")
+    discard a.stop
+    discard b.stop
+
+  test "bl jam running lists what is served and bridged here, and bl jam stop stops it":
+    let (a, b) = (jamServe(), jamServe())
+    let br = bridge(@[":" & a.port, ":" & b.port])
+    let mine = [a.p.processID, b.p.processID, br.processID]
+    let listed = decoded(sh("bl jam running").output).filterIt(
+      it.items[^1][sym"pid"].num.toInt in mine)
+    check listed.len == 3
+    check listed.filterIt(it.items[0] == sym"jam").mapIt(it.items[2][sym"served"].text).sorted ==
+      @[a.place, b.place].sorted
+    check listed.filterIt(it.items[0] == sym"bridge").mapIt(it.items[1][sym"ends"]) ==
+      @[initList(@[toValue(a.place), toValue(b.place)])]
+    var r = sh("bl jam stop :" & a.port & " bridge")
+    check r.code == 0 and ("stopped jam jam at " & a.place) in r.errors
+    check ("stopped the bridge between " & a.place & " and " & b.place) in r.errors
+    check not a.p.running and not br.running
+    r = sh("bl jam stop nothing-here")
+    check r.code == 1 and "nothing running here is nothing-here" in r.errors
+    check sh("bl jam stop --all").code == 0
+    check not b.p.running
+    check decoded(sh("bl jam running").output).filterIt(
+      it.items[^1][sym"pid"].num.toInt in mine).len == 0
+    discard a.stop
+    discard b.stop
+    br.close()
+
+  test "bl jam bridge: what came unsigned a jam taking signed only takes with --sign":
+    let key = tmp / "bridgekey.blb"
+    let (a, b) = (jamServe(), jamServe(@["--memory", "--clave"]))
+    check a.put(blb("(rooms general) (general !{(by bob) (said \"hi\")})")).code == 0
+    var br = bridge(@[":" & a.port, ":" & b.port, "--key", key])
+    let ask = sh("bl clave sign --key " & key, blb("(general)")).output
+    check b.asking(ask).told.len == 0
+    discard br.stopBridge
+    br = bridge(@[":" & a.port, ":" & b.port, "--key", key, "--sign"])
+    var onB: seq[Value]
+    let line = b.asking(ask)
+    line.hearUntil(onB, vs => vs.len >= 1)
+    check onB.len == 1 and onB[0].items[2].isSigned
+    check heard(onB[0]).get.said.answer(sym"by") == some sym"bob"
+    discard br.stopBridge
+    check a.asking(blb("(general)")).told.len == 1    # the bridge's signing isn't brought back
+    line.close()
+    check "refused (general !{" in b.stop
+    discard a.stop
+
+  test "a client called gone while it is still here says so again, and gone once when it goes":
+    let jam = jamServe()
+    var alice = jam.agent("alice")
+    let line = jam.asking(blb("(here) (gone)"))
+    var told: seq[Value]
+    line.hearUntil(told, vs => vs.len >= 1)
+    check jam.put(blb("(gone !{(by alice) (at 1)})")).code == 0
+    line.hearUntil(told, vs => vs.countIt(it.items[0] == sym"here") >= 2)
+    check told.mapIt(it.items[0]) == @[sym"here", sym"gone", sym"here"]
+    alice.leave
+    line.hearUntil(told, vs => vs.len >= 4)
+    told.add line.told
+    check told.mapIt(it.items[0]) == @[sym"here", sym"gone", sym"here", sym"gone"]
+    line.close()
+    discard jam.stop
+
+  test "bl jam bridge: once it drops, who came across is gone, and says so again when it is back":
+    let (a, b) = (jamServe(), jamServe())
+    var alice = a.agent("alice")
+    var br = bridge(@[":" & a.port, ":" & b.port])
+    let line = b.asking(blb("(here) (gone)"))
+    var told: seq[Value]
+    let presence = proc(vs: seq[Value]): seq[Value] =
+      vs.filterIt(it.items[2].answer(sym"by") == some sym"alice").mapIt(it.items[0])
+    line.hearUntil(told, vs => presence(vs) == @[sym"here"])
+    discard br.stopBridge
+    line.hearUntil(told, vs => presence(vs) == @[sym"here", sym"gone"])
+    br = bridge(@[":" & a.port, ":" & b.port])
+    line.hearUntil(told, vs => presence(vs).len >= 3)
+    check presence(told) == @[sym"here", sym"gone", sym"here"]
+    line.close()
+    alice.leave
+    discard br.stopBridge
+    discard a.stop
+    discard b.stop
 
   test "bl jam mcp: two tools, tell and heard, and what is said to it as a channel":
     let jam = jamServe()

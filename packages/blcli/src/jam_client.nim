@@ -1,5 +1,10 @@
 ## A line to a jam, for the jam's own clients: the speaker on it, and the
 ## reader's own space of what the jam has told it
+##
+## A client that has said it is here and hears, after that, that it is
+## gone says it is here again: a jam says someone is gone when the line
+## that brought their here goes, a bridge's among them, and that is not
+## them going.
 
 import std/[options, os, posix, times, sugar]
 import harness
@@ -24,6 +29,9 @@ type
     closed*: bool                       ## whether the jam has gone
     jam*: Option[Value]                 ## which jam it is, once it has said
     elsewhere*: Option[Value]           ## another jam found at its place since
+    here: Option[Value]                 ## the here it said last, as the jam keeps it
+    hereRank: int                       ## where the jam heard that here; -1 until told
+    leaving: bool                       ## whether it has said it is gone
 
 proc defaultKey*(): string =
   getHomeDir() / ".bl" / "key.blb"
@@ -68,8 +76,26 @@ proc called*(jam: Option[Value]): string =
   ## the name a jam goes by, from its answer to (jam), or nothing
   if jam.isSome: nameOf(jam.get) else: ""
 
+proc ownRoom*(id: Value): Value =
+  ## someone's own room: (for NAME), by the first name they go by
+  for n in identities(id):
+    if n.kind in {bSym, bText}: return initRec(@[ForQ, n])
+  initRec(@[ForQ, id])
+
 proc ask*(c: Client, q: Value)
+proc put*(c: Client, q, a: Value): Value
 proc turn*(ms: int)
+
+proc stays(c: Client, h: Heard) =
+  ## follows its own here, and says it again when it hears after it that
+  ## it is gone
+  if c.here.isNone or c.leaving: return
+  if h.q == HereQ and h.answer == c.here.get:
+    c.hereRank = h.rank
+  elif h.q == GoneQ and c.hereRank >= 0 and h.rank > c.hereRank:
+    let by = h.said.answer(ByQ)
+    if by.isSome and sharesIdentity(by.get, c.speaker.by):
+      discard c.put(HereQ, c.speaker.here)
 
 proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
   ## a line to the jam at `place`, keeping what `was`, a line gone, was
@@ -80,9 +106,9 @@ proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
   ## Raises if it can't be reached
   let c =
     if was == nil: Client(speaker: speaker, local: spaceVar[Value, Ranked[Value]](),
-                          told: newBSet())
+                          told: newBSet(), hereRank: -1)
     else: Client(speaker: speaker, local: was.local, told: was.told,
-                 onHeard: was.onHeard, jam: was.jam)
+                 onHeard: was.onHeard, jam: was.jam, hereRank: -1)
   c.conn = waitFor connect(place.host, place.port)
   var first = true
   proc arrived(v: Value): bool =
@@ -98,7 +124,9 @@ proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
     if v in c.told: return true
     c.told.incl v
     let h = c.local.keep(v)
-    if h.isSome and c.onHeard != nil: c.onHeard(h.get)
+    if h.isSome:
+      if c.onHeard != nil: c.onHeard(h.get)
+      c.stays(h.get)
     true
   let pumping = c.conn.pump(arrived)
   pumping.addCallback(() => (block: c.closed = true))
@@ -125,10 +153,37 @@ proc ask*(c: Client, q: Value) =
 
 proc put*(c: Client, q, a: Value): Value =
   ## puts `a` as an answer to `q`, answering the answer as the jam will
-  ## keep it, to know it when it is told back
+  ## keep it, to know it when it is told back. Putting a here asks who
+  ## is here and gone, so the client hears if it is called gone after it
+  if q == HereQ: c.ask HereQ
   let v = c.speaker.put(q, a)
   discard c.send(v)
-  if c.speaker.key.isSome: v else: a
+  result = if c.speaker.key.isSome: v else: a
+  if q == HereQ:
+    c.here = some result
+    c.hereRank = -1
+    c.ask GoneQ
+
+proc carry*(c: Client, h: Heard, sign = false): Value =
+  ## puts what another jam told as it was put there, answering it as this
+  ## jam will keep it: an answer that came signed goes as it was signed,
+  ## and anything else as (Q A), signed by the speaker if `sign`
+  let o = opened(h.answer)
+  if o.isSome and o.get.signer.isSome and o.get.said.isKind(bRec, unmarked) and
+     o.get.said.items.len == 2 and o.get.said.items[0] == h.q:
+    discard c.send(h.answer)
+    return h.answer
+  if sign and c.speaker.key.isSome:
+    result = c.speaker.put(h.q, h.answer)
+    discard c.send(result)
+  else:
+    discard c.send(initRec(@[h.q, h.answer]))
+    result = h.answer
+
+proc hangUp*(c: Client) =
+  ## closes the line, saying nothing
+  c.closed = true
+  c.conn.close()
 
 proc hello*(c: Client): Value {.discardable.} =
   ## the questions everyone asks, who is here, who has gone, which rooms
@@ -141,6 +196,7 @@ proc hello*(c: Client): Value {.discardable.} =
 
 proc bye*(c: Client) =
   ## that the speaker has stopped listening, sent before the line closes
+  c.leaving = true
   discard c.put(GoneQ, c.speaker.gone)
   try: discard waitFor c.conn.flush().withTimeout(1000)
   except CatchableError: discard

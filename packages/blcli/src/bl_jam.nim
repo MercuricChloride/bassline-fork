@@ -5,10 +5,11 @@
 ## answer to Q, (Q) asks Q, and a jam tells whoever asks (Q R A) for each
 ## answer, R its own order. `bl jam serve` is a jam; `bl jam` is a
 ## terminal on one; `bl jam mcp` puts an agent on one; `bl jam share`
-## shares a search space on one; any program joins through `bl reach`.
+## shares a search space on one; `bl jam bridge` tells two jams what is
+## said on each other; any program joins through `bl reach`.
 
 import std/[options, os, strutils, sugar]
-import harness, jam_client, jam_kept, jam_tui, jam_mcp, jam_share, jam_scan
+import harness, jam_client, jam_kept, jam_tui, jam_mcp, jam_share, jam_scan, jam_bridge
 import bl/[core, queries]
 import bl/lib/[bvarfile, jam, server]
 import bl/lib/crypto/clave
@@ -70,6 +71,10 @@ proc serve(t: Tool, a: Args) =
   chatter "listening on " & at & ", as " & called &
     (if a.has("clave"): ", taking signed values only" else: "") &
     (if key.isSome: ", stamping what it keeps under " & $initRec(@[StampsQ, name]) else: "")
+  var about = @[(sym"served", text(at)), (sym"pid", toValue(getCurrentProcessId())),
+                (sym"since", toValue(now()))]
+  if path.len > 0: about.add (sym"kept", text(path))
+  running(initRec(@[JamQ, name, initDict(about)]))
   if path.len > 0:
     served(path, at)
     chatter "keeping what is put in " & path
@@ -109,8 +114,9 @@ to Q, what it has and then each as it comes, R the order the jam heard
 it in; an answer put twice is kept once. Signed values from bl clave
 are taken as what they sign, and kept signed. When a line stops
 speaking, or the jam can no longer reach it, the jam puts
-(gone !{(by ID) (at MS)}) for each (here !{(by ID) …}) the line put; a
-jam started on a log does so for everyone the log says is here.
+(gone !{(by ID) (at MS)}) for each (here !{(by ID) …}) the line put and
+hasn't said since is gone; a jam started on a log does so for everyone
+the log says is here.
 
 Each jam is kept by name in ~/.bl/jams/NAME.blb: --as NAME serves the
 jam called NAME (default jam), and --as NAME --new begins one, so
@@ -143,6 +149,39 @@ holds what it held.""",
                                         "whose signatures hold"),
                Opt(long: "key", arg: "PATH", help: "sign the jam's order with this keypair")],
        run: serve),
+  Tool(name: "jam bridge", args: "PLACE [PLACE]",
+       summary: "two jams, each told what is said on the other",
+       about: """
+Keeps a line to each jam and puts on each what the other tells it, so
+whoever is on either hears what is said on both. Given one PLACE, the
+other is the jam this machine's clients use (--at, else $JAM_AT, else
+the config's at, else """ & JamPlace & """), and a PLACE may be a
+name from bl name. It asks both who is here and who has gone, which rooms
+there are, every room either lists, the own room of everyone either has
+heard from, each question --ask names, and every question a jam with a
+key has stamped. An answer goes as it was put: one that came signed goes
+as it was signed, so either jam takes it as its speaker's and a reader
+on either can check it, and anything else as (Q A), unsigned unless
+--sign. A jam keeps an answer once, and nothing a jam has told the
+bridge, or the bridge has put on it, is put on it again, so a value
+said on one jam reaches every jam bridged to it and stops. Which jam
+each is, and its stamps, stay its own.
+
+When either jam can't be reached the bridge hangs up on the other too,
+so that jam says whoever came across the bridge is gone, and it dials
+both again every two seconds. Whoever is still here hears they were
+called gone and says they are here again, and the bridge brings that
+across. It asks signed when there is a key (your own,
+~/.bl/key.blb, unless --key or --no-sign), so a jam taking signed values
+only answers it. What came unsigned such a jam takes only with --sign,
+as the bridge's word.""",
+       opts: @[speakingOpts[0],
+               Opt(long: "ask", arg: "Q",
+                   help: "ask both this question too (a name or any value), as many times as wanted"),
+               Opt(long: "key", arg: "PATH", help: "ask, and with --sign put, signed with this keypair"),
+               Opt(long: "sign", help: "sign what came unsigned, with --key or ~/.bl/key.blb"),
+               Opt(long: "no-sign", help: "ask unsigned")],
+       run: jam_bridge.run),
   Tool(name: "jam list", args: "",
        summary: "the jams kept on this machine, and what each holds",
        about: """
@@ -154,6 +193,25 @@ earliest and latest `at` its answers carry, and served where it is
 served now, if it is. `bl jam list | bl cat` reads it; `bl jam serve
 --as NAME` serves one.""",
        opts: @[], run: jam_kept.list),
+  Tool(name: "jam running", args: "",
+       summary: "the jams served and the bridges running on this machine",
+       about: """
+One value for each, whether it keeps what is put or not:
+(jam NAME {served: PLACE pid: N since: MS kept: PATH}) for a jam, kept
+only when it keeps a log, and (bridge {ends: [PLACE PLACE] pid: N
+since: MS}) for a bridge. Each says so in ~/.bl/running/PID.blb, held
+while it runs, so what has gone isn't listed, however it went.
+`bl jam running | bl cat` reads it, and bl jam stop stops one.""",
+       opts: @[], run: jam_kept.listRunning),
+  Tool(name: "jam stop", args: "[WHAT…]",
+       summary: "stops jams and bridges running on this machine",
+       about: """
+WHAT is a pid, a jam's name, the port it is served on as :PORT or
+HOST:PORT, or bridge for every bridge, as bl jam running lists them.
+Each is stopped, and said to be once it has gone; WHAT that names
+nothing running exits 1. --all stops everything running here.""",
+       opts: @[Opt(long: "all", help: "stop every jam and bridge running here")],
+       run: jam_kept.stop),
   Tool(name: "jam scan", args: "[PORT…]",
        summary: "the places on this machine's networks that answer, and what each jam says it is",
        about: """

@@ -26,8 +26,8 @@
 ## it was told by. A line may ask (jam) and not put to it. And once
 ## nothing more will arrive on a line, or it can no longer reach it, it
 ## puts (gone !{(by ID) (at MS)}) for each (here !{(by ID) …}) that line
-## put. A jam opened on a log puts it for everyone the log says is here,
-## since no line reaches them yet.
+## put and hasn't said since is gone. A jam opened on a log puts it for
+## everyone the log says is here, since no line reaches them yet.
 ##
 ## What people and programs share on top, which a jam needs none of:
 ##
@@ -195,9 +195,11 @@ proc put(jam: Jam, line: JamLine, q, kept, said: Value): bool =
     inc jam.next
     jam.tell(q, r)
     if stamping: jam.tell(jam.stampsQ, stamped)
-  if q == HereQ and line != nil:
+  if q in [HereQ, GoneQ] and line != nil:
     let id = said.answer(ByQ)
-    if id.isSome and id.get notin line.heres: line.heres.add id.get
+    if id.isSome:
+      line.heres.keepItIf(it != id.get)
+      if q == HereQ: line.heres.add id.get
   true
 
 proc ask(jam: Jam, line: JamLine, q: Value): bool =

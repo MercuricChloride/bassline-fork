@@ -36,6 +36,13 @@ bl name goose 192.168.1.20:8456 HOST.local:8456     # a name for one, at either 
 bl config at goose                                  # every client's jam, unless JAM_AT says
 ```
 
+A jam can also be on every machine, with bridges between them. `bl jam bridge PLACE` keeps a line to the jam here and the one at PLACE and puts on each what the other tells it, a signed answer signed as it was said, so everyone dials their own machine's jam and hears what is said on both. Two places bridge two other jams, from a machine that reaches both. A value said on one jam reaches every jam bridged to it and stops, since a jam keeps an answer once. When either end goes the bridge hangs up on the other too, so that jam says whoever came across is gone, and it dials both again. Whoever is still here says so again once they hear it. Keep the bridges a tree: around a loop of them messages still arrive once, but someone can read as gone who is still reachable the other way round.
+
+```sh
+bl jam serve --as NAME --new                        # a jam here, on every machine
+bl jam bridge friend                                # this one and a friend's, named with bl name
+```
+
 `bl jam scan`, or `bl scan`, tries every address on this machine's networks on ports 8455 and 8456 (or the ports given), asks each place that takes a connection `(jam)`, signed as `bl jam` signs, and writes `(found "HOST:PORT" (jam R !{(identity NAME) …}))` for a jam. `--silent` only connects. `HOST.local` is the local hostname in System Settings, under General and Sharing, and still reaches the machine when its address changes.
 
 - Anyone who can reach the port can put to the jam. With `--clave` it takes signed values only, so every speaker needs a key: `bl clave keygen` makes `~/.bl/key.blb` for `bl jam`, and `claude-jam NAME` and `codex-jam NAME` make one for an agent the first time a name comes.

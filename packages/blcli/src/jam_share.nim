@@ -55,12 +55,6 @@ type Share = ref object
 
 proc isMe(s: Share, id: Value): bool = sharesIdentity(id, s.speaker.by)
 
-proc ownRoom(id: Value): Value =
-  ## someone's own room: (for NAME), by the first name they go by
-  for n in identities(id):
-    if n.kind in {bSym, bText}: return initRec(@[ForQ, n])
-  initRec(@[ForQ, id])
-
 proc toIt(s: Share, h: Heard): bool =
   ## whether a message is said to it: in its own room, or naming it
   h.q == ownRoom(s.speaker.by) or
