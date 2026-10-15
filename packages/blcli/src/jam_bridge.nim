@@ -2,8 +2,9 @@
 ##
 ## The bridge keeps a line to each jam and asks both the same questions:
 ## who is here and who has gone, which rooms there are, every room either
-## lists, the own room of everyone either has heard from, the questions
-## it is given, and every question a jam with a key has stamped. Whatever
+## lists, the own room of everyone either has heard from, every question
+## a message it carries says it wants, (want Q), the questions it is
+## given, and every question a jam with a key has stamped. Whatever
 ## one jam tells it, it puts on the other, as it was put: an answer that
 ## came signed goes as it was signed, so either jam takes it as its
 ## speaker's and a reader on either can check it, and anything else as
@@ -22,6 +23,8 @@ import std/[options, os, sequtils, strutils, times]
 import harness, jam_client, jam_kept
 import bl/[core, queries]
 import bl/lib/jam
+
+let WantQ = sym"want"  ## a question a message says its speaker is asking: (want Q)
 
 type
   End = ref object
@@ -85,6 +88,7 @@ proc heard(b: Bridge, i: int, h: Heard) =
   elif h.q in [HereQ, GoneQ]:
     let by = h.said.answer(ByQ)
     if by.isSome: b.follow(ownRoom(by.get))
+  for q in h.said.answers(WantQ): b.follow(q)
   b.pass(i, h)
 
 proc reach(b: Bridge, i: int) =

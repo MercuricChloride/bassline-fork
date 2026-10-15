@@ -20,42 +20,9 @@ import bl/mold
 
 refuseWith BasslineError
 from bl/lib/crypto/digest import blake2b
+from bl/lib/fs import cuts
 
 moldable staticRead("archive.bl")
-
-const
-  MinChunk = 2 * 1024
-  MaxChunk = 64 * 1024
-  CutBits = 13 # cuts fall about every 2^13 bytes past the minimum
-  CutMask = ((1'u64 shl CutBits) - 1) shl (64 - CutBits)
-  Gear = block:
-    # fixed pseudo-random words, so every packer cuts in the same places
-    var
-      g: array[256, uint64]
-      x = 0'u64
-    for i in 0 ..< 256:
-      x += 0x9E3779B97F4A7C15'u64
-      var z = x
-      z = (z xor (z shr 30)) * 0xBF58476D1CE4E5B9'u64
-      z = (z xor (z shr 27)) * 0x94D049BB133111EB'u64
-      g[i] = z xor (z shr 31)
-    g
-
-iterator cuts(data: openArray[byte]): (int, int) =
-  ## the first and last index of each chunk: a cut falls where the gear
-  ## hash of the bytes since the last cut has its top bits clear
-  var
-    start = 0
-    h = 0'u64
-  for i in 0 ..< data.len:
-    h = (h shl 1) + Gear[data[i]]
-    let n = i - start + 1
-    if n >= MaxChunk or (n >= MinChunk and (h and CutMask) == 0):
-      yield (start, i)
-      start = i + 1
-      h = 0
-  if start < data.len:
-    yield (start, data.len - 1)
 
 proc digestOf(ce: openArray[byte]): Digest =
   Digest(algo: "blake2b", hash: @(blake2b(ce)))

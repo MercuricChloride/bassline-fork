@@ -1,12 +1,14 @@
-# `nim build` makes bin/bl, bin/bl-clave and bin/bl-jam; `nim test` builds them,
-# then runs each tests/t*.nim against bin/, or only those named (`nim test jam`).
+# `nim build` makes bin/bl, bin/bl-clave, bin/bl-jam and bin/bl-fs; `nim test`
+# builds them, then runs each tests/t*.nim against bin/, or only those named
+# (`nim test jam`).
 # blcli.nimble names the dependencies, and nim.cfg their paths, beside the
 # compiler flags.
 
-task build, "build bin/bl, bin/bl-clave and bin/bl-jam":
+task build, "build bin/bl, bin/bl-clave, bin/bl-jam and bin/bl-fs":
   exec "nim c --hints:off --out:bin/bl src/bl.nim"
   exec "nim c --hints:off --out:bin/bl-clave src/bl_clave.nim"
   exec "nim c --hints:off --out:bin/bl-jam src/bl_jam.nim"
+  exec "nim c --hints:off --out:bin/bl-fs src/bl_fs.nim"
 
 import std/[algorithm, os, strutils]
 

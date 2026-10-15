@@ -9,6 +9,7 @@ binDir = "bin"
 namedBin["bl"] = "bl"
 namedBin["bl_clave"] = "bl-clave"   # apart, so bl carries no signing code
 namedBin["bl_jam"] = "bl-jam"       # apart, with its terminal and MCP server
+namedBin["bl_fs"] = "bl-fs"         # apart, since an alias is signed
 
 # Dependencies
 

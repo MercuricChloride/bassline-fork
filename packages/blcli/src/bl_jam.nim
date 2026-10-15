@@ -5,13 +5,15 @@
 ## answer to Q, (Q) asks Q, and a jam tells whoever asks (Q R A) for each
 ## answer, R its own order. `bl jam serve` is a jam; `bl jam` is a
 ## terminal on one; `bl jam mcp` puts an agent on one; `bl jam share`
-## shares a search space on one; `bl jam bridge` tells two jams what is
-## said on each other; any program joins through `bl reach`.
+## shares a search space on one; `bl jam keep` keeps files on one; `bl
+## jam bridge` tells two jams what is said on each other; any program
+## joins through `bl reach`.
 
 import std/[options, os, strutils, sugar]
-import harness, jam_client, jam_kept, jam_tui, jam_mcp, jam_share, jam_scan, jam_bridge
+import harness, jam_client, jam_kept, jam_tui, jam_mcp, jam_share, jam_scan, jam_bridge, jam_keep
 import bl/[core, queries]
 import bl/lib/[bvarfile, jam, server]
+import bl/queries/rewrite
 import bl/lib/crypto/clave
 
 proc serve(t: Tool, a: Args) =
@@ -51,7 +53,11 @@ proc serve(t: Tool, a: Args) =
       except CatchableError as e: fail "can't keep the jam in " & path & ": " & e.msg
   let key = if a.has("key"): some loadKeypair(a.get("key")) else: none(Keypair)
   let name = sym(called)
-  let jam = newJam(log, signedOnly = a.has("clave"), key = key, name = name)
+  var passes: seq[rewrite.Shape]
+  for spelled in a.every("pass"):
+    try: passes.add rewrite.Shape.fromValue(readValue(spelled))
+    except ValueError as e: t.misuse "--pass takes a shape: " & e.msg
+  let jam = newJam(log, signedOnly = a.has("clave"), key = key, name = name, passes = passes)
   let observe: Observer = (e: EdgeEvent) => chatter($e)
   proc offer(tell: (Value) -> bool): Line =
     let line = jam.newLine(tell)
@@ -70,7 +76,9 @@ proc serve(t: Tool, a: Args) =
   let at = $Place(kind: tcpPlace, host: place.host, port: listener.port)
   chatter "listening on " & at & ", as " & called &
     (if a.has("clave"): ", taking signed values only" else: "") &
-    (if key.isSome: ", stamping what it keeps under " & $initRec(@[StampsQ, name]) else: "")
+    (if key.isSome: ", stamping what it keeps under " & $initRec(@[StampsQ, name]) else: "") &
+    (if passes.len > 0: ", passing through what fits " & $passes.len &
+                        (if passes.len == 1: " shape" else: " shapes") else: "")
   var about = @[(sym"served", text(at)), (sym"pid", toValue(getCurrentProcessId())),
                 (sym"since", toValue(now()))]
   if path.len > 0: about.add (sym"kept", text(path))
@@ -136,6 +144,16 @@ of the answer as put, T the jam's clock in milliseconds, and PREV the
 digest of the stamp before. Lines may ask (stamps NAME) and may not put
 to it.
 
+--pass SHAPE, as many times as wanted, passes through what fits: a
+put whose (Q A) fits SHAPE, (shape EXAMPLE {HOLE …}), is taken and
+checked as any put is, and told to each line asking Q at that moment as
+(Q nil A), nil where the rank goes, and kept nowhere, so nobody asking
+later is told it and it takes no rank or stamp. It suits what is too
+bulky or too brief to keep: --pass '(shape ((digest a h) v) {a h v})'
+passes file content, which keepers (bl jam keep) hold instead. Asked
+(passes), the jam tells each shape it passes as (passes nil SHAPE), and
+lines may not put to it.
+
 What is put is kept in the log, a bare concatenation of the records, so
 `bl cat ~/.bl/jams/NAME.blb` reads it, and a jam started on it again
 holds what it held.""",
@@ -147,7 +165,9 @@ holds what it held.""",
                Opt(long: "memory", help: "keep nothing past this run"),
                Opt(long: "clave", help: "take only values signed with bl clave " &
                                         "whose signatures hold"),
-               Opt(long: "key", arg: "PATH", help: "sign the jam's order with this keypair")],
+               Opt(long: "key", arg: "PATH", help: "sign the jam's order with this keypair"),
+               Opt(long: "pass", arg: "SHAPE",
+                   help: "tell what fits SHAPE and don't keep it, as many times as wanted")],
        run: serve),
   Tool(name: "jam bridge", args: "PLACE [PLACE]",
        summary: "two jams, each told what is said on the other",
@@ -158,8 +178,9 @@ other is the jam this machine's clients use (--at, else $JAM_AT, else
 the config's at, else """ & JamPlace & """), and a PLACE may be a
 name from bl name. It asks both who is here and who has gone, which rooms
 there are, every room either lists, the own room of everyone either has
-heard from, each question --ask names, and every question a jam with a
-key has stamped. An answer goes as it was put: one that came signed goes
+heard from, every question a message it carries says it wants (a record
+(want Q) in the message, as a keeper says what it lacks), each question
+--ask names, and every question a jam with a key has stamped. An answer goes as it was put: one that came signed goes
 as it was signed, so either jam takes it as its speaker's and a reader
 on either can check it, and anything else as (Q A), unsigned unless
 --sign. A jam keeps an answer once, and nothing a jam has told the
@@ -235,12 +256,16 @@ bl cat` reads what was found, and bl name names a place.""",
                Opt(long: "no-sign", help: "ask unsigned")],
        run: jam_scan.run),
   Tool(name: "jam mcp", args: "[ROOM…]",
-       summary: "a jam as tools for an agent, over MCP on stdio",
+       summary: "jams as tools for an agent, over MCP on stdio",
        about: """
 For Claude Code and other MCP clients: two tools in values, tell, which
 hands the jam values exactly as written ((Q A) puts, (Q) asks), and
 heard, which searches what the jam has told it as (heard Q R READINGS A)
-records. --push claude (default) pushes what is said to the agent as a
+records. An agent may be on several jams at once: jams lists them and,
+with scan, finds what answers on this machine's networks as bl jam scan
+does, join puts it on one, leave takes it off, and tell and heard take
+jam to say which. --at given more than once starts it on each.
+--push claude (default) pushes what is said to the agent as a
 claude/channel notification once the MCP client is initialized;
 --push none gives tool-only delivery, with no channel notifications.
 The agent goes by --as, or $JAM_NAME, or claude-XXXX.
@@ -269,7 +294,30 @@ Whoever comes onto the jam after it is told once, in their own room,
 what it shares and how to ask, as (sharing DIGEST TEXT), and the first
 ROOM hears the same once; the space's answers to `help` say how to ask
 it. What a share says, found and sharing values, is passed over.""",
-       opts: speakingOpts, run: jam_share.run)]
+       opts: speakingOpts, run: jam_share.run),
+  Tool(name: "jam keep", args: "[ROOM…]",
+       summary: "a keeper on a jam: files held by digest, put where someone wants them",
+       about: """
+Holds a keep, values filed under their digests (bl/lib/fs: a file's
+bytes, a manifest (chunks SIZE [D …]) and its (chunk BYTES), a
+(tree {NAME: ENTRY …})), in --keep PATH, ~/.bl/fs/keep.blb by default,
+and hears its own room and ROOM… (default fs). A message there saying
+(want D) for each digest someone lacks is taken up when the keeper holds
+some of them and hasn't been told the jam answers them: it asks the jam
+each and says (has D) for each, re the want, and once that is told back
+puts (D V) for each D the jam hasn't answered and no earlier (has D) re
+the same want names, so the first keeper to say has, in the jam's
+order, puts it. A message saying (keep D) has it fetch D and everything
+under it: it asks the jam, says (want D) re the keep for what it lacks,
+stores each answer that checks against its digest, and says (kept D) re
+the keep once it holds all of it. A want or keep for someone else is
+left to them. What was said to it while it was away is taken up when it
+comes back, unless it has said something re it, or someone has said has
+re a want. It goes by --as, or $JAM_NAME, or keeper, and signs with your
+own key, ~/.bl/key.blb, when it is there.""",
+       opts: speakingOpts & @[Opt(long: "keep", arg: "PATH",
+                                  help: "the keep (default ~/.bl/fs/keep.blb)")],
+       run: jam_keep.run)]
 
 proc usage(): string =
   result = "usage: bl jam [COMMAND] [ARGS…]\n\n" &

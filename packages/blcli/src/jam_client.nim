@@ -23,9 +23,11 @@ type
     conn: Conn
     speaker*: Speaker
     local*: BVar[Value, Ranked[Value]]  ## what the jam has told it
+    passed*: BVar[Value, Value]         ## what the jam has passed it, kept apart, unranked
     told: BSet                          ## every record told, so each is heard once
     asked*: seq[Value]                  ## the questions asked on it
     onHeard*: (Heard) -> void           ## told of each answer as it comes
+    onPassed*: (Passed) -> void         ## told of each answer passed through as it comes
     closed*: bool                       ## whether the jam has gone
     jam*: Option[Value]                 ## which jam it is, once it has said
     elsewhere*: Option[Value]           ## another jam found at its place since
@@ -106,9 +108,9 @@ proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
   ## Raises if it can't be reached
   let c =
     if was == nil: Client(speaker: speaker, local: spaceVar[Value, Ranked[Value]](),
-                          told: newBSet(), hereRank: -1)
-    else: Client(speaker: speaker, local: was.local, told: was.told,
-                 onHeard: was.onHeard, jam: was.jam, hereRank: -1)
+                          passed: spaceVar[Value, Value](), told: newBSet(), hereRank: -1)
+    else: Client(speaker: speaker, local: was.local, passed: was.passed, told: was.told,
+                 onHeard: was.onHeard, onPassed: was.onPassed, jam: was.jam, hereRank: -1)
   c.conn = waitFor connect(place.host, place.port)
   var first = true
   proc arrived(v: Value): bool =
@@ -127,6 +129,11 @@ proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
     if h.isSome:
       if c.onHeard != nil: c.onHeard(h.get)
       c.stays(h.get)
+    else:
+      let p = passedOf(v)
+      if p.isSome:
+        discard c.passed.send(p.get.q, p.get.said)
+        if c.onPassed != nil: c.onPassed(p.get)
     true
   let pumping = c.conn.pump(arrived)
   pumping.addCallback(() => (block: c.closed = true))
@@ -163,6 +170,16 @@ proc put*(c: Client, q, a: Value): Value =
     c.here = some result
     c.hereRank = -1
     c.ask GoneQ
+
+proc heardSearch*(c: Client): Search[Value, Value] =
+  ## a question to what the jam has told the client answers it, taken out
+  ## of its signature: what it kept, in the jam's order, taking turns with
+  ## what it passed through. It asks nothing: whoever wants a question
+  ## answered asks it, and the answers come as they come. Who signed an
+  ## answer is dropped, so it suits answers checked by what they are, such
+  ## as content by its digest; where the signer matters, read heardIn
+  newSearch[Value, Value]((q: Value) =>
+    alt(c.local.heardIn(q).map((h: Heard) => h.said), c.passed[q]))
 
 proc carry*(c: Client, h: Heard, sign = false): Value =
   ## puts what another jam told as it was put there, answering it as this

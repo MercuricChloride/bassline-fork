@@ -489,6 +489,88 @@ suite "jam":
     a.leave()
     discard jam.stop
 
+  test "bl jam mcp: on several jams at once, each its own, told and heard by name or place":
+    let one = jamServe(@["--memory", "--as", "one"])
+    let two = jamServe(@["--memory", "--as", "two"])
+    let (atOne, atTwo) = ("\"127.0.0.1:" & one.port & "\"", "\"127.0.0.1:" & two.port & "\"")
+    var a = one.agent("agent-8")
+    check a.call(1, "join", %*{"at": ":" & two.port}) == "(joined two " & atTwo & ")"
+    check a.call(2, "jams", %*{}) == "(on one " & atOne & ")\n(on two " & atTwo & ")"
+    check a.call(3, "tell", %*{"value": "(general !{(by agent-8) (said \"hi two\")})",
+                               "jam": "two"}).startsWith("(put general ")
+    check two.asking(blb("(general)")).told.anyIt(it.items[2].answer(sym"said") == some toValue("hi two"))
+    check one.asking(blb("(general)")).told.len == 0
+    check two.put(blb("(general !{(by bob) (said \"on two\") (for agent-8)})")).code == 0
+    let pushed = a.pushed
+    check pushed.len == 1 and pushed[0]["params"]["meta"]["jam"].getStr == "two"
+    check readValue(pushed.said[0]).items[3].dict[sym"jam"] == sym"two"
+    let toYou = "(shape (heard q r {to-you: w}) {q r w})"
+    check "on two" in a.call(4, "heard", %*{"shape": toYou, "jam": "127.0.0.1:" & two.port})
+    check a.lastResult{"_meta", "jam", "called"}.getStr == "two"
+    check a.call(5, "heard", %*{"shape": toYou}) == "nothing heard fits"   # the first, one
+    check "not on a jam called three" in a.call(6, "heard", %*{"jam": "three"})
+    a.leave()
+    discard one.stop
+    discard two.stop
+
+  test "bl jam mcp: joining a jam it is on says so, and leaving one says it is gone there":
+    let one = jamServe(@["--memory", "--as", "one"])
+    let two = jamServe(@["--memory", "--as", "two"])
+    var a = one.agent("agent-9", @["--at", ":" & two.port])
+    check a.call(1, "jams", %*{}).splitLines.len == 2
+    check "already on it" in a.call(2, "join", %*{"at": "one"})
+    check "already on it, at 127.0.0.1:" & one.port in
+      a.call(3, "join", %*{"at": "localhost:" & one.port})
+    let gone = two.asking(blb("(gone)"))
+    check a.call(4, "leave", %*{"jam": "two"}) == "(left two \"127.0.0.1:" & two.port & "\")"
+    check gone.told.anyIt(it.items[2].answer(sym"by").isSome)
+    check a.call(5, "jams", %*{}) == "(on one \"127.0.0.1:" & one.port & "\")"
+    check "not on a jam called two" in a.call(6, "tell", %*{"value": "(general)", "jam": "two"})
+    check a.call(7, "leave", %*{"jam": "one"}).startsWith("(left one ")
+    check a.call(8, "jams", %*{}) == "on no jam"
+    check "on no jam now" in a.call(9, "tell", %*{"value": "(general)"})
+    gone.close()
+    a.leave()
+    discard one.stop
+    discard two.stop
+
+  test "bl jam mcp: a place that has become another jam is joined again from the start":
+    var jam = jamServe(@["--memory", "--as", "one"])
+    let port = jam.port
+    var a = jam.agent("agent-10")
+    check a.call(1, "tell", %*{"value": "(general !{(by agent-10) (said \"on one\")})"}).startsWith("(put ")
+    discard jam.stop
+    jam = jamServe(@["--memory", "--as", "other"], at = ":" & port)
+    var listed = ""
+    for i in 0 ..< 30:
+      listed = a.call(2 + i, "jams", %*{})
+      if "join" in listed: break
+      sleep 200
+    check listed.startsWith("(off one ") and "is other now" in listed
+    check a.call(40, "join", %*{"at": ":" & port}) == "(joined other \"127.0.0.1:" & port & "\")"
+    check a.call(41, "heard", %*{"shape": "(shape (heard general) {})"}) == "nothing heard fits"
+    check "agent-10" in a.call(42, "heard", %*{"shape": "(shape (heard here) {})"})
+    a.leave()
+    discard jam.stop
+
+  test "bl jam mcp: jams with scan finds what bl jam scan finds, and a jam found is joined by name":
+    let one = jamServe(@["--memory", "--as", "one"])
+    let two = jamServe(@["--memory", "--as", "two"])
+    var a = one.agent("agent-11")
+    let found = a.call(1, "jams", %*{"scan": true, "net": ["127.0.0.1"],
+                                     "ports": [parseInt(two.port)]}).splitLines
+    check found.len == 2 and found[0].startsWith("(on one ")
+    let f = readValue(found[1])
+    check f.items[1] == toValue("127.0.0.1:" & two.port)
+    check heard(f.items[2]).get.said.knownAs(sym"two")
+    check a.call(2, "join", %*{"at": "two"}) == "(joined two \"127.0.0.1:" & two.port & "\")"
+    check "net is a list" in a.call(3, "jams", %*{"scan": true, "net": "127.0.0.1"})
+    check "not 10.0" in a.call(4, "jams", %*{"scan": true, "net": ["10.0"]})
+    check "a port is a number" in a.call(5, "jams", %*{"scan": true, "ports": [0]})
+    a.leave()
+    discard one.stop
+    discard two.stop
+
   test "bl jam share: the space under its digest, and what it finds said in the room asked":
     let spaceText = "!{!(kind search-space) (identity s1) (holds {(k 1) (k 2) (help \"ask k\")})}"
     let space = file("space.bl", spaceText)
