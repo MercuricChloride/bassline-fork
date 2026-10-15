@@ -71,20 +71,6 @@ const
 
 # ================ names ================
 
-proc nimSpelling*(name: string, capital: bool): string =
-  ## `file-entry` as a Nim identifier: FileEntry for a type, fileEntry
-  ## for a field
-  var upper = capital
-  for c in name:
-    if c == '-':
-      upper = true
-    elif upper:
-      result.add c.toUpperAscii
-      upper = false
-    else:
-      result.add c
-  guard validIdentifier(result), name & " has no spelling as a Nim name"
-
 proc nameOf(v: Value, what: string): string =
   guard v.isKind(bSym) and not v.mark,
     "a " & what & " is named by an unmarked symbol: " & $v
