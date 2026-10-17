@@ -132,3 +132,6 @@ macro blfmt*(src: string): untyped =
   src.expectKind({nnkStrLit, nnkTripleStrLit, nnkRStrLit})
   let val = readValue(src.strVal)
   return val.emitFmtAST
+
+template bl*(src: string): untyped =
+  blfmt(src)

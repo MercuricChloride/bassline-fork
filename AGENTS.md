@@ -64,6 +64,15 @@ The implementation is `packages/blnim` (Nim 2.2, ORC). The JavaScript packages i
 
 `packages/blnim/examples/lang`: `groceries.bl` and `ui.nim` (an app as values over a space, drawn in a terminal; a nearer rule changes it while it runs), `numeric.nim` (where the time goes; build with -d:release), `rpn.nim` (a dialect as one doer).
 
+`packages/blnim/src/bl/conv` (`bl/conv.nim` aggregates): conversations, begun 2026-10-17 as the unit programs are composed from. A conversation is the extent of a scope: values are said into it, never to someone, so nothing is addressed and nothing is wired.
+
+- `conv.nim`: a `Msg` is a value said in a conversation by a participant (`by`, nil when the conversation says it, for telling who spoke: only the conversation reaches anyone by it, with `tell`). `Conversation` and `Participant` are two hierarchies, each with a `send` method: a participant says into a conversation (`p.say(c, v)`), and the conversation's `send` decides what is passed on (`reflect`, to everyone in it, its speaker included or not, `say` for what it says itself, and `tell` for what it says to one participant in it), answering whether it took it. Who is in it is `known`, changed only through `join` and `leave`. What `fresh` keeps is a `BSet`. The base passes a message on as said, once if the `once` flag is on, to its speaker too if `echoes` is. A conversation passes on one message to everyone before the next, so what is said into it meanwhile waits its turn, and its `send` finishes its own bookkeeping before it says anything. A participant's `send` never waits, and one that raises is kicked. `join`, `leave` and `kick`, with `joined` and `left` told to both the participant and the conversation. `Speaker` knows the conversations it is in (`convs`, `say(s, v, but)`, `leaveAll`). `Inbox`, a speaker, keeps what it is sent for an async loop (`take`, `each`).
+- `stdio.nim`: the module lets `input`, which says each CE value arriving on stdin into its conversations and leaves them at the end (`done`), `inputFrom(path)`, the same for a file, and `output`, which writes each value it is sent to stdout as CE, waiting for room in a pipe without holding anyone up (`flush`).
+- `tcp.nim`: a `Wire` is one socket as a participant. What it is sent goes out as CE, and what arrives is said into its conversations. When the other end stops sending it stops reading and stays, it leaves once a write fails, and in no conversation it closes after its writes have gone out. `listen(port, c)` joins a wire to `c` for each connection, `dial(host, port, c)` joins one dialled.
+- `jam.nim`: the jam as a conversation, `(Q A)` kept once and said ranked as `(Q R A)` to everyone, `(Q)` answered by telling whoever asked every `(Q R A)` it holds (one `BSet`, so those for Q are one run in rank order) and passed on to everyone else, anything else refused. A `Bridge` speaker says into its other jams, as `(Q A)`, what it hears ranked in one, and asks the others when someone asks in one, so history crosses then. It doesn't pass on another bridge's ask, and a jam keeping an answer once is what stops answers looping.
+
+`packages/blnim/examples/conv`: `basics.nim` (two conversations and a bridge), `spawn.nim` (a spawner in `ctl` and a room, making participants from values and joining them to its other conversations), `jam.nim` (two jams, a bridge, catch-up), `jam_tcp.nim` (a jam reached over TCP by a bridge, a plain conversation and a dialled wire), `cat.nim` (the files named, in turn, to stdout), `echo.nim` (stdin to stdout), `relay.nim` (wires through one listened conversation).
+
 `packages/blnim/src/bl/lib`
 
 - `blmacro.nim`: the `bl` macro reads Nim surface syntax as a value literal. Its doc comment is the reference.
@@ -127,6 +136,7 @@ The core and the store compile and agree.
 - A reading that cannot hold a value refuses it. Never coerce, truncate, or normalise.
 - `cmp` on values is CE order: kind, then mark, then shortlex for scalars, then members with a shorter frame sorting after a longer one that it prefixes.
 - Prefer the stdlib to hand-rolled code (`parseBiggestInt`, `lowerBound`). Constants come from C headers, not literals.
+- Build values with `bl"…"` (`blfmt` in `core/value_macros.nim`): `bl"(heard $n $v)"` splices the Nim bindings `n` and `v`, and `$name!` marks what goes in. It reads better than building by hand and costs the same. `blet"{foo bar}"` binds symbols.
 - Benchmark release builds only (`-d:release` is not in `nim.cfg`; pass it).
 - Do not import mental models from other systems. Values are not objects, sends are not RPC, a search is not receiving, a connection is not a peer protocol, a dialect is not a schema.
 - Lifecycle does not propagate. Closing is a local decision.
