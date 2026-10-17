@@ -83,25 +83,3 @@ template each*(ch, name, body) =
       let name = await ch.recv
       body
   except ChanError: discard
-
-type
-  Read*[T] = distinct Chan[T]
-  Write*[T] = distinct Chan[T]
-
-proc reader*[T](self: Chan[T]): auto =
-  Read[T](self)
-
-proc writer*[T](self: Chan[T]): auto =
-  Write[T](self)
-
-proc chan*[T](self: Read[T] | Write[T]): auto =
-  Chan[T](self)
-
-proc send*[T](self: Write[T], val: sink T): auto =
-  self.chan.send(val)
-
-proc close*[T](self: Write[T]) =
-  self.chan.close()
-
-proc recv*[T](self: Read[T]): auto =
-  self.chan.recv
