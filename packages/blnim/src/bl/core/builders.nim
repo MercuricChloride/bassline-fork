@@ -208,14 +208,41 @@ func `[]`*(a: Value, i: BNum): lent Value =
   a[i.toInt]
 
 func `[]`*(a: Value, k: Value): lent Value =
-  a.expectKind bDict
-  a.dict[k]
+  a.expectKind({bList, bRec, bDict})
+  if a.kind == bDict:
+    return a.dict[k]
+  k.expectKind(bNum)
+  return a.items[k.num.toInt]
 
 func `[]=`*(a: var Value, i: Natural, val: Value) =
   a.items[i] = val
 
 func `[]=`*(a: var Value, i: BNum, val: Value) =
   a[i.toInt] = val
+
+func `[]=`*(a: var Value, k, v: Value) =
+  a.expectKind({bList, bRec, bDict})
+  if a.kind == bDict:
+    a.dict[k] = v
+  k.expectKind(bNum)
+  a.items[k.num.toInt] = v
+
+func atPath*(a: Value, path: varargs[Value]): Value =
+  guard path.len >= 1, "path cant be empty"
+  result = a
+  for part in path:
+    result = result[part]
+
+func `//`*(val, path: Value): Value =
+  path.expectKind({bList, bRec}, unmarked)
+  val.atPath(path.items.data)
+
+func putAtPath*(a: var Value, val: sink Value, path: varargs[Value]) =
+  guard path.len >= 1, "path cant be empty"
+  var it {.cursor.} = a
+  for part in path[0..^2]:
+    it = it[part]
+  it[path[^1]] = val
 
 func add*(a: var Value, el: sink Value) =
   a.expectKind({bList, bRec, bSet})
@@ -224,15 +251,15 @@ func add*(a: var Value, el: sink Value) =
   else:
     a.els.incl el
 
+func insert*(a: var Value, el: sink Value, idx: Natural) =
+  a.expectKind({bList, bRec})
+  a.items.data.insert(el, idx)
+
 func pop*(a: var Value): Value =
   a.expectKind({bList, bRec})
   if a.isKind(bRec):
     guard a.len > 1, "cant pop the head of a record"
   a.items.data.pop()
-
-func `[]=`*(a: var Value, k, v: Value) =
-  a.expectKind(bDict)
-  a.dict[k] = v
 
 func incl*(a: var Value, v: Value) =
   a.expectKind(bSet)

@@ -31,7 +31,7 @@ type
 proc finish(w: Wire) {.gcsafe.} =
   ## closes the socket once what was written to it has gone out, unless
   ## it has joined a conversation again meanwhile
-  if w.socket.isClosed or w.convs.len > 0: return
+  if w.socket.isClosed or w.rooms.len > 0: return
   if w.writing.isNil or w.writing.finished: w.socket.close
   else: w.writing.addCallback () => w.finish
 
@@ -52,8 +52,8 @@ proc read(w: Wire) {.async.} =
   except CatchableError:
     discard
 
-method left*(w: Wire, c: Conversation) =
-  procCall Speaker(w).left(c)
+method left*(w: Wire, r: Room) =
+  procCall Speaker(w).left(r)
   callSoon () => w.finish  # so a wire moved from one conversation to another lives
 
 method send*(w: Wire, msg: Msg) =
@@ -66,20 +66,20 @@ method send*(w: Wire, msg: Msg) =
       w.socket.close
       w.leaveAll
 
-proc start(socket: AsyncSocket, c: Conversation): Wire =
+proc start(socket: AsyncSocket, r: Room): Wire =
   result = Wire(socket: socket)
-  result.join c
+  result.join r
   asyncCheck result.read
 
-proc dial*(host: string, port: Port, c: Conversation): Future[Wire] {.async.} =
-  ## connects to `host` and `port`, and joins a wire for it to `c`
+proc dial*(host: string, port: Port, r: Room): Future[Wire] {.async.} =
+  ## connects to `host` and `port`, and joins a wire for it to `r`
   let socket = newAsyncSocket(buffered = false)
   try:
     await socket.connect(host, port)
   except CatchableError:
     socket.close
     raise
-  return socket.start(c)
+  return socket.start(r)
 
 # ================
 # Listener
@@ -92,7 +92,7 @@ proc close*(l: Listener) =
   ## stops accepting. The wires it joined stay where they are
   if not l.socket.isClosed: l.socket.close
 
-proc accept(l: Listener, c: Conversation) {.async.} =
+proc accept(l: Listener, r: Room) {.async.} =
   while not l.socket.isClosed:
     var socket: AsyncSocket
     try:
@@ -104,10 +104,10 @@ proc accept(l: Listener, c: Conversation) {.async.} =
     if l.socket.isClosed:  # closed while the accept was on its way here
       socket.close
       break
-    discard socket.start(c)
+    discard socket.start(r)
 
-proc listen*(port: Port, c: Conversation, address = ""): Listener =
-  ## Listens on `port`, and joins a wire to `c` for each connection.
+proc listen*(port: Port, r: Room, address = ""): Listener =
+  ## Listens on `port`, and joins a wire to `r` for each connection.
   ## Sockets are unbuffered, since a buffered recv waits to fill the
   ## whole chunk. Accepted sockets inherit it.
   let socket = newAsyncSocket(buffered = false)
@@ -119,4 +119,4 @@ proc listen*(port: Port, c: Conversation, address = ""): Listener =
     socket.close
     raise
   result = Listener(socket: socket)
-  asyncCheck result.accept(c)
+  asyncCheck result.accept(r)

@@ -86,8 +86,8 @@ proc read(p: Input) {.async.} =
   if p.owned: discard posix.close(p.fd)
   p.leaveAll
 
-method joined*(p: Input, c: Conversation) =
-  procCall Speaker(p).joined(c)
+method joined*(p: Input, r: Room) =
+  procCall Speaker(p).joined(r)
   if not p.reading:
     p.reading = true
     asyncCheck p.read

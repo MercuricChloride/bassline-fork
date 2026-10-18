@@ -37,13 +37,11 @@ proc emitFmtAST(val: Value): NimNode
 
 macro blet*(src: string, exported = true) =
   ##[
-    Parses bassline text into a series of let bindings for values
+    Parses bassline text into a series of bindings for values
 
-    When given a set of symbols, it will generate a
-    let statement of the symbol.
-    
+    When given a set of symbols, it binds each name to its symbol.
 
-    ie: when given {foo bar baz} it generates:
+    ie: when given {foo bar baz} it generates, in effect:
       let foo = sym"foo"
       let bar = sym"bar"
       let baz = sym"baz"
@@ -51,25 +49,26 @@ macro blet*(src: string, exported = true) =
     When given a dict with symbol keys it binds the symbol to their
     associated value.
 
-    ie: when given {foo: [1 2 3]} it generates:
+    ie: when given {foo: [1 2 3]} it generates, in effect:
       let foo = initList([1,2,3])
+
+    Each value is built once, into a hidden let, and the name is a
+    template over it, so a name can also be a proc or method in the same
+    module, such as `joined` beside the conversation hook.
   ]##
   src.expectKind({nnkStrLit, nnkTripleStrLit, nnkRStrLit})
-  let 
+  let
     declarations = newTree(nnkStmtList)
     isExported = exported.boolVal
   for (name, val) in letTerms(src.strVal):
-    let 
-      nameIdent = ident(name)
+    let
+      nameIdent = if isExported: postfix(ident(name), "*") else: ident(name)
+      held = genSym(nskLet, name)
       valLit = emitFmtAST(val)
-    if isExported:
-      declarations.add(
-        quote do:
-          let `nameIdent`* = `valLit`)
-    else:
-      declarations.add(
-        quote do:
-          let `nameIdent` = `valLit`)
+    declarations.add(
+      quote do:
+        let `held` = `valLit`
+        template `nameIdent`(): Value = `held`)
   result = declarations
 
 proc emitFmtAST(val: Value): NimNode =
@@ -107,6 +106,12 @@ proc emitFmtAST(val: Value): NimNode =
       dictArgs.add(newTree(nnkTupleConstr, emitFmtAST(k), emitFmtAST(v)))
     return quote do:
       initDict(`dictArgs`, `mark`)
+  of bNum:
+    # newLit would spell out a wide number's BigInt, whose fields are private
+    let n = val.num
+    return
+      if n.isBig: newCall(bindSym"num", newLit($n), newLit(mark))
+      else: newCall(bindSym"num", newLit(n.small), newLit(mark))
   else:
     return newLit(val)
 
