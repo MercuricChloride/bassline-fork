@@ -5,7 +5,7 @@
 
 import std/[os, strutils, unittest]
 import bl/core
-import bl/lib/[json, blmacro]
+import bl/lib/json
 import ./corpus
 
 suite "ce":

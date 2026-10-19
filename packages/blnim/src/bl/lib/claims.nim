@@ -105,24 +105,11 @@ type
     ## one way of reading evidence: what `v` entails, asking `again`
     ## for what the values inside it entail
 
-let
-  InHead* = sym"in"
-  GrewHead* = sym"grew"
-  OpenedHead* = sym"opened"
-  MemberHead* = sym"member"
-  ScopeHead* = sym"scope"
-  AddedHead* = sym"added"
-  RemovedHead* = sym"removed"
-  UnchangedOutsideHead* = sym"unchanged-outside"
-  SignedHead* = sym"signed"
-  PutHead* = sym"put"
-  StampedHead* = sym"stamped"
-  ConvictedHead* = sym"convicted"
-  PartHead* = sym"part"
-  FrameHead* = sym"frame"
-  ReadsHead* = sym"reads"
-  DigestOfHead* = sym"digest-of"
-  EvidenceName = sym"evidence"
+blet"{grew member stamped convicted reads}"
+blet"""{in-head: in opened-head: opened scope-head: scope added-head: added
+  removed-head: removed unchanged-outside-head: unchanged-outside
+  signed-head: signed put-head: put part-head: part frame-head: frame}"""
+blet("{evidence-name: evidence}", false)
 
 method afterLoad(self: Claim) =
   self.find = try: Find.fromValue(self.asks)
@@ -151,19 +138,19 @@ proc entails*(v: Value, again: Entails): Stream[Value] =
   let p = Inclusion.maybeLoad(v)
   if p.isSome:
     if p.get.holds:
-      into.add statement(initRec(@[InHead, p.get.root.toValue, p.get.index.toValue]), p.get.leaf)
+      into.add statement(initRec(@[inHead, p.get.root.toValue, p.get.index.toValue]), p.get.leaf)
     return initStream(into)
   let g = Growth.maybeLoad(v)
   if g.isSome:
     if g.get.holds:
-      into.add statement(initRec(@[GrewHead, g.get.older.toValue]), g.get.newer.toValue)
+      into.add statement(initRec(@[grew, g.get.older.toValue]), g.get.newer.toValue)
     return initStream(into)
   let o = Opening.maybeLoad(v)
   if o.isSome:
     if o.get.holds:
       let (root, range, ms) = (o.get.root.toValue, o.get.range, o.get.members)
-      into.add statement(initRec(@[OpenedHead, root, range]), initSet(ms))
-      for m in ms: into.add statement(initRec(@[MemberHead, root, range]), m)
+      into.add statement(initRec(@[openedHead, root, range]), initSet(ms))
+      for m in ms: into.add statement(initRec(@[member, root, range]), m)
     return initStream(into)
   let ch = Changed.maybeLoad(v)
   if ch.isSome:
@@ -171,17 +158,17 @@ proc entails*(v: Value, again: Entails): Stream[Value] =
       let (older, newer, range) =
         (ch.get.before.root.toValue, ch.get.after.root.toValue, ch.get.before.range)
       let (added, removed) = ch.get.scope
-      into.add statement(initRec(@[ScopeHead, older, newer, range]),
-                         initDict(@[(AddedHead, initSet(added)), (RemovedHead, initSet(removed))]))
-      for m in added: into.add statement(initRec(@[AddedHead, older, newer, range]), m)
-      for m in removed: into.add statement(initRec(@[RemovedHead, older, newer, range]), m)
+      into.add statement(initRec(@[scopeHead, older, newer, range]),
+                         bl"{added: {@added} removed: {@removed}}")
+      for m in added: into.add statement(initRec(@[addedHead, older, newer, range]), m)
+      for m in removed: into.add statement(initRec(@[removedHead, older, newer, range]), m)
       if ch.get.unchangedOutside:
-        into.add statement(initRec(@[UnchangedOutsideHead, older, newer]), range)
+        into.add statement(initRec(@[unchangedOutsideHead, older, newer]), range)
     return initStream(into)
   let r = Receipt.maybeLoad(v)
   if r.isSome:
     let k = r.get.vouchedBy
-    if k.isSome: into.add statement(initRec(@[StampedHead, k.get.toValue]), r.get.told)
+    if k.isSome: into.add statement(initRec(@[stamped, k.get.toValue]), r.get.told)
     return initStream(into)
   let e = Equivocation.maybeLoad(v)
   if e.isSome:
@@ -189,7 +176,7 @@ proc entails*(v: Value, again: Entails): Stream[Value] =
     if k.isSome:
       # convicts read both words and found their slots one
       let s = slot(opened(e.get.a).get.said, k.get)
-      into.add statement(initRec(@[ConvictedHead, k.get.toValue]), s.get)
+      into.add statement(initRec(@[convicted, k.get.toValue]), s.get)
     return initStream(into)
   let sh = Shown.maybeLoad(v)
   if sh.isSome:
@@ -197,9 +184,9 @@ proc entails*(v: Value, again: Entails): Stream[Value] =
       let (hidden, places) = (sh.get.hidden.toValue, sh.get.places)
       let leaf = leafOf(sh.get.node)
       if leaf.isSome:
-        into.add statement(initRec(@[PartHead, hidden, places]), leaf.get)
+        into.add statement(initRec(@[partHead, hidden, places]), leaf.get)
       else:
-        into.add statement(initRec(@[FrameHead, hidden, places]), sh.get.node)
+        into.add statement(initRec(@[frameHead, hidden, places]), sh.get.node)
     return initStream(into)
   let c = Claim.maybeLoad(v)
   if c.isSome:
@@ -209,16 +196,18 @@ proc entails*(v: Value, again: Entails): Stream[Value] =
   if s.isSome:
     if s.get.holds:
       let (key, said) = (s.get.sig.pubkey.toValue, s.get.value)
-      into.add statement(initRec(@[SignedHead, key]), said)
+      into.add statement(initRec(@[signedHead, key]), said)
       inner(said)
-      if said.isKind(bRec, unmarked) and said.items.len == 2:
-        into.add statement(initRec(@[PutHead, key, said.items[0]]), said.items[1])
-        inner(said.items[1])
+      matchValue said:
+      of "($q $a)":
+        into.add statement(initRec(@[putHead, key, q]), a)
+        inner(a)
+      else: discard
     return initStream(into)
   if v.isKind(bBytes, unmarked):
     let read = try: some Value.decode(v.bytes) except ValueError: none(Value)
     if read.isSome:
-      into.add statement(initRec(@[ReadsHead, v]), read.get)
+      into.add statement(initRec(@[reads, v]), read.get)
       inner(read.get)
   initStream(into)
 
@@ -241,21 +230,21 @@ proc statements*(c: Claim, entails = entailments()): Stream[Value] =
 
 proc digestsOf(q: Value): Stream[Value] =
   ## (digest-of V) answered on demand, one digest per algorithm
-  if not q.isKind(bRec, unmarked) or q.items.len != 2 or q.head != DigestOfHead:
-    return empty Value
-  let v = q.items[1]
-  initStream(@[digest(v, Blake2bAlgo).toValue, digest(v, Sha256Algo).toValue])
+  matchValue q:
+  of "(digest-of $v)":
+    initStream(@[digest(v, Blake2bAlgo).toValue, digest(v, Sha256Algo).toValue])
+  else: empty Value
 
 proc evidenceOf*(c: Claim): Value =
   ## the name the claim's evidence answers by: evidence, and the
   ## claim's digest
-  identity(EvidenceName, digest(c.toValue, Blake2bAlgo).toValue)
+  identity(evidenceName, digest(c.toValue, Blake2bAlgo).toValue)
 
 proc subject*(c: Claim, entails = entailments()): Subject =
   ## the claim's evidence as a subject a find asks: the statements it
   ## entails, held, and digests on demand
   let part = c.evidenceOf
-  joined(AltKind, @[held(part, @[initSet(c.statements(entails).toSeq)], false, false),
+  joined(altKind, @[held(part, @[initSet(c.statements(entails).toSeq)], false, false),
                     answering(digestsOf, part)])
 
 # ================ premises ================
@@ -263,8 +252,8 @@ proc subject*(c: Claim, entails = entailments()): Subject =
 proc premises*(v: Value): Subject =
   ## what a reader brings, as a subject: a search space written down
   ## with what it holds, or an object answering its own records
-  if v.hasKind(SearchSpaceKind):
-    let ranked = v.hasKind(RankedKind)
+  if v.hasKind(searchSpace):
+    let ranked = v.hasKind(rankedKind)
     return held(v, spaceBodies(v, ranked), ranked, false)
   guard v.isObject, "premises are an object, or a space written down: " & $v
   thing(v)

@@ -144,14 +144,11 @@ func unmarked(v: Value): Value =
   result = v
   result.mark = false
 
-let
-  FrameQ = sym"frame"
-  KindQ = sym"kind"
-
 proc headKey(h: Value): Value =
   ## a call's head, or, for a head that is itself a record such as a
   ## function's value, its head, all the way in
-  if h.isKind(bRec, unmarked) and h.items.len > 0: headKey(h.items[0])
+  matchValue h:
+  of "($head &_)": headKey(head)
   else: h
 
 proc keys*(v: Value): seq[Value] =
@@ -163,11 +160,13 @@ proc keys*(v: Value): seq[Value] =
   of bSym: return @[v]
   of bSet:
     for m in v.els:
-      if m.isKind(bRec, marked) and m.items.len == 2 and m.items[0] == KindQ:
-        result.add initRec(@[KindQ, m.items[1]])
+      matchValue m:
+      of "!(kind $k)": result.add bl"(kind $k)"
+      else: discard
     if result.len > 0: return
   else: discard
-  @[initRec(@[FrameQ, sym($v.kind)])]
+  let kind = sym($v.kind)
+  @[bl"(frame $kind)"]
 
 proc asking(s: Search[Value, Doer], v: Value): Stream[Doer] =
   lazy(() => s[v])

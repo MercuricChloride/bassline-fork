@@ -49,7 +49,7 @@ export queries, stream
 
 refuseWith BasslineError
 
-let ShapeHead = sym"shape"
+blet("{shape}", false)
 
 type
   Shape* = object
@@ -80,14 +80,17 @@ proc initShape*(example: Value, holes: openArray[Value],
 proc fromValue*(T: typedesc[Shape], v: Value): Shape =
   ## reads (shape EXAMPLE {HOLE …}) or (shape EXAMPLE {HOLE …} WILD).
   ## Refuses anything else
-  guard v.isKind(bRec, unmarked) and v.head == ShapeHead and
-    v.items.len in 3..4 and v.items[2].isKind(bSet, unmarked),
-    "not (shape EXAMPLE {HOLE …}) or (shape EXAMPLE {HOLE …} WILD): " & $v
-  Shape(example: v.items[1], holes: v.items[2].els,
-        wild: if v.items.len == 4: some v.items[3] else: none(Value))
+  matchValue v:
+  of "(shape $example $holes)":
+    if holes.isKind(bSet, unmarked): return Shape(example: example, holes: holes.els)
+  of "(shape $example $holes $wild)":
+    if holes.isKind(bSet, unmarked):
+      return Shape(example: example, holes: holes.els, wild: some wild)
+  else: discard
+  refuse "not (shape EXAMPLE {HOLE …}) or (shape EXAMPLE {HOLE …} WILD): " & $v
 
 proc toValue*(s: Shape): Value =
-  var fields = @[ShapeHead, s.example, initSet(s.holes)]
+  var fields = @[shape, s.example, initSet(s.holes)]
   if s.wild.isSome: fields.add s.wild.get
   initRec fields
 

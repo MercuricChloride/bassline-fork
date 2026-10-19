@@ -4,8 +4,13 @@
   conversation it is in, and leaves them when stdin ends. `inputFrom`
   does the same for a file. `output` writes each value it is sent to
   stdout as CE.
+
+  Either can go by text instead (`asText`). Input as text says each
+  value once nothing still to come can change it, so a terminal can
+  type into it, and text it can't read it says as (unreadable WHY) and
+  goes on past. Output as text writes each value on a line of its own.
 ]##
-import std/[deques, nativesockets, oserrors, posix]
+import std/[deques, nativesockets, oserrors, posix, strutils]
 import ../core
 import ./conv
 
@@ -16,12 +21,14 @@ type
     fd: cint
     owned: bool  ## whether it opened `fd`, and so closes it
     reading: bool
+    asText*: bool  ## whether it reads the textual syntax, not CE
     done*: Future[void]
       ## complete once its input ends. It fails if the input ends inside
       ## a value or holds bytes that are not CE, since nothing past them
       ## reads
 
   Output* = ref object of Participant
+    asText*: bool            ## whether it writes text, a value a line, not CE
     queue: Deque[seq[byte]]  ## what stdout hasn't taken yet
     writing: bool
     flushed: Future[void]
@@ -62,6 +69,7 @@ proc read(p: Input) {.async.} =
   let waits = p.fd.isPipe or p.fd.isatty == 1
   var
     decoder = newDecoder()
+    reader: Reader
     chunk = newSeq[byte](Chunk)
   if waits: AsyncFD(p.fd).register
   try:
@@ -73,11 +81,25 @@ proc read(p: Input) {.async.} =
         if errno in [EINTR, EAGAIN]: continue
         raiseOSError osLastError()
       if n == 0: break
-      decoder.buf.add chunk.toOpenArray(0, n - 1)
-      for view in decoder.checked:
-        p.say view.toValue
-      decoder.compact
-    if decoder.pending:
+      if p.asText:
+        var piece = newString(n)
+        copyMem(addr piece[0], addr chunk[0], n)
+        for line in piece.splitLines(keepEol = true):  # a refusal loses one line
+          reader.add line
+          try:
+            for v in reader.items: p.say v
+          except ReadError as e:
+            let why = text(e.msg)
+            p.say bl"(unreadable $why)"
+            reader = Reader()
+      else:
+        decoder.buf.add chunk.toOpenArray(0, n - 1)
+        for view in decoder.checked:
+          p.say view.toValue
+        decoder.compact
+    if p.asText:
+      for v in reader.finish: p.say v
+    elif decoder.pending:
       raise newException(CodecError, "the input ended inside a value")
     p.done.complete
   except CatchableError as e:
@@ -130,7 +152,10 @@ proc write(p: Output) {.async.} =
     else: p.flushed.fail failed
 
 method send*(p: Output, msg: Msg) =
-  p.queue.addLast msg.value.ce
+  if p.asText:
+    let line = $msg.value & "\n"
+    p.queue.addLast @(line.toOpenArrayByte(0, line.high))
+  else: p.queue.addLast msg.value.ce
   if not p.writing:
     p.writing = true
     p.flushed = nil

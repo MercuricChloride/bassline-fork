@@ -74,10 +74,10 @@ proc logVar*[Q, A](path: string, id = randomId(), skipRefused = false):
   ## file at `path`: each record it takes is appended, and an existing
   ## file is every record it holds, going by `id`
   let records = if fileExists(path): valuesIn(path) else: @[]
-  let kinds = when A is Ranked: @[SearchSpaceKind, RankedKind]
-              else: @[SearchSpaceKind]
+  let kinds = when A is Ranked: @[searchSpace, rankedKind]
+              else: @[searchSpace]
   let held = spaceVar[Q, A](
-    describe(kinds, id, initRec(@[HoldsQ, initSet(records)])), skipRefused)
+    describe(kinds, id, initRec(@[holdsQ, initSet(records)])), skipRefused)
   let inner = held.sender
   proc send(q: Q, a: A): bool =
     # kept, then taken: what the file doesn't hold, the place doesn't

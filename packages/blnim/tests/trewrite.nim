@@ -3,7 +3,6 @@
 import std/[unittest, options, random]
 import std/sets except initSet
 import bl/core
-import bl/lib/blmacro
 import bl/queries
 
 template refuses(call: untyped) =
@@ -71,11 +70,11 @@ suite "fillings":
 
   test "a search can start from bindings already had":
     let row = shape("(shape (row label n) {label n})")
-    check row.fillings(bl(row(a, 1)), bl({label: a})).toSeq == @[bl({label: a, n: 1})]
-    check row.fillings(bl(row(a, 1)), bl({label: b})).toSeq.len == 0
-    check row.fillings(bl(row(a, 1)), bl({seen: yes})).toSeq ==   # what it doesn't bind rides along
-      @[bl({label: a, n: 1, seen: yes})]
-    refuses row.fillings(bl(row(a, 1)), bl([label, a]))
+    check row.fillings(bl"(row a 1)", bl"{label: a}").toSeq == @[bl"{label: a n: 1}"]
+    check row.fillings(bl"(row a 1)", bl"{label: b}").toSeq.len == 0
+    check row.fillings(bl"(row a 1)", bl"{seen: yes}").toSeq ==   # what it doesn't bind rides along
+      @[bl"{label: a n: 1 seen: yes}"]
+    refuses row.fillings(bl"(row a 1)", bl"[label a]")
 
   test "nothing is worked out ahead of a pull":
     var members = initSet()
@@ -100,11 +99,11 @@ suite "fillings":
 suite "a shape as a search":
   test "asked about a value, it answers every filling, and composes":
     let row = shape("(shape (row label n) {label n})").search
-    check row[bl(row(a, 1))].toSeq == @[bl({label: a, n: 1})]
-    check (row ? bl(note(x))).isNone
-    let rows = newSearch[Value, Value](q => initStream(@[bl(row(a, 1)), bl(note(x)), bl(row(b, 2))]))
-    check feed(rows, row)[bl anything].toSeq ==
-      @[bl({label: a, n: 1}), bl({label: b, n: 2})]
+    check row[bl"(row a 1)"].toSeq == @[bl"{label: a n: 1}"]
+    check (row ? bl"(note x)").isNone
+    let rows = newSearch[Value, Value](q => initStream(@[bl"(row a 1)", bl"(note x)", bl"(row b 2)"]))
+    check feed(rows, row)[bl"anything"].toSeq ==
+      @[bl"{label: a n: 1}", bl"{label: b n: 2}"]
 
 suite "written down, and filled":
   test "a shape reads and writes as (shape EXAMPLE {HOLE …} WILD)":
@@ -117,10 +116,10 @@ suite "written down, and filled":
 
   test "inject fills the holes bound, and leaves the rest":
     let s = shape("(shape !{(cmd c): [arg x] other: y} {c x y})")
-    check s.inject(bl({c: go, x: 1})) == readValue("!{(cmd go): [arg 1] other: y}")
+    check s.inject(bl"{c: go x: 1}") == readValue("!{(cmd go): [arg 1] other: y}")
     check s.inject(s.fillings(readValue("!{(cmd go): [arg 1] other: 2}")).next.get) ==
       readValue("!{(cmd go): [arg 1] other: 2}")
-    refuses s.inject(bl([c, go]))
+    refuses s.inject(bl"[c go]")
 
 # ================ against a brute-force search ================
 
@@ -191,13 +190,13 @@ proc small(r: var Rand, depth = 0): Value =
   ## small values from a small alphabet, so parts repeat and shapes find
   ## several ways to fill
   if depth >= 3 or r.rand(if depth == 0: 5 else: 2) == 0:
-    result = [bl 0, bl 1, bl 2, bl a, bl b, bl c, bl "", bl "t", bl nil][r.rand(8)]
+    result = [bl"0", bl"1", bl"2", bl"a", bl"b", bl"c", toValue(""), toValue("t"), bl"nil"][r.rand(8)]
   else:
     var members: seq[Value]
     for _ in 0 ..< r.rand(3): members.add r.small(depth + 1)
     case r.rand(3)
     of 0: result = initList(members)
-    of 1: result = initRec(@[if r.rand(2) == 0: r.small(3) else: [bl p, bl q][r.rand(1)]] & members)
+    of 1: result = initRec(@[if r.rand(2) == 0: r.small(3) else: [bl"p", bl"q"][r.rand(1)]] & members)
     of 2:
       var entries: seq[(Value, Value)]
       for m in members: entries.add (r.small(depth + 2), m)
@@ -209,8 +208,8 @@ proc punch(r: var Rand, part: Value, holes: var seq[Value], depth = 0): Value =
   ## `part` with holes, some repeated, and the wild in place of some of its
   ## parts, anywhere: keys, members and heads too
   if depth > 0 and r.rand(3) == 0:
-    if r.rand(4) == 0: return bl `_`
-    result = [bl x, bl y, bl z][r.rand(2)]
+    if r.rand(4) == 0: return bl"_"
+    result = [bl"x", bl"y", bl"z"][r.rand(2)]
     result.mark = if r.rand(5) == 0: not part.mark else: part.mark
     holes.add result
     return
@@ -237,8 +236,8 @@ suite "fillings against brute force":
       let v = r.small
       var holes: seq[Value]
       let example = r.punch(v, holes)
-      if r.rand(14) == 0: holes.add bl never
-      let s = initShape(example, holes, some(bl `_`))
+      if r.rand(14) == 0: holes.add bl"never"
+      let s = initShape(example, holes, some(bl"_"))
       let brute = bruteForce(s, v)
       if brute.isNone:
         inc skipped           # too many assignments to try them all

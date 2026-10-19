@@ -58,7 +58,7 @@ proc isMe(s: Share, id: Value): bool = sharesIdentity(id, s.speaker.by)
 proc toIt(s: Share, h: Heard): bool =
   ## whether a message is said to it: in its own room, or naming it
   h.q == ownRoom(s.speaker.by) or
-    h.said.answers(ForQ).exists(n => s.isMe(n))
+    h.said.answers(forQ).exists(n => s.isMe(n))
 
 proc fromAShare(said: Value): bool =
   ## whether something said is what a share says
@@ -84,11 +84,11 @@ proc sharing(s: Share): Value =
 proc saidIn(s: Share, room: Value): bool =
   ## whether it has said anything in `room`, as far as the jam has told it
   s.c.local.heardIn(room).exists(
-    h => h.said.answer(ByQ).isSome and s.isMe(h.said.answer(ByQ).get))
+    h => h.said.answer(byQ).isSome and s.isMe(h.said.answer(byQ).get))
 
 proc find(s: Share, h: Heard) =
   ## asks the space what a message says, and says what it found
-  let query = h.said.answer(SaidQ).get
+  let query = h.said.answer(saidQ).get
   var found: seq[Value]
   var more = false
   for a in s.search.ask(query):
@@ -102,7 +102,7 @@ proc find(s: Share, h: Heard) =
     for a in s.search.ask(query): discard s.c.put(q, a)
     said.add initRec(@[MoreQ, q])
   discard s.c.put(h.q, s.speaker.message(initRec(said), [h.digestOf],
-                                         [h.said.answer(ByQ).get]))
+                                         [h.said.answer(byQ).get]))
 
 proc caughtUp(s: Share) =
   ## everything asked before the here has been told: what is waiting and
@@ -115,24 +115,24 @@ proc caughtUp(s: Share) =
     discard s.c.put(s.rooms[0], s.speaker.message(s.sharing))
 
 proc heard(s: Share, h: Heard) =
-  if h.q == HereQ:
+  if h.q == hereQ:
     if s.since < 0:
       if h.answer == s.here:
         s.since = h.rank
         s.caughtUp()
     elif h.rank > s.since:
-      let by = h.said.answer(ByQ)
+      let by = h.said.answer(byQ)
       if by.isSome and not s.isMe(by.get):
         let room = ownRoom(by.get)
         if room notin s.told:
           s.told.incl room
           discard s.c.put(room, s.speaker.message(s.sharing))
     return
-  let by = h.said.answer(ByQ)
-  let said = h.said.answer(SaidQ)
+  let by = h.said.answer(byQ)
+  let said = h.said.answer(saidQ)
   if by.isNone or said.isNone: return
   if s.isMe(by.get):
-    for d in h.said.answers(ReQ): s.saidRe.incl d
+    for d in h.said.answers(reQ): s.saidRe.incl d
   elif not fromAShare(said.get) and s.toIt(h):
     if s.since < 0: s.waiting.add h
     else: s.find(h)
@@ -144,14 +144,14 @@ proc reach(s: Share): Client =
     s.since = -1
     s.waiting.setLen 0
     s.c.onHeard = (h: Heard) => s.heard(h)
-    for q in @[HereQ, ownRoom(s.speaker.by)] & s.rooms:
+    for q in @[hereQ, ownRoom(s.speaker.by)] & s.rooms:
       s.c.ask q
     for r in s.rooms:
-      if not r.isKind(bRec) or r.items.len != 2 or r.head != ForQ:
-        discard s.c.put(RoomsQ, r)
+      if not r.isKind(bRec) or r.items.len != 2 or r.head != forQ:
+        discard s.c.put(roomsQ, r)
     discard s.c.put(KnowledgeQ, s.digest)
     discard s.c.put(s.digest, s.space)
-    s.here = s.c.put(HereQ, s.speaker.here)
+    s.here = s.c.put(hereQ, s.speaker.here)
   s.c
 
 var running: Client   # for ctrl-c, which can't close over anything

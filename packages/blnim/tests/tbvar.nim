@@ -3,7 +3,7 @@
 
 import std/[unittest, options, os]
 import bl/core
-import bl/lib/[blmacro, bvarfile]
+import bl/lib/bvarfile
 import bl/queries/bvar
 
 template refuses(call: untyped) =
@@ -18,10 +18,11 @@ type Peer = ref object
 var connections = 0
 
 proc toValue(p: Peer): Value =
-  bl peer(%p.address)
+  let address = p.address
+  bl"(peer $address)"
 
 proc fromValue(T: typedesc[Peer], v: Value): Peer =
-  if not v.isKind(bRec) or v.items.len != 2 or v.head != bl(peer) or
+  if not v.isKind(bRec) or v.items.len != 2 or v.head != bl"peer" or
       not v.items[1].isKind(bText):
     raise newException(ValueError, "not a peer: " & $v)
   inc connections
@@ -29,66 +30,66 @@ proc fromValue(T: typedesc[Peer], v: Value): Peer =
 
 suite "space vars":
   test "what is sent is kept as a search set, and reading asks it":
-    let v = spaceVar[Value, Value](id = bl v)
-    check v.send(bl alice, bl 1)
-    check v.send(bl alice, bl 2)
-    check v.send(bl bob, bl 3)
-    check v.read(bl alice).toSeq == @[bl 1, bl 2]
-    check v.read(bl carol).toSeq.len == 0
-    check v.search.toValue == bl(!{!kind(`search-space`), identity(v), holds({alice(1), alice(2), bob(3)})})
+    let v = spaceVar[Value, Value](id = bl"v")
+    check v.send(bl"alice", bl"1")
+    check v.send(bl"alice", bl"2")
+    check v.send(bl"bob", bl"3")
+    check v.read(bl"alice").toSeq == @[bl"1", bl"2"]
+    check v.read(bl"carol").toSeq.len == 0
+    check v.search.toValue == bl"!{!(kind search-space) (identity v) (holds {(alice 1) (alice 2) (bob 3)})}"
 
   test "runtime things are sent, kept as values, and read back as things":
-    let v = spaceVar[Value, Peer](id = bl peers)
-    check v.send(bl here, Peer(address: "10.0.0.1", connection: -1))
-    check v.search.toValue == bl(!{!kind(`search-space`), identity(peers), holds({here(peer("10.0.0.1"))})})
-    let back = v.read(bl here).next
+    let v = spaceVar[Value, Peer](id = bl"peers")
+    check v.send(bl"here", Peer(address: "10.0.0.1", connection: -1))
+    check v.search.toValue == bl"""!{!(kind search-space) (identity peers) (holds {(here (peer "10.0.0.1"))})}"""
+    let back = v.read(bl"here").next
     check back.isSome and back.get.address == "10.0.0.1"
     check back.get.connection > 0                # rebuilt, connected again
 
   test "a read with nothing asked asks nil":
     let v = spaceVar[Value, Value]()
-    check v.send(null(), bl anything)
-    check v.read().toSeq == @[bl anything]
+    check v.send(null(), bl"anything")
+    check v.read().toSeq == @[bl"anything"]
 
   test "with one answer a query, the first answer sent stands":
-    let v = spaceVar[Value, Value](one, id = bl d)
-    check v.send(bl x, bl 1)
-    check v.send(bl x, bl 1)                   # the same again is taken
-    check not v.send(bl x, bl 2)               # a second answer is not
-    check v.read(bl x).toSeq == @[bl 1]
-    check v.search.toValue == bl(!{!kind(`search-space`), identity(d), holds({x: 1})})
+    let v = spaceVar[Value, Value](one, id = bl"d")
+    check v.send(bl"x", bl"1")
+    check v.send(bl"x", bl"1")                   # the same again is taken
+    check not v.send(bl"x", bl"2")               # a second answer is not
+    check v.read(bl"x").toSeq == @[bl"1"]
+    check v.search.toValue == bl"!{!(kind search-space) (identity d) (holds {x: 1})}"
 
   test "a ranked var reads back in rank order":
-    let v = spaceVar[Value, Ranked[Value]](id = bl r)
-    check v.send(bl k, Ranked[Value](rank: 5, answer: bl late))
-    check v.send(bl k, Ranked[Value](rank: 0, answer: bl soon))
+    let v = spaceVar[Value, Ranked[Value]](id = bl"r")
+    check v.send(bl"k", Ranked[Value](rank: 5, answer: bl"late"))
+    check v.send(bl"k", Ranked[Value](rank: 0, answer: bl"soon"))
     var got: seq[Value]
-    for a in v.read(bl k): got.add a.answer
-    check got == @[bl soon, bl late]
+    for a in v.read(bl"k"): got.add a.answer
+    check got == @[bl"soon", bl"late"]
 
   test "written down, it is what it held then, and stays so":
-    let v = spaceVar[Value, Value](id = bl v)
-    discard v.send(bl a, bl 1)
+    let v = spaceVar[Value, Value](id = bl"v")
+    discard v.send(bl"a", bl"1")
     let then = v.search.toValue
-    discard v.send(bl a, bl 2)
-    check then == bl(!{!kind(`search-space`), identity(v), holds({a(1)})})
-    check v.search.toValue == bl(!{!kind(`search-space`), identity(v), holds({a(1), a(2)})})
+    discard v.send(bl"a", bl"2")
+    check then == bl"!{!(kind search-space) (identity v) (holds {(a 1)})}"
+    check v.search.toValue == bl"!{!(kind search-space) (identity v) (holds {(a 1) (a 2)})}"
 
   test "a space written down is held again, as a copy":
-    let space = bl(!{!kind(`search-space`), identity(old), holds({a(1)})})
+    let space = bl"!{!(kind search-space) (identity old) (holds {(a 1)})}"
     let v = spaceVar[Value, Value](space)
-    discard v.send(bl a, bl 2)
-    check v.read(bl a).toSeq == @[bl 1, bl 2]
-    check v.search.id == identity(bl old)
-    check space == bl(!{!kind(`search-space`), identity(old), holds({a(1)})})   # the value unchanged
-    check spaceVar[Value, Value](bl(!{!kind(`search-space`), identity(d), holds({x: 1})})).search.fanout == one
-    refuses spaceVar[Value, Value](bl junk)
+    discard v.send(bl"a", bl"2")
+    check v.read(bl"a").toSeq == @[bl"1", bl"2"]
+    check v.search.id == identity(bl"old")
+    check space == bl"!{!(kind search-space) (identity old) (holds {(a 1)})}"   # the value unchanged
+    check spaceVar[Value, Value](bl"!{!(kind search-space) (identity d) (holds {x: 1})}").search.fanout == one
+    refuses spaceVar[Value, Value](bl"junk")
     refuses spaceVar[Value, Ranked[Value]](space)
 
   test "a space holding several dicts is held as every record it holds":
     let v = spaceVar[Value, Value](readValue(
       "!{!(kind search-space) (identity d) (holds {x: 1}) (holds {x: 2}) (holds {(x 3)})}"))
-    check v[bl x].toSeq == @[bl 1, bl 2, bl 3]
+    check v[bl"x"].toSeq == @[bl"1", bl"2", bl"3"]
     check v.search.fanout == many
 
   test "what a holder can do is which halves it has":
@@ -97,128 +98,128 @@ suite "space vars":
     check v.readOnly.access == Access.r
     check v.writeOnly.access == Access.w
     check newBVar[Value, Value]().access == Access.none
-    check not v.readOnly.send(bl a, bl 1)
-    check v.writeOnly.send(bl a, bl 1)
-    refuses v.writeOnly.read(bl a)
-    check v.readOnly.read(bl a).toSeq == @[bl 1]
+    check not v.readOnly.send(bl"a", bl"1")
+    check v.writeOnly.send(bl"a", bl"1")
+    refuses v.writeOnly.read(bl"a")
+    check v.readOnly.read(bl"a").toSeq == @[bl"1"]
 
 suite "written down":
   test "a space var: its send into the space, and the space":
-    let v = spaceVar[Value, Value](id = bl v)
-    discard v.send(bl a, bl 1)
-    check v.toValue == bl(!{!kind(bvar), identity(v), send(!{!kind(send), !to(v)}), search(!{!kind(`search-space`), identity(v), holds({a(1)})})})
-    check v.readOnly.toValue == bl(!{!kind(bvar), identity(v), search(!{!kind(`search-space`), identity(v), holds({a(1)})})})
-    check v.writeOnly.toValue == bl(!{!kind(bvar), identity(v), send(!{!kind(send), !to(v)})})
+    let v = spaceVar[Value, Value](id = bl"v")
+    discard v.send(bl"a", bl"1")
+    check v.toValue == bl"!{!(kind bvar) (identity v) (send !{!(kind send) !(to v)}) (search !{!(kind search-space) (identity v) (holds {(a 1)})})}"
+    check v.readOnly.toValue == bl"!{!(kind bvar) (identity v) (search !{!(kind search-space) (identity v) (holds {(a 1)})})}"
+    check v.writeOnly.toValue == bl"!{!(kind bvar) (identity v) (send !{!(kind send) !(to v)})}"
 
   test "read back, a space with a send into it is a live space var":
-    let v = spaceVar[Value, Value](id = bl v)
-    discard v.send(bl a, bl 1)
+    let v = spaceVar[Value, Value](id = bl"v")
+    discard v.send(bl"a", bl"1")
     let back = BVar[Value, Value].fromValue(v.toValue)
     check back.access == Access.rw
-    check back.send(bl a, bl 2)
-    check back.read(bl a).toSeq == @[bl 1, bl 2]
-    check v.read(bl a).toSeq == @[bl 1]       # a copy, not the same place
+    check back.send(bl"a", bl"2")
+    check back.read(bl"a").toSeq == @[bl"1", bl"2"]
+    check v.read(bl"a").toSeq == @[bl"1"]       # a copy, not the same place
 
   test "a read-only one reads back read-only":
-    let v = spaceVar[Value, Value](id = bl v)
-    discard v.send(bl a, bl 1)
+    let v = spaceVar[Value, Value](id = bl"v")
+    discard v.send(bl"a", bl"1")
     let back = BVar[Value, Value].fromValue(v.readOnly.toValue)
     check back.access == Access.r
-    check back.read(bl a).toSeq == @[bl 1]
+    check back.read(bl"a").toSeq == @[bl"1"]
 
   test "a write-only one reaches the place the environment knows by it":
-    let v = spaceVar[Value, Value](id = bl v)
+    let v = spaceVar[Value, Value](id = bl"v")
     let resolve = newSearch[Value, Send[Value, Value]](
-      d => initStream(if sharesIdentity(d, bl v): @[v.sender] else: @[]))
+      d => initStream(if sharesIdentity(d, bl"v"): @[v.sender] else: @[]))
     let back = BVar[Value, Value].fromValue(v.writeOnly.toValue, resolve)
     check back.access == Access.w
-    check back.send(bl a, bl 9)
-    check v.read(bl a).toSeq == @[bl 9]
+    check back.send(bl"a", bl"9")
+    check v.read(bl"a").toSeq == @[bl"9"]
 
   test "a bvar whose send has no denotation can't be written down":
     let v = newBVar[Value, Value]((q, a: Value) => true)
     refuses v.toValue
-    refuses BVar[Value, Value].fromValue(bl junk)
+    refuses BVar[Value, Value].fromValue(bl"junk")
 
 suite "reading back, every answer":
   test "a send to several places reaches all of them, the live copy as one":
-    let v1 = spaceVar[Value, Value](id = bl v1)
-    let v2 = spaceVar[Value, Value](id = bl v2)
-    let b = newBVar(tee([v1.sender, v2.sender]), v1.search, id = bl b)
+    let v1 = spaceVar[Value, Value](id = bl"v1")
+    let v2 = spaceVar[Value, Value](id = bl"v2")
+    let b = newBVar(tee([v1.sender, v2.sender]), v1.search, id = bl"b")
     var asked: seq[Value]
     let resolve = newSearch[Value, Send[Value, Value]](n => (block:
       asked.add n
-      initStream(if n == bl(v2): @[v2.sender] else: @[])))
+      initStream(if n == bl"v2": @[v2.sender] else: @[])))
     let back = BVar[Value, Value].fromValue(b.toValue, resolve)
-    check back.send(bl k, bl 1)
-    check v2[bl k].toSeq == @[bl 1]            # the other target, resolved
-    check back[bl k].toSeq == @[bl 1]          # and the live copy of v1
-    check bl(v1) in asked and bl(v2) in asked  # every target was asked about
+    check back.send(bl"k", bl"1")
+    check v2[bl"k"].toSeq == @[bl"1"]          # the other target, resolved
+    check back[bl"k"].toSeq == @[bl"1"]        # and the live copy of v1
+    check bl"v1" in asked and bl"v2" in asked  # every target was asked about
 
   test "a target with several names is resolved by each of them":
-    let v = spaceVar[Value, Value](id = bl n1)
+    let v = spaceVar[Value, Value](id = bl"n1")
     let resolve = newSearch[Value, Send[Value, Value]](
-      n => initStream(if n == bl(n1): @[v.sender] else: @[]))
+      n => initStream(if n == bl"n1": @[v.sender] else: @[]))
     let w = BVar[Value, Value].fromValue(
-      bl(!{!kind(bvar), identity(w), send(!{!kind(send), !to(!{identity(n1), identity(n2)})})}),
+      bl"!{!(kind bvar) (identity w) (send !{!(kind send) !(to !{(identity n1) (identity n2)})})}",
       resolve)
-    check w.send(bl k, bl 1)
-    check v[bl k].toSeq == @[bl 1]
+    check w.send(bl"k", bl"1")
+    check v[bl"k"].toSeq == @[bl"1"]
 
   test "several sends tell every one; several searches are all asked":
-    let (a, b) = (spaceVar[Value, Value](id = bl a), spaceVar[Value, Value](id = bl b))
-    discard a.send(bl k, bl 1)
-    discard b.send(bl k, bl 2)
-    let both = bl(!{!kind(bvar), identity(ab),
-      search(!{!kind(`search-space`), identity(a), holds({k(1)})}),
-      search(!{!kind(`search-space`), identity(b), holds({k(2)})})})
-    check BVar[Value, Value].fromValue(both)[bl k].toSeq == @[bl 1, bl 2]
+    let (a, b) = (spaceVar[Value, Value](id = bl"a"), spaceVar[Value, Value](id = bl"b"))
+    discard a.send(bl"k", bl"1")
+    discard b.send(bl"k", bl"2")
+    let both = bl"""!{!(kind bvar) (identity ab)
+      (search !{!(kind search-space) (identity a) (holds {(k 1)})})
+      (search !{!(kind search-space) (identity b) (holds {(k 2)})})}"""
+    check BVar[Value, Value].fromValue(both)[bl"k"].toSeq == @[bl"1", bl"2"]
 
   test "a space holding several bodies holds them all":
-    let v = spaceVar[Value, Value](bl(!{!kind(`search-space`), identity(s),
-      holds({a(1)}), holds({a(2)})}))
-    check v[bl a].toSeq == @[bl 1, bl 2]
+    let v = spaceVar[Value, Value](bl"""!{!(kind search-space) (identity s)
+      (holds {(a 1)}) (holds {(a 2)})}""")
+    check v[bl"a"].toSeq == @[bl"1", bl"2"]
 
 suite "streams over a place that grows":
   test "an open stream survives the place growing, and sees what comes after":
-    let v = spaceVar[Value, Value](id = bl v)
-    for i in 0 ..< 40: discard v.send(bl k, toValue(i * 2))   # even
-    let early = v[bl k]
+    let v = spaceVar[Value, Value](id = bl"v")
+    for i in 0 ..< 40: discard v.send(bl"k", toValue(i * 2))   # even
+    let early = v[bl"k"]
     var got: seq[Value]
     for _ in 0 ..< 35: got.add early().get   # well into one leaf
-    for i in 0 ..< 200: discard v.send(bl k, toValue(1001 + i * 2))  # splits it
+    for i in 0 ..< 200: discard v.send(bl"k", toValue(1001 + i * 2))  # splits it
     var rest = 0
     for x in early: inc rest
-    check got[34] == bl 68
+    check got[34] == bl"68"
     check rest == 5 + 200                      # the rest, and all that came after
 
 suite "subscripts":
   test "subscripting a bvar or search gives every answer; ? the first":
-    let v = spaceVar[Value, Value](id = bl v)
-    discard v.send(bl k, bl 1)
-    discard v.send(bl k, bl 2)
-    check v[bl k].toSeq == @[bl 1, bl 2]
-    check (v ? bl(k)) == some(bl 1)
-    check (v ? bl(nothing)).isNone
-    check v.search[bl k].toSeq == @[bl 1, bl 2]
-    check (v.search ? bl(k)) == some(bl 1)
+    let v = spaceVar[Value, Value](id = bl"v")
+    discard v.send(bl"k", bl"1")
+    discard v.send(bl"k", bl"2")
+    check v[bl"k"].toSeq == @[bl"1", bl"2"]
+    check (v ? bl"k") == some(bl"1")
+    check (v ? bl"nothing").isNone
+    check v.search[bl"k"].toSeq == @[bl"1", bl"2"]
+    check (v.search ? bl"k") == some(bl"1")
 
 suite "many places as one":
   test "a union tells every part and reads them all, taking turns":
-    let (a, b) = (spaceVar[Value, Value](id = bl a), spaceVar[Value, Value](id = bl b))
-    discard a.send(bl k, bl 1)
-    discard b.send(bl k, bl 2)
+    let (a, b) = (spaceVar[Value, Value](id = bl"a"), spaceVar[Value, Value](id = bl"b"))
+    discard a.send(bl"k", bl"1")
+    discard b.send(bl"k", bl"2")
     let u = union([a, b.readOnly])
-    check u[bl k].toSeq == @[bl 1, bl 2]
-    check u.send(bl k, bl 3)                   # only a can be sent to
-    check a[bl k].toSeq == @[bl 1, bl 3]
-    check b[bl k].toSeq == @[bl 2]
+    check u[bl"k"].toSeq == @[bl"1", bl"2"]
+    check u.send(bl"k", bl"3")                   # only a can be sent to
+    check a[bl"k"].toSeq == @[bl"1", bl"3"]
+    check b[bl"k"].toSeq == @[bl"2"]
 
 suite "keeping":
   test "a send the keeper couldn't keep wasn't taken":
     let v = spaceVar[Value, Value]().persist(space => false)
-    check not v.send(bl a, bl 1)
-    check v[bl a].toSeq == @[bl 1]              # held, though not kept
+    check not v.send(bl"a", bl"1")
+    check v[bl"a"].toSeq == @[bl"1"]              # held, though not kept
 
   test "only a place that can be sent to and written down is kept":
     let keep = (space: Value) => true
@@ -229,14 +230,14 @@ suite "keeping":
 
   test "persist hands over the space, written down, each time it takes":
     var kept: seq[Value]
-    let v = spaceVar[Value, Value](one, id = bl k).persist(space => (block:
+    let v = spaceVar[Value, Value](one, id = bl"k").persist(space => (block:
       kept.add space
       true))
-    check v.send(bl a, bl 1)
-    check not v.send(bl a, bl 2)                # not taken: nothing kept
-    check v.send(bl b, bl 2)
-    check kept == @[bl(!{!kind(`search-space`), identity(k), holds({a: 1})}),
-                    bl(!{!kind(`search-space`), identity(k), holds({a: 1, b: 2})})]
+    check v.send(bl"a", bl"1")
+    check not v.send(bl"a", bl"2")                # not taken: nothing kept
+    check v.send(bl"b", bl"2")
+    check kept == @[bl"!{!(kind search-space) (identity k) (holds {a: 1})}",
+                    bl"!{!(kind search-space) (identity k) (holds {a: 1 b: 2})}"]
 
 suite "memo":
   test "it keeps what it has answered, and writes that down":
@@ -248,51 +249,51 @@ suite "memo":
         inc n
         if n <= 3: some(initList(@[q, toValue(n)])) else: none(Value))
     let s = newSearch[Value, Value](counting)
-    let m = s.memo(id = bl s9)
-    check m.ask(bl a).take(2) == @[bl [a, 1], bl [a, 2]]
+    let m = s.memo(id = bl"s9")
+    check m.ask(bl"a").take(2) == @[bl"[a 1]", bl"[a 2]"]
     check pulls[] == 2
-    check m.toValue == bl(!{!kind(`search-space`), identity(s9), holds({a([a, 1]), a([a, 2])})})
-    discard m.ask(bl b).toSeq
+    check m.toValue == bl"!{!(kind search-space) (identity s9) (holds {(a [a 1]) (a [a 2])})}"
+    discard m.ask(bl"b").toSeq
     let again = Search[Value, Value].fromValue(m.toValue)
-    check again.ask(bl b).toSeq == @[bl [b, 1], bl [b, 2], bl [b, 3]]
-    check again.ask(bl a).toSeq == @[bl [a, 1], bl [a, 2]]
+    check again.ask(bl"b").toSeq == @[bl"[b 1]", bl"[b 2]", bl"[b 3]"]
+    check again.ask(bl"a").toSeq == @[bl"[a 1]", bl"[a 2]"]
 
   test "asked again, it answers from what it kept first, then what is new":
-    let s = newSearch[Value, Value](q => initStream(@[bl 1, bl 2, bl 3]))
-    let m = s.memo(id = bl m)
-    check m.ask(bl a).take(1) == @[bl 1]
-    check m.ask(bl a).toSeq == @[bl 1, bl 2, bl 3]   # 1 kept, not twice
-    check m.toValue == bl(!{!kind(`search-space`), identity(m), holds({a(1), a(2), a(3)})})
+    let s = newSearch[Value, Value](q => initStream(@[bl"1", bl"2", bl"3"]))
+    let m = s.memo(id = bl"m")
+    check m.ask(bl"a").take(1) == @[bl"1"]
+    check m.ask(bl"a").toSeq == @[bl"1", bl"2", bl"3"]   # 1 kept, not twice
+    check m.toValue == bl"!{!(kind search-space) (identity m) (holds {(a 1) (a 2) (a 3)})}"
 
   test "with one answer a query, a kept answer is not asked for again":
     var asked = 0
     let s = newSearch[Value, Value](q => (block:
       inc asked
-      initStream(@[bl answer])), fanout = one)
-    let m = s.memo(id = bl m)
-    check m.ask(bl a).toSeq == @[bl answer]
-    check m.ask(bl a).toSeq == @[bl answer]
+      initStream(@[bl"answer"])), fanout = one)
+    let m = s.memo(id = bl"m")
+    check m.ask(bl"a").toSeq == @[bl"answer"]
+    check m.ask(bl"a").toSeq == @[bl"answer"]
     check asked == 1
-    check m.toValue == bl(!{!kind(`search-space`), identity(m), holds({a: answer})})
+    check m.toValue == bl"!{!(kind search-space) (identity m) (holds {a: answer})}"
     check m.fanout == one
     check Search[Value, Value].fromValue(m.toValue).fanout == one
 
   test "a ranked memo keeps the ranks":
     let s = newSearch[Value, Ranked[Value]](q => initStream(@[
-      Ranked[Value](rank: 1, answer: bl late), Ranked[Value](rank: 0, answer: bl soon)]))
-    let m = s.memo(id = bl r)
-    discard m.ask(bl k).toSeq
-    check m.toValue == bl(!{!kind(`search-space`), !kind(ranked), identity(r), holds({k(0, soon), k(1, late)})})
+      Ranked[Value](rank: 1, answer: bl"late"), Ranked[Value](rank: 0, answer: bl"soon")]))
+    let m = s.memo(id = bl"r")
+    discard m.ask(bl"k").toSeq
+    check m.toValue == bl"!{!(kind search-space) !(kind ranked) (identity r) (holds {(k 0 soon) (k 1 late)})}"
 
   test "a ranked memo answers in rank order, however the search grew":
     let src = spaceVar[Value, Ranked[Value]]()
-    discard src.send(bl q, Ranked[Value](rank: 1, answer: bl b))
-    discard src.send(bl q, Ranked[Value](rank: 2, answer: bl c))
+    discard src.send(bl"q", Ranked[Value](rank: 1, answer: bl"b"))
+    discard src.send(bl"q", Ranked[Value](rank: 2, answer: bl"c"))
     let m = src.search.memo
-    check m[bl q].next.get.rank == 1               # kept
-    discard src.send(bl q, Ranked[Value](rank: 0, answer: bl a))
+    check m[bl"q"].next.get.rank == 1               # kept
+    discard src.send(bl"q", Ranked[Value](rank: 0, answer: bl"a"))
     var ranks: seq[int]
-    for r in m[bl q]: ranks.add r.rank
+    for r in m[bl"q"]: ranks.add r.rank
     check ranks == @[0, 1, 2]
 
   test "a memo without an id gets a random one":
@@ -312,27 +313,27 @@ suite "file vars":
 
   test "the file holds one value: the space, as it stands":
     let path = dir / "v.blb"
-    let v = fileVar[Value, Value](path, id = bl peers)
-    check valueIn(path) == bl(!{!kind(`search-space`), identity(peers), holds({})})
-    check v.send(bl alice, bl 1)
-    check v.send(bl bob, bl 2)
-    check valueIn(path) == bl(!{!kind(`search-space`), identity(peers), holds({alice(1), bob(2)})})
+    let v = fileVar[Value, Value](path, id = bl"peers")
+    check valueIn(path) == bl"!{!(kind search-space) (identity peers) (holds {})}"
+    check v.send(bl"alice", bl"1")
+    check v.send(bl"bob", bl"2")
+    check valueIn(path) == bl"!{!(kind search-space) (identity peers) (holds {(alice 1) (bob 2)})}"
 
   test "opened again, it holds what it held, by its own name":
     let path = dir / "v.blb"
-    discard fileVar[Value, Value](path, one, id = bl settings).send(bl x, bl 1)
+    discard fileVar[Value, Value](path, one, id = bl"settings").send(bl"x", bl"1")
     let v = fileVar[Value, Value](path)          # id and fan-out from the file
-    check v.read(bl x).toSeq == @[bl 1]
-    check v.search.id == identity(bl settings)
+    check v.read(bl"x").toSeq == @[bl"1"]
+    check v.search.id == identity(bl"settings")
     check v.search.fanout == one
-    check not v.send(bl x, bl 2)                 # the first answer stands
+    check not v.send(bl"x", bl"2")               # the first answer stands
 
   test "a file that isn't one space is refused":
     let junk = dir / "junk.blb"
-    check writeValue(junk, bl junk)
+    check writeValue(junk, bl"junk")
     refuses fileVar[Value, Value](junk)
     let two = dir / "two.blb"
-    writeFile(two, ce(bl(!{!kind(`search-space`), identity(a), holds({})})).toString & ce(bl x).toString)
+    writeFile(two, ce(bl"!{!(kind search-space) (identity a) (holds {})}").toString & ce(bl"x").toString)
     refuses fileVar[Value, Value](two)
     let plain = dir / "plain.blb"
     discard fileVar[Value, Value](plain)
@@ -343,10 +344,10 @@ suite "file vars":
     var asked = 0
     let slow = newSearch[Value, Value](q => (block:
       inc asked
-      initStream(@[initList(@[q, bl found])])), fanout = one)
-    discard slow.memo(fileVar[Value, Value](path, one, id = bl cache)).ask(
-      bl a).toSeq
+      initStream(@[initList(@[q, bl"found"])])), fanout = one)
+    discard slow.memo(fileVar[Value, Value](path, one, id = bl"cache")).ask(
+      bl"a").toSeq
     check asked == 1
     let later = slow.memo(fileVar[Value, Value](path))   # another run
-    check later.ask(bl a).toSeq == @[bl [a, found]]
+    check later.ask(bl"a").toSeq == @[bl"[a found]"]
     check asked == 1                                     # from the file

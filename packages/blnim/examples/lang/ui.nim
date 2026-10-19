@@ -60,27 +60,25 @@ proc flush(d: var Drawn, line: var string) =
 
 proc draw(d: var Drawn, w: Value, indent: int, line: var string) =
   let pad = repeat("  ", indent)
-  let head = if w.isKind(bRec, unmarked): $w.items[0] else: ""
-  case head
-  of "text":
+  matchValue w:
+  of "(text $words &_)":
     if line.len == 0: line = pad
-    line.add w.items[1].text & "  "
-  of "button":
-    d.actions.add (w.items[1].text, w.items[2])
+    line.add words.text & "  "
+  of "(button $label $action &_)":
+    d.actions.add (label.text, action)
     if line.len == 0: line = pad
-    line.add "[" & $d.actions.len & ": " & w.items[1].text & "]  "
-  of "input":
-    d.actions.add (w.items[1].text, w.items[2])
+    line.add "[" & $d.actions.len & ": " & label.text & "]  "
+  of "(input $label $action &_)":
+    d.actions.add (label.text, action)
     d.flush(line)
-    d.lines.add pad & "[" & $d.actions.len & ": " & w.items[1].text & " ____]"
-  of "row":
+    d.lines.add pad & "[" & $d.actions.len & ": " & label.text & " ____]"
+  of "(row &parts)":
     d.flush(line)
-    d.drawAll(w.items.data[1 .. ^1], indent, line)
+    d.drawAll(parts, indent, line)
     d.flush(line)
-  of "column":
+  of "(column &parts)":
     d.flush(line)
-    let items = w.items.data[1 .. ^1]
-    for i, part in items:
+    for i, part in parts:
       d.drawAll([part], (if i == 0: indent else: indent + 1), line)
       d.flush(line)
   else:

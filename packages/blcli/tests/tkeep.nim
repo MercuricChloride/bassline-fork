@@ -5,7 +5,7 @@ import std/sugar
 import cli
 import bl/queries
 import bl/lib/fs
-from bl/lib/jam import Heard, ByQ, ReQ, nameOf
+from bl/lib/jam import Heard, byQ, reQ, nameOf
 
 proc keeper(s: Serving, keep, name: string, extra: seq[string] = @[]): Process =
   ## `bl jam keep` as `name` on the jam `s`, keeping in `keep`
@@ -25,8 +25,8 @@ proc messages(vs: seq[Value], room: Value): seq[Heard] =
 
 proc saying(vs: seq[Value], room: Value, by: string, q: Value): seq[Heard] =
   ## what `by` said in `room` that answers `q`
-  vs.messages(room).filterIt(it.said.answer(ByQ).isSome and
-    nameOf(it.said.answer(ByQ).get) == by and it.said.answer(q).isSome)
+  vs.messages(room).filterIt(it.said.answer(byQ).isSome and
+    nameOf(it.said.answer(byQ).get) == by and it.said.answer(q).isSome)
 
 proc answersTo(vs: seq[Value], d: Value): seq[Value] =
   ## what the jam told as answers to `d`, out of its signature
@@ -49,8 +49,8 @@ proc ready(line: Socket, heard: var seq[Value], names: varargs[string]) =
   ## heard until each keeper has said it keeps here
   let names = @names
   proc spoke(vs: seq[Value], name: string): bool =
-    vs.messages(fsRoom).anyIt(it.said.answer(ByQ).isSome and
-                              nameOf(it.said.answer(ByQ).get) == name)
+    vs.messages(fsRoom).anyIt(it.said.answer(byQ).isSome and
+                              nameOf(it.said.answer(byQ).get) == name)
   line.hearUntil(heard, (vs: seq[Value]) => names.allIt(vs.spoke(it)))
 
 suite "keep":

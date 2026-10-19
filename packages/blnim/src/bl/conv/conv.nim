@@ -316,7 +316,7 @@ method send*(c: Conversation, msg: Msg): bool {.base.} =
 
 proc sending(c: Conversation, msg: Msg): bool = c.send msg
 
-proc say*(p: Participant, r: Room, v: Value): bool =
+proc say*(p: Participant, r: Room, v: Value): bool {.discardable.} =
   ## `p` says `v` into `r`, answering whether the conversation took it.
   ## One not in it is refused
   let i = r.conv.seat(p)
@@ -406,3 +406,10 @@ template each*(p: Inbox, msg, body: untyped) =
   while true:
     let msg = await p.take
     body
+
+# ================
+# Msg
+# ================
+
+proc reply*(self: Participant, msg: Msg, val: sink Value): bool {.discardable.} =
+  self.say(msg.room, val)

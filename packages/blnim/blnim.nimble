@@ -19,12 +19,16 @@ requires "https://github.com/Bassline-Org/petit-parser-nim"
 
 import std/[os, strutils]
 
-task clean, "remove the binaries nim c -r leaves beside tests/*.nim":
-  # A test binary is a file in tests/ with no extension; everything
-  # kept there has one (.nim, .nims), as tests/.gitignore says too.
-  for f in listFiles("tests"):
+proc removeBinaries(dir: string) =
+  # A binary is a file with no extension; everything kept in tests/ and
+  # examples/ has one (.nim, .nims, .bl), as .gitignore says too.
+  for f in listFiles(dir):
     if f.splitFile.ext == "":
       rmFile f
-  for d in listDirs("tests"):
-    if d.endsWith ".dSYM":
-      rmDir d
+  for d in listDirs(dir):
+    if d.endsWith ".dSYM": rmDir d
+    else: removeBinaries d
+
+task clean, "remove the binaries nim c leaves beside tests/ and examples/":
+  removeBinaries "tests"
+  removeBinaries "examples"

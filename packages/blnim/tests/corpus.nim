@@ -1,6 +1,6 @@
 import std/[os, unittest]
 import bl/core
-import bl/lib/[json, blmacro]
+import bl/lib/json
 
 const
   Corpus* = currentSourcePath().parentDir.parentDir.parentDir.parentDir / "corpus"

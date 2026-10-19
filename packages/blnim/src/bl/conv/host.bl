@@ -1,0 +1,10 @@
+!(input text)
+!(output text)
+
+!(say "hello bassline")
+
+!(wait 1_000)
+
+!(say "goodbye")
+
+!(exit)

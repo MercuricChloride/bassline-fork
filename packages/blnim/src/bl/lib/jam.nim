@@ -77,31 +77,32 @@ export teatime
 
 refuseWith BasslineError
 
-let
-  JamQ* = sym"jam"      ## which jam this is
-  HereQ* = sym"here"    ## who is listening
-  GoneQ* = sym"gone"    ## who has stopped
-  RoomsQ* = sym"rooms"  ## rooms someone has opened
-  ForQ* = sym"for"      ## whom a message is for; (for NAME) is their room
-  AllName* = sym"all"   ## whom a message for everyone who hears it is for
-  ByQ* = sym"by"        ## who says
-  SaidQ* = sym"said"    ## what
-  ReQ* = sym"re"        ## the digest of what it answers
-  AtQ* = sym"at"        ## when, by the speaker's clock, in milliseconds
-  StampsQ* = sym"stamps"  ## (stamps NAME): where a jam named NAME puts its stamps
-  PassesQ* = sym"passes"  ## the shapes of what a jam passes through, unkept
-  SignedHead = sym"signed"
+# jamQ: which jam this is
+# hereQ: who is listening
+# goneQ: who has stopped
+# roomsQ: rooms someone has opened
+# forQ: whom a message is for, and (for NAME) is their room
+# allName: whom a message for everyone who hears it is for
+# byQ: who says
+# saidQ: what
+# reQ: the digest of what it answers
+# atQ: when, by the speaker's clock, in milliseconds
+# stampsQ: (stamps NAME), where a jam named NAME puts its stamps
+# passesQ: the shapes of what a jam passes through, unkept
+blet"""{jam-q: jam here-q: here gone-q: gone rooms-q: rooms for-q: for all-name: all
+  by-q: by said-q: said re-q: re at-q: at stamps-q: stamps passes-q: passes}"""
 
 proc opened*(v: Value): Option[tuple[said: Value, signer: Option[Key]]] =
   ## what a value says, and the key that signed it if it came signed:
   ## (signed V SIGNATURE) says V when the signature holds, and nothing
   ## when it doesn't; anything else says itself
   type Said = tuple[said: Value, signer: Option[Key]]
-  if v.isKind(bRec, unmarked) and v.items.len == 3 and v.head == SignedHead:
+  matchValue v:
+  of "(signed $_ $_)":
     let s = try: Signed.fromValue(v) except ValueError: return none(Said)
     if not s.holds: return none(Said)
-    return some (s.value, some s.sig.pubkey)
-  some (v, none(Key))
+    some (s.value, some s.sig.pubkey)
+  else: some (v, none(Key))
 
 # ================ the jam ================
 
@@ -131,7 +132,7 @@ proc who*(local: BVar[Value, Ranked[Value]]): seq[Value]
 proc put(jam: Jam, line: JamLine, q, kept, said: Value): bool
 
 proc presence(id: Value, at: int64): Value =
-  obj(initRec(@[ByQ, id]), initRec(@[AtQ, toValue(at)]))
+  obj(initRec(@[byQ, id]), initRec(@[atQ, toValue(at)]))
 
 proc stamp(jam: Jam, q, kept: Value, rank: int): Ranked[Value] =
   ## keeps the reflector's word that it heard `kept` for `q`: its next
@@ -154,9 +155,9 @@ proc newJam*(log: BVar[Value, Ranked[Value]], signedOnly = false,
   ## whose ranks that key hasn't all stamped, once each and in one
   ## chain, is refused. What fits `passes` it passes through, unkept
   result = Jam(log: log, kept: initSet(), signedOnly: signedOnly,
-               stampsQ: initRec(@[StampsQ, name]), passes: @passes)
+               stampsQ: initRec(@[stampsQ, name]), passes: @passes)
   let jam = result
-  for r in log.search.toValue.answers(HoldsQ).flatMaps(it.members):
+  for r in log.search.toValue.answers(holdsQ).flatMaps(it.members):
     jam.kept.incl initRec(@[r.items[0], r.items[2]])
     jam.next = max(jam.next, r.items[1].num.toInt + 1)
   if key.isSome:
@@ -168,18 +169,18 @@ proc newJam*(log: BVar[Value, Ranked[Value]], signedOnly = false,
     jam.reflector = initReflector(key.get, history)
     guard history.conflicts.len == 0 and history.hasAll and jam.reflector.next == jam.next,
       "a jam stamps every rank from its first, once: this log's aren't all stamped by this key"
-  if (log ? JamQ).isNone:
-    let me = obj(initRec(@[IdentityQ, name]), initRec(@[IdentityQ, bytes(urandom(16))]),
-                 initRec(@[AtQ, toValue(now())]))
-    discard jam.put(nil, JamQ, me, me)
+  if (log ? jamQ).isNone:
+    let me = obj(initRec(@[identityQ, name]), initRec(@[identityQ, bytes(urandom(16))]),
+                 initRec(@[atQ, toValue(now())]))
+    discard jam.put(nil, jamQ, me, me)
   for id in who(log):
     let gone = presence(id, now())
-    discard jam.put(nil, GoneQ, gone, gone)
+    discard jam.put(nil, goneQ, gone, gone)
   if jam.reflector != nil:
     let me = identity(name, bytes(@(jam.reflector.key)))
-    let here = obj(initRec(@[ByQ, me]), initRec(@[AtQ, toValue(now())]),
-                   initRec(@[StampsQ, jam.stampsQ]))
-    discard jam.put(nil, HereQ, jam.reflector.keypair.signed(initRec(@[HereQ, here])).toValue, here)
+    let here = obj(initRec(@[byQ, me]), initRec(@[atQ, toValue(now())]),
+                   initRec(@[stampsQ, jam.stampsQ]))
+    discard jam.put(nil, hereQ, jam.reflector.keypair.signed(initRec(@[hereQ, here])).toValue, here)
 
 proc newLine*(jam: Jam, tell: (Value) -> bool): JamLine =
   ## a line that `tell` tells
@@ -220,18 +221,18 @@ proc put(jam: Jam, line: JamLine, q, kept, said: Value): bool =
     inc jam.next
     jam.tell(q, r)
     if stamping: jam.tell(jam.stampsQ, stamped)
-  if q in [HereQ, GoneQ] and line != nil:
-    let id = said.answer(ByQ)
+  if q in [hereQ, goneQ] and line != nil:
+    let id = said.answer(byQ)
     if id.isSome:
       line.heres.keepItIf(it != id.get)
-      if q == HereQ: line.heres.add id.get
+      if q == hereQ: line.heres.add id.get
   true
 
 proc ask(jam: Jam, line: JamLine, q: Value): bool =
   ## tells the line every answer to `q` it has, and then each as it is
   ## kept
   if jam.askings.anyIt(it.line == line and it.q == q): return true
-  if q == PassesQ:
+  if q == passesQ:
     for s in jam.passes:
       if not line.tell(passed(q, s.toValue)):
         jam.drop(line)
@@ -247,20 +248,18 @@ proc hear*(jam: Jam, line: JamLine, v: Value): bool =
   ## a value arriving on a line: an answer to keep or a question to
   ## answer, answering whether it was taken
   let o = opened(v)
-  if o.isNone or (jam.signedOnly and o.get.signer.isNone): return false
+  if o.isNone or (jam.signedOnly and o.get.signer.isNone) or not line.open: return false
   let said = o.get.said
-  if not said.isKind(bRec, unmarked) or not line.open: return false
-  case said.items.len
-  of 1: jam.ask(line, said.items[0])
-  of 2:
-    if said.items[0] in [JamQ, PassesQ] or
-       (jam.reflector != nil and said.items[0] == jam.stampsQ):
+  matchValue said:
+  of "($q)": jam.ask(line, q)
+  of "($q $a)":
+    if q in [jamQ, passesQ] or (jam.reflector != nil and q == jam.stampsQ):
       return false
-    let kept = if o.get.signer.isSome: v else: said.items[1]
+    let kept = if o.get.signer.isSome: v else: a
     if jam.passes(said):
-      jam.tell(said.items[0], passed(said.items[0], kept))
+      jam.tell(q, passed(q, kept))
       return true
-    jam.put(line, said.items[0], kept, said.items[1])
+    jam.put(line, q, kept, a)
   else: false
 
 proc leave(jam: Jam, line: JamLine) =
@@ -269,7 +268,7 @@ proc leave(jam: Jam, line: JamLine) =
   line.heres.setLen 0
   for id in ids:
     let gone = presence(id, now())
-    discard jam.put(nil, GoneQ, gone, gone)
+    discard jam.put(nil, goneQ, gone, gone)
 
 proc drop*(jam: Jam, line: JamLine) =
   ## the line can no longer be reached: it is told nothing more, and
@@ -328,21 +327,22 @@ proc reading(q, a: Value): Option[tuple[said: Value, signer: Option[Key]]] =
 proc heard*(record: Value): Option[Heard] =
   ## (Q R A) as a jam tells it, read as `reading` reads A; nothing for
   ## an answer passed through, (Q nil A), which has no rank
-  if not record.isKind(bRec) or record.items.len != 3: return none(Heard)
-  let (q, r, a) = (record.items[0], record.items[1], record.items[2])
-  if not r.isKind(bNum, unmarked) or not r.num.isInt or r.num.toInt < 0: return none(Heard)
-  let o = reading(q, a)
-  if o.isNone: return none(Heard)
-  some Heard(q: q, rank: r.num.toInt, answer: a, said: o.get.said, signer: o.get.signer)
+  matchValue record:
+  of "($q $r $a) {any-mark}":
+    if not r.isKind(bNum, unmarked) or not r.num.isInt or r.num.toInt < 0: return none(Heard)
+    let o = reading(q, a)
+    if o.isNone: return none(Heard)
+    some Heard(q: q, rank: r.num.toInt, answer: a, said: o.get.said, signer: o.get.signer)
+  else: none(Heard)
 
 proc passedOf*(record: Value): Option[Passed] =
   ## (Q nil A), an answer a jam passed through, read as `reading` reads A
-  if not record.isKind(bRec) or record.items.len != 3 or
-     not record.items[1].isKind(bNil, unmarked): return none(Passed)
-  let (q, a) = (record.items[0], record.items[2])
-  let o = reading(q, a)
-  if o.isNone: return none(Passed)
-  some Passed(q: q, answer: a, said: o.get.said, signer: o.get.signer)
+  matchValue record:
+  of "($q nil $a) {any-mark}":
+    let o = reading(q, a)
+    if o.isNone: return none(Passed)
+    some Passed(q: q, answer: a, said: o.get.said, signer: o.get.signer)
+  else: none(Passed)
 
 proc keep*(local: BVar[Value, Ranked[Value]], record: Value): Option[Heard] =
   ## keeps what a jam told in a reader's own ranked space, answering what
@@ -375,16 +375,16 @@ proc ask*(s: Speaker, q: Value): Value =
 proc message*(s: Speaker, said: Value, re: openArray[Value] = [],
               `for`: openArray[Value] = []): Value =
   ## a message from `s` saying `said`, now
-  var members = @[initRec(@[ByQ, s.by]), initRec(@[SaidQ, said]),
-                  initRec(@[AtQ, toValue(now())])]
-  for d in re: members.add initRec(@[ReQ, d])
-  for n in `for`: members.add initRec(@[ForQ, n])
+  var members = @[initRec(@[byQ, s.by]), initRec(@[saidQ, said]),
+                  initRec(@[atQ, toValue(now())])]
+  for d in re: members.add initRec(@[reQ, d])
+  for n in `for`: members.add initRec(@[forQ, n])
   obj members
 
 proc isFor*(said, id: Value): bool =
   ## whether a message is for someone going by `id`: it names one of
   ## their names as whom it is for, or names all
-  said.answers(ForQ).exists(n => n == AllName or sharesIdentity(n, id))
+  said.answers(forQ).exists(n => n == allName or sharesIdentity(n, id))
 
 proc here*(s: Speaker): Value =
   ## that `s` is listening, now
@@ -407,8 +407,8 @@ proc nameOf*(id: Value): string =
 
 proc vouched*(h: Heard): bool =
   ## whether the answer came signed by a key its speaker goes by
-  h.signer.isSome and h.said.answer(ByQ).isSome and
-    h.said.answer(ByQ).get.knownAs(bytes(@(h.signer.get)))
+  h.signer.isSome and h.said.answer(byQ).isSome and
+    h.said.answer(byQ).get.knownAs(bytes(@(h.signer.get)))
 
 type Turn = Ranked[(Value, bool)]   # who, and whether they came or went
 
@@ -416,10 +416,10 @@ proc turns(local: BVar[Value, Ranked[Value]]): Stream[Turn] =
   ## who a reader has been told came and went, in the order the jam heard it
   proc told(q: Value, coming: bool): Stream[Turn] =
     local.heardIn(q).filterMaps(block:
-      let id = it.said.answer(ByQ)
+      let id = it.said.answer(byQ)
       if id.isNone: none(Turn)
       else: some(Turn(rank: it.rank, answer: (id.get, coming))))
-  byRank(told(HereQ, true), told(GoneQ, false))
+  byRank(told(hereQ, true), told(goneQ, false))
 
 proc who*(local: BVar[Value, Ranked[Value]]): seq[Value] =
   ## who a reader has been told is here and not gone since, in the order
@@ -455,10 +455,12 @@ proc stampOf*(said: Value, signer: Key): Option[Stamp] =
   ## (Q D), as `signer` signed it
   if not TeaMsg.fits(said): return none(Stamp)
   let m = TeaMsg.fromValue(said)
-  if not m.value.isKind(bRec, unmarked) or m.value.items.len != 2: return none(Stamp)
   if not m.ordinal.isInt or m.ordinal.toInt < 0 or not m.at.isInt: return none(Stamp)
-  some Stamp(q: m.value.items[0], rank: m.ordinal.toInt, digest: m.value.items[1],
-             at: m.at.toInt, prev: m.prev, record: said, signer: signer)
+  matchValue m.value:
+  of "($q $d)":
+    some Stamp(q: q, rank: m.ordinal.toInt, digest: d,
+               at: m.at.toInt, prev: m.prev, record: said, signer: signer)
+  else: none(Stamp)
 
 proc stampOf*(h: Heard): Option[Stamp] =
   ## the stamp a jam told, if `h` is one: a key's signature over the

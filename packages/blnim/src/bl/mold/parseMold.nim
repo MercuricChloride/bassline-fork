@@ -218,17 +218,17 @@ proc parseField(f: Value, struct: string): Field =
 
 proc parseStruct*(s: Value): Struct =
   ## `(struct NAME PRAGMAS? (FIELD PRAGMAS? TYPE) …)`
-  guard s.isKind(bRec) and s.len >= 2 and s[0].isKind(bSym) and
-    not s[0].mark and s[0].text == "struct",
-    "a description is (struct NAME PRAGMAS? (FIELD TYPE) …): " & $s
-  let name = nameOf(s[1], "struct")
+  let (named, rest) = matchValue s:
+  of "(struct $named &rest) {any-mark}": (named, rest)
+  else: refuse "a description is (struct NAME PRAGMAS? (FIELD TYPE) …): " & $s
+  let name = nameOf(named, "struct")
   guard name notin Reserved, name & " is a TYPE already, not a struct's name"
   var
     p: Pragmas
-    at = 2
-  if s.len > 2 and s[2].isPragmas:
-    p = readPragmas(s[2], name, ["exact"], ["rep", "nim"])
-    at = 3
+    fields = rest
+  if rest.len > 0 and rest[0].isPragmas:
+    p = readPragmas(rest[0], name, ["exact"], ["rep", "nim"])
+    fields = rest[1 .. ^1]
   result = Struct(name: name, marked: s.mark, exact: "exact" in p.flags,
                   nimName: p.nimPragma(name).get(nimSpelling(name, true)))
   let rep = p.one("rep", name)
@@ -236,8 +236,8 @@ proc parseStruct*(s: Value): Struct =
     guard rep.get.isKind(bSym) and not rep.get.mark and
       rep.get.text in ["dict", "record"], name & ": (rep dict) or (rep record)"
     result.rep = if rep.get.text == "dict": repDict else: repRecord
-  for i in at ..< s.len:
-    let f = parseField(s[i], name)
+  for each in fields:
+    let f = parseField(each, name)
     for seen in result.fields:
       guard seen.name != f.name, name & ": " & f.name & " is described twice"
       guard seen.nimName != f.nimName,

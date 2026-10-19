@@ -3,11 +3,12 @@
 
 import std/unittest
 import bl/core
-import bl/lib/[json, blah, blmacro]
+import bl/lib/[json, blah]
 import ./corpus
 
-template survives(v: untyped) =
-  check bl(v).toJson.toValue == bl(v)
+template survives(src: string) =
+  let v = bl(src)
+  check v.toJson.toValue == v
 
 template refused(j: string) =
   expect JsonRefusal:
@@ -15,28 +16,29 @@ template refused(j: string) =
 
 suite "round trips":
   test "every kind, marked and not":
-    survives nil
-    survives !nil
-    survives 42
-    survives !(-7)
-    survives "text"
-    survives !"text"
-    survives sym
-    survives !sym
-    survives x"dead_beef"
-    survives x""
-    survives [1, [2], {3}]
-    survives ![]
-    survives f(a, !b)
-    survives {a: 1, [b]: {c: d}}
-    survives {:}
-    survives {1, 2, !3}
-    survives {}
+    survives "nil"
+    survives "nil!"
+    survives "42"
+    survives "-7!"
+    survives "\"text\""
+    survives "\"text\"!"
+    survives "sym"
+    survives "sym!"
+    survives "0xdead_beef"
+    survives "0x"
+    survives "[1 [2] {3}]"
+    survives "![]"
+    survives "(f a b!)"
+    survives "{a: 1 [b]: {c: d}}"
+    survives "{:}"
+    survives "{1 2 3!}"
+    survives "{}"
   test "past int64 travels as a raw number":
     let w = 123456789012345678901234567890'bn
     check $w.toJson["value"] == "123456789012345678901234567890"
     check w.toJson.toValue == w
-    check bl(!n"-123456789012345678901234567890").toJson.toValue == bl(!n"-123456789012345678901234567890")
+    let marked = bl"-123456789012345678901234567890!"
+    check marked.toJson.toValue == marked
   test "every corpus case":
     for c in cases:
       check c.toJson.toValue == c

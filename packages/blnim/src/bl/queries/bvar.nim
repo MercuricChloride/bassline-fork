@@ -116,9 +116,9 @@ proc toValue*(v: BVar): Value =
   ## the bvar written down: the halves it has, by their denotations.
   ## Refuses a bvar with a half that has no denotation
   var halves: seq[Value]
-  if v.sending != nil: halves.add initRec(@[SendQ, v.sending.toValue])
-  if v.reading != nil: halves.add initRec(@[SearchQ, v.reading.toValue])
-  describe([BVarKind], v.id, halves)
+  if v.sending != nil: halves.add initRec(@[sendQ, v.sending.toValue])
+  if v.reading != nil: halves.add initRec(@[searchQ, v.reading.toValue])
+  describe([bVarKind], v.id, halves)
 
 # ================ space vars ================
 
@@ -126,9 +126,10 @@ proc record*[Q, A](q: Q, a: A): Value =
   ## the record a space keeps for an answer: (q a), or ranked (q r a)
   mixin toValue
   when A is Ranked:
-    initRec(@[q.toValue, toValue(a.rank), a.answer.toValue])
+    let (r, v) = (a.rank, a.answer)
+    bl"($q $r $v)"
   else:
-    initRec(@[q.toValue, a.toValue])
+    bl"($q $a)"
 
 proc spaceSend[Q, A](send: (Q, A) -> bool, id: Value): Send[Q, A] =
   newSend(send, k(sendTo id))
@@ -165,7 +166,7 @@ proc spaceVar*[Q, A](space: Value, skipRefused = false): BVar[Q, A] =
   ## the space's own names: a dict, one answer a query, if it holds one
   ## dict, and otherwise a set of every record it holds. Refuses anything
   ## else
-  guard space.isObject and space.hasKind(SearchSpaceKind),
+  guard space.isObject and space.hasKind(searchSpace),
     "not a search space: " & $space
   guard compositeOf(space, A is Ranked).isKind(bNil),
     "a composite holds nothing itself: " & $space
@@ -197,21 +198,21 @@ proc fromValue*[Q, A](T: typedesc[BVar[Q, A]], d: Value,
   ## bvar also answers as its search is held here as a live copy, which
   ## answers for the space's names as well. Searches are read through
   ## `resolve`. A half not answered is missing
-  guard d.isObject and d.hasKind(BVarKind), "not a bvar: " & $d
+  guard d.isObject and d.hasKind(bVarKind), "not a bvar: " & $d
   let id = identityOf d
   proc isPlainSpace(r: Value): bool =
-    r.hasKind(SearchSpaceKind) and compositeOf(r, A is Ranked).isKind(bNil)
+    r.hasKind(searchSpace) and compositeOf(r, A is Ranked).isKind(bNil)
   var
     copies: seq[(Value, BVar[Q, A])]   # plain spaces held live, by their names
     searches: seq[Search[Q, A]]
-  for r in d.answers(SearchQ):
+  for r in d.answers(searchQ):
     if r.isPlainSpace:
       let live = spaceVar[Q, A](r, skipRefused)
       copies.add (identityOf(r), live)
       searches.add live.reading
     else:
       searches.add Search[Q, A].fromValue(r, skipRefused, resolve)
-  let sends = d.answers(SendQ).taps(guard(it.isObject and it.hasKind(SendKind), "not a send: " & $it)).toSeq
+  let sends = d.answers(sendQ).taps(guard(it.isObject and it.hasKind(sendKind), "not a send: " & $it)).toSeq
   var sending: Send[Q, A] = nil
   if sends.len > 0:
     let ids = initStream(sends).flatMap(targets).toSeq

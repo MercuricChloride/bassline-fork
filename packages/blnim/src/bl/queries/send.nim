@@ -46,7 +46,8 @@ proc toValue*(s: Send): Value =
 
 proc sendTo*(ids: varargs[Value]): Value =
   ## a send written down: !{!(kind send) !(to ID) …}
-  obj(order(KindQ, SendKind) & initStream(@ids).maps(target(it)).toSeq)
+  let targets = initStream(@ids).maps(target(it)).toSeq
+  bl"!{!(kind send) @targets}"
 
 proc tee*[Q, A](parts: openArray[Send[Q, A]]): Send[Q, A] =
   ## tells every part, and was taken if any part took it. Written down,

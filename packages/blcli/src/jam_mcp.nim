@@ -93,7 +93,7 @@ proc firstName(id: Value): Value =
 
 proc isMe(m: Mcp, id: Value): bool = sharesIdentity(id, m.speaker.by)
 
-proc ownRoom(m: Mcp): Value = initRec(@[ForQ, m.speaker.name])
+proc ownRoom(m: Mcp): Value = initRec(@[forQ, m.speaker.name])
 
 proc key(q, digest: Value): string = $q & " " & $digest
 
@@ -112,11 +112,11 @@ proc toYou(l: Line, h: Heard): Option[Value] =
   ## it, answering something it said, or for all. What it said itself is
   ## said to others
   let m = l.m
-  let by = h.said.answer(ByQ)
+  let by = h.said.answer(byQ)
   if by.isSome and m.isMe(by.get): return none(Value)
   if h.q == m.ownRoom: return some sym"room"
-  if h.said.answers(ForQ).exists(n => m.isMe(n)): return some sym"named"
-  if h.said.answers(ReQ).exists(d => d in l.mine): return some sym"answer"
+  if h.said.answers(forQ).exists(n => m.isMe(n)): return some sym"named"
+  if h.said.answers(reQ).exists(d => d in l.mine): return some sym"answer"
   if h.said.isFor(m.speaker.by): return some sym"all"
   none(Value)
 
@@ -124,16 +124,16 @@ proc record(l: Line, h: Heard): Value =
   ## (heard Q R READINGS A): an answer as the jam told it, A as said, and
   ## what this session reads in it, the jam it came from among them
   var readings = @[(DigestQ, h.digestOf), (JamName, l.jamName)]
-  let by = h.said.answer(ByQ)
-  if by.isSome: readings.add (ByQ, firstName(by.get))
+  let by = h.said.answer(byQ)
+  if by.isSome: readings.add (byQ, firstName(by.get))
   if h.signer.isSome:
     readings.add (SignerQ, bytes(@(h.signer.get)))
     if h.vouched: readings.add (VouchedQ, firstName(by.get))
   var re: seq[Value]
-  for d in h.said.answers(ReQ):
+  for d in h.said.answers(reQ):
     let k = key(h.q, d)
     if k in l.ranks: re.add toValue(l.ranks[k])
-  if re.len > 0: readings.add (ReQ, initList(re))
+  if re.len > 0: readings.add (reQ, initList(re))
   let why = l.toYou(h)
   if why.isSome: readings.add (ToYouQ, why.get)
   initRec(@[HeardHead, h.q, toValue(h.rank), initDict(readings), h.said])
@@ -172,12 +172,12 @@ proc push(l: Line, h: Heard) =
   notify("notifications/claude/channel", %*{
     "content": $l.record(h),
     "meta": {"jam": $l.jamName, "room": $h.q, "rank": $h.rank,
-             "by": $firstName(h.said.answer(ByQ).get)}})
+             "by": $firstName(h.said.answer(byQ).get)}})
 
 proc firstHere(l: Line): int =
   ## where its name first said it was here, as far as it has been told
-  for h in l.c.local.heardIn(HereQ):
-    let by = h.said.answer(ByQ)
+  for h in l.c.local.heardIn(hereQ):
+    let by = h.said.answer(byQ)
     if by.isSome and l.m.isMe(by.get): return h.rank
   l.since
 
@@ -199,17 +199,17 @@ proc heard(l: Line, h: Heard) =
   l.told.add h
   l.ranks[key(h.q, h.digestOf)] = h.rank
   l.newest = max(l.newest, h.rank)
-  if h.q == HereQ and l.since < 0 and h.answer == l.here:
+  if h.q == hereQ and l.since < 0 and h.answer == l.here:
     l.since = h.rank
     l.catchUp()
     return
-  let by = h.said.answer(ByQ)
+  let by = h.said.answer(byQ)
   if by.isNone: return
   if m.isMe(by.get):
     l.mine.add h.digestOf
-    for d in h.said.answers(ReQ): l.saidRe.incl d
+    for d in h.said.answers(reQ): l.saidRe.incl d
     return
-  if h.said.answer(SaidQ).isNone: return
+  if h.said.answer(saidQ).isNone: return
   if l.toYou(h).isSome or (m.hearAll and h.q in l.asking):
     if l.since < 0 or h.rank < l.since: l.backlog.add h
     else: l.push(h)
@@ -363,10 +363,10 @@ proc tools(): JsonNode =
 proc opens(l: Line, q, a: Value): bool =
   ## whether saying `a` in `q` opens a room nobody has listed: a message,
   ## in a question that isn't the jam's own or someone's own room
-  if not (a.isObject and a.answer(ByQ).isSome): return false
-  if q in [HereQ, GoneQ, RoomsQ, JamQ]: return false
-  if q.isKind(bRec, unmarked) and q.len > 0 and q.head in [ForQ, StampsQ]: return false
-  not l.c.local.heardIn(RoomsQ).exists(h => h.said == q)
+  if not (a.isObject and a.answer(byQ).isSome): return false
+  if q in [hereQ, goneQ, roomsQ, jamQ]: return false
+  if q.isKind(bRec, unmarked) and q.len > 0 and q.head in [forQ, stampsQ]: return false
+  not l.c.local.heardIn(roomsQ).exists(h => h.said == q)
 
 proc tell(l: Line, text: string): string =
   let c = l.reach
@@ -380,7 +380,7 @@ proc tell(l: Line, text: string): string =
       said.add $initRec(@[sym"asked", q, toValue(c.local.heardIn(q).toSeq.len)])
       continue
     let a = v.items[1]
-    if l.opens(q, a): discard c.put(RoomsQ, q)
+    if l.opens(q, a): discard c.put(roomsQ, q)
     let kept = c.put(q, a)
     var told = none(int)
     let until = epochTime() + 2
@@ -391,11 +391,11 @@ proc tell(l: Line, text: string): string =
     said.add $(if told.isSome: initRec(@[sym"put", q, toValue(told.get)])
                else: initRec(@[sym"put", q]))
     let here = c.local.who
-    for name in a.answers(ForQ):
+    for name in a.answers(forQ):
       let n = name
-      if n == AllName: continue
-      let came = c.local.heardIn(HereQ).exists(
-        h => h.said.answer(ByQ).isSome and sharesIdentity(h.said.answer(ByQ).get, n))
+      if n == allName: continue
+      let came = c.local.heardIn(hereQ).exists(
+        h => h.said.answer(byQ).isSome and sharesIdentity(h.said.answer(byQ).get, n))
       if not came:
         said.add $initRec(@[sym"note", toValue("no one going by " & $n &
                                                " has been on this jam, so no one may hear it")])
@@ -451,7 +451,7 @@ proc scanning(m: Mcp, id: JsonNode, args: JsonNode) =
   if nets.len == 0:
     raise newException(ValueError, "this machine is on no network but loopback")
   let s = Scanning(id: id, said: m.onJams)
-  s.done = scan(nets, ports, m.speaker.ask(JamQ).ce.toString, 500,
+  s.done = scan(nets, ports, m.speaker.ask(jamQ).ce.toString, 500,
                 (v: Value) => s.found.add v)
   m.scans.add s
 
@@ -461,7 +461,7 @@ proc foundJams(m: Mcp, s: Scanning) =
   for f in s.found:
     if f.items.len < 3: continue
     let h = heard(f.items[2])
-    if h.isSome and h.get.q == JamQ: m.found.add (f.items[1].text, h.get.said)
+    if h.isSome and h.get.q == jamQ: m.found.add (f.items[1].text, h.get.said)
 
 proc placeOf(m: Mcp, at: string): Place =
   ## a place by its spelling, a name bl name keeps, or the name of a jam

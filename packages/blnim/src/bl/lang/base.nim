@@ -290,8 +290,6 @@ method answers(d: Reduce, v: Value, cx: Cx): Stream[Value] =
       guard(made.len == entries.len, "a dict made with a key twice")
       made))
 
-let RecordQ = sym"record"
-
 type Make = ref object of Doer
   ## !(record HEAD ARG …), its direct marked arguments done: (HEAD ARG …)
 
@@ -304,8 +302,6 @@ method describe(d: Make): Value = rv"!(record head arg)"
 
 # ================ functions ================
 
-let FnQ = sym"fn"
-
 proc isParams(v: Value): bool =
   v.isKind(bList, unmarked) and v.parts.every(p => p.isKind(bSym, unmarked))
 
@@ -313,19 +309,22 @@ proc isName(v: Value): bool = v.isKind(bSym, unmarked)
 
 proc isClosure*(f: Value): bool =
   ## (fn [PARAM …] BODY CAPTURED) or (fn NAME [PARAM …] BODY CAPTURED)
-  f.isKind(bRec, unmarked) and f.items[0] == FnQ and (
-    (f.items.len == 4 and f.items[1].isParams and f.items[3].isKind(bDict, unmarked)) or
-    (f.items.len == 5 and f.items[1].isName and f.items[2].isParams and
-      f.items[4].isKind(bDict, unmarked)))
+  matchValue f:
+  of "(fn $params $_ $captured)":
+    params.isParams and captured.isKind(bDict, unmarked)
+  of "(fn $name $params $_ $captured)":
+    name.isName and params.isParams and captured.isKind(bDict, unmarked)
+  else: false
 
 type Fn = ref object of Doer
   ## functions made, as values, and applied
 
 proc making(v: Value): bool =
   ## !(fn [PARAM …] BODY) or !(fn NAME [PARAM …] BODY)
-  v.items[0] == FnQ and (
-    (v.items.len == 3 and v.items[1].isParams) or
-    (v.items.len == 4 and v.items[1].isName and v.items[2].isParams))
+  matchValue v:
+  of "(fn $params $_) {any-mark}": params.isParams
+  of "(fn $name $params $_) {any-mark}": name.isName and params.isParams
+  else: false
 
 method fits(d: Fn, v: Value): bool =
   if not v.isKind(bRec): return false
@@ -348,14 +347,14 @@ proc capturing(cx: Cx, body: Value, own: seq[Value]): Value =
   caught
 
 method answers(d: Fn, v: Value, cx: Cx): Stream[Value] =
-  if v.making:
-    let named = v.items.len == 4
-    let params = v.items[^2]
-    var own = params.items.data
-    if named: own.add v.items[1]
-    var items = v.items.data
-    items.add cx.capturing(v.items[^1], own)
-    return just initRec(items)
+  matchValue v:
+  of "(fn $params $body) {any-mark}":
+    let captured = cx.capturing(body, params.items.data)
+    return just bl"(fn $params $body $captured)"
+  of "(fn $name $params $body) {any-mark}":
+    let captured = cx.capturing(body, params.items.data & name)
+    return just bl"(fn $name $params $body $captured)"
+  else: discard
   let f = v.items[0]
   let params = f.items[^3].items.data
   var vars = f.items[^1].copy
@@ -368,8 +367,6 @@ method run(c: Let, cx: Cx): Stream[Value] =
 
 # ================ rules ================
 
-let RuleQ = sym"rule"
-
 type Rule* = ref object of Doer
   ## a call fitting the rule's example: its body done with the example's
   ## holes bound. Rules for one head are tried in the order given, as any
@@ -381,12 +378,13 @@ proc rules*(values: openArray[Value]): seq[(Value, Rule)] =
   ## the rules among values, `(rule (shape EXAMPLE {HOLE …}) BODY)`, each
   ## with the head of its example, in the order given
   for r in values:
-    guard r.isKind(bRec, unmarked) and r.items.len == 3 and r.items[0] == RuleQ,
-      "a rule is (rule (shape EXAMPLE {HOLE …}) BODY): " & $r
-    let s = rw.Shape.fromValue(r.items[1])
-    guard s.example.isKind(bRec, marked) and s.example.items.len > 0,
-      "a rule's example is a call: " & $s.example
-    result.add (s.example.items[0], Rule(shape: s, body: r.items[2]))
+    matchValue r:
+    of "(rule $shape $body)":
+      let s = rw.Shape.fromValue(shape)
+      matchValue s.example:
+      of "!($head &_)": result.add (head, Rule(shape: s, body: body))
+      else: refuse "a rule's example is a call: " & $s.example
+    else: refuse "a rule is (rule (shape EXAMPLE {HOLE …}) BODY): " & $r
 
 proc install*(cx: Cx, rs: openArray[(Value, Rule)]) =
   for (head, r) in rs: cx.install(head, r)
@@ -397,7 +395,8 @@ method fits(d: Rule, v: Value): bool =
   v.isKind(bRec, marked) and v.items.len >= d.shape.example.items.len
 
 method describe(d: Rule): Value =
-  initRec(@[RuleQ, d.shape.toValue, d.body])
+  let (shape, body) = (d.shape, d.body)
+  bl"(rule $shape $body)"
 
 method answers(d: Rule, v: Value, cx: Cx): Stream[Value] =
   let body = d.body
@@ -446,9 +445,9 @@ method run(c: Describe, cx: Cx): Stream[Value] =
   cx.doersFor(initRec(@[c.name], mark = true)).maps(it.describe).filters(not it.isKind(bNil))
 
 method run(c: Readings, cx: Cx): Stream[Value] =
-  guard c.body.isKind(bList) and c.body.len == 1,
-    "readings takes a block of one call: !(readings [CALL])"
-  cx.readings(c.body.items[0])
+  matchValue c.body:
+  of "[$call] {any-mark}": cx.readings(call)
+  else: refuse "readings takes a block of one call: !(readings [CALL])"
 
 # ================ finds ================
 
@@ -469,10 +468,8 @@ proc finding*(cx: Cx, resolve: Search[Value, Value] = nil) =
 
 # ================ sends and searches ================
 
-let
-  PutQ = sym"put"
-  AskQ = sym"ask"
-  Taken = sym"taken"
+blet("{put taken}", false)
+blet("{ask-q: ask}", false)
 
 type
   Put = ref object of Doer
@@ -490,7 +487,7 @@ method answers(d: Put, v: Value, cx: Cx): Stream[Value] =
   lazy(() => (block:
     if to.send(q, a):
       cx.acted
-      just(Taken)
+      just(taken)
     else: empty(Value)))
 
 method describe(d: Put): Value = rv"!(put Q A)"
@@ -505,11 +502,11 @@ method describe(d: Ask): Value = rv"!(ask Q)"
 
 proc install*(cx: Cx, to: Send[Value, Value]) =
   ## !(put Q A) tells `to`
-  cx.install(PutQ, Put(to: to))
+  cx.install(put, Put(to: to))
 
 proc install*(cx: Cx, space: Search[Value, Value]) =
   ## !(ask Q) answers what `space` answers
-  cx.install(AskQ, Ask(space: space))
+  cx.install(askQ, Ask(space: space))
 
 # ================ the vocabulary ================
 
@@ -526,6 +523,6 @@ proc base*(unheard: (Value) -> void = nil,
   let r = Reduce()
   for k in [bList, bDict, bSet]:
     result.install(initRec(@[sym"frame", sym($k)]), r)
-  result.install(FnQ, Fn())
-  result.install(RecordQ, Make())
+  result.install(sym"fn", Fn())
+  result.install(sym"record", Make())
   result.finding

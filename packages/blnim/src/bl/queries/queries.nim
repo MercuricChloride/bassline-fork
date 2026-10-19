@@ -36,24 +36,17 @@ export stream
 
 refuseWith BasslineError
 
-let
-  IdentityQ* = sym"identity"
-  PartsQ* = sym"parts"     ## a composite's parts, in order
-  HoldsQ* = sym"holds"     ## what a space holds
-  SendQ* = sym"send"       ## a bvar's send
-  SearchQ* = sym"search"   ## a bvar's search
-  KindQ* = sym"kind"       ## how to bring a thing about: !(kind K), marked
-  ToQ* = sym"to"           ## where a send sends: !(to ID), marked
-  SearchSpaceKind* = sym"search-space"
-  RankedKind* = sym"ranked"
-  CatKind* = sym"cat"
-  AltKind* = sym"alt"
-  FeedKind* = sym"feed"
-  MergeKind* = sym"merge"
-  MoreKind* = sym"more"
-  ViaKind* = sym"via"
-  SendKind* = sym"send"
-  BVarKind* = sym"bvar"
+# to: where a send sends, !(to ID), marked
+blet"{to search-space}"
+# partsQ: a composite's parts, in order
+# holdsQ: what a space holds
+# sendQ: a bvar's send
+# searchQ: a bvar's search
+# kindQ: how to bring a thing about, !(kind K), marked
+blet"""{identity-q: identity parts-q: parts holds-q: holds send-q: send
+  search-q: search kind-q: kind ranked-kind: ranked cat-kind: cat alt-kind: alt
+  feed-kind: feed merge-kind: merge more-kind: more via-kind: via send-kind: send
+  b-var-kind: bvar}"""
 
 # ================ predicates and maps over values ================
 
@@ -121,8 +114,8 @@ type
     answer*: Value
 
 proc toAnswer*(v: Value): Option[Answer] =
-  if v.isKind(bRec) and v.hasWidth(2):
-    some Answer(question: v.items[0], answer: v.items[1])
+  matchValue v:
+  of "($question $answer) {any-mark}": some Answer(question: question, answer: answer)
   else: none Answer
 
 # ================ streams over values ================
@@ -277,30 +270,30 @@ proc order*(question, answer: Value): Value =
 
 proc target*(id: Value): Value =
   ## !(to ID): an order to send to the thing going by `id`
-  order(ToQ, id)
+  order(to, id)
 
 proc targets*(o: Value): Stream[Value] =
   ## the IDs an object's !(to ID) orders send to
-  o.orders ToQ
+  o.orders to
 
 proc kinds*(o: Value): Stream[Value] =
   ## an object's kinds, from its !(kind K) orders
-  o.orders KindQ
+  o.orders kindQ
 
 proc hasKind*(o: Value, kind: Value): bool =
   ## whether an object has this kind among its kinds
-  o.isObject and order(KindQ, kind) in o.els
+  o.isObject and order(kindQ, kind) in o.els
 
 # ================ names ================
 
 proc identities*(id: Value): Stream[Value] =
   ## the names an ID goes by: an object's answers to `identity`, or a
   ## value that isn't an object, alone
-  if id.isObject: id.answers IdentityQ else: just id
+  if id.isObject: id.answers identityQ else: just id
 
 proc knownAs*(id: Value, name: Value): bool =
   ## whether an ID goes by `name`
-  if id.isObject: initRec(@[IdentityQ, name]) in id.els else: id == name
+  if id.isObject: initRec(@[identityQ, name]) in id.els else: id == name
 
 proc sharesIdentity*(a, b: Value): bool =
   ## whether two IDs speak of the same thing: a name of one is a name of
@@ -309,7 +302,7 @@ proc sharesIdentity*(a, b: Value): bool =
 
 proc identityAnswers(id: Value): Stream[Value] =
   ## the (identity NAME) records an ID stands for, to put in an object
-  id.identities.maps initRec(@[IdentityQ, it])
+  id.identities.maps initRec(@[identityQ, it])
 
 proc identity*(names: varargs[Value]): Value =
   ## an object that is only names: one (identity NAME) per name, an
@@ -333,4 +326,4 @@ proc alsoKnownAs*(o: Value, more: varargs[Value]): Value =
 
 proc describe*(ks: openArray[Value], id: Value, more: varargs[Value]): Value =
   ## an object of these kinds, going by `id`'s names, answering `more`
-  (initStream(@ks).maps(order(KindQ, it)) & id.identityAnswers & initStream(@more)).toSeq.obj
+  (initStream(@ks).maps(order(kindQ, it)) & id.identityAnswers & initStream(@more)).toSeq.obj

@@ -79,7 +79,7 @@ type
 
 proc isMe(k: Keeper, id: Value): bool = sharesIdentity(id, k.speaker.by)
 
-proc byOf(h: Heard): Option[Value] = h.said.answer(ByQ)
+proc byOf(h: Heard): Option[Value] = h.said.answer(byQ)
 
 proc listens(k: Keeper, room: Value): bool =
   room in k.rooms or room == ownRoom(k.speaker.by)
@@ -87,7 +87,7 @@ proc listens(k: Keeper, room: Value): bool =
 proc toIt(k: Keeper, h: Heard): bool =
   ## whether a want or keep is its to take up: in its own room, or saying
   ## for no one, or naming it or all
-  h.q == ownRoom(k.speaker.by) or h.said.answers(ForQ).next.isNone or
+  h.q == ownRoom(k.speaker.by) or h.said.answers(forQ).next.isNone or
     h.said.isFor(k.speaker.by)
 
 proc ask(k: Keeper, d: Value) =
@@ -98,9 +98,9 @@ proc say(k: Keeper, room, re: Value, to: openArray[Value], records: seq[Value],
          text: string): Value =
   ## says `records` in `room`, re the message whose digest is `re` and
   ## for `to`, answering the message as the jam will keep it
-  var members = @[initRec(@[ByQ, k.speaker.by]), initRec(@[ReQ, re]),
-                  initRec(@[SaidQ, text(text)]), initRec(@[AtQ, toValue(now())])]
-  for n in to: members.add initRec(@[ForQ, n])
+  var members = @[initRec(@[byQ, k.speaker.by]), initRec(@[reQ, re]),
+                  initRec(@[saidQ, text(text)]), initRec(@[atQ, toValue(now())])]
+  for n in to: members.add initRec(@[forQ, n])
   result = k.c.put(room, obj(members & records))
   k.mine.incl result
 
@@ -121,7 +121,7 @@ proc settle(k: Keeper, h: Heard) =
   let o = k.offers[h.answer]
   k.offers.del h.answer
   let first = k.c.local.heardIn(o.room).filter((e: Heard) =>
-    e.rank < h.rank and e.said.answers(ReQ).exists(d => d == o.want)).toSeq
+    e.rank < h.rank and e.said.answers(reQ).exists(d => d == o.want)).toSeq
   let offered = first.mapIt(it.said.answers(HasQ).toSeq).concat
   for d in o.ds:
     if d in k.onJam or d in offered: continue
@@ -172,7 +172,7 @@ proc offeredRe(k: Keeper, h: Heard): bool =
   ## whether someone has said has re a want
   let d = h.digestOf
   k.c.local.heardIn(h.q).exists((e: Heard) =>
-    e.said.answers(HasQ).next.isSome and e.said.answers(ReQ).exists(x => x == d))
+    e.said.answers(HasQ).next.isSome and e.said.answers(reQ).exists(x => x == d))
 
 proc caughtUp(k: Keeper) =
   ## everything asked before the here has been told: what was said to it
@@ -185,8 +185,8 @@ proc caughtUp(k: Keeper) =
   k.waiting.setLen 0
   if k.rooms.len > 0 and not k.saidIn(k.rooms[0]):
     let me = $k.speaker.name
-    k.mine.incl k.c.put(k.rooms[0], obj(initRec(@[ByQ, k.speaker.by]), initRec(@[AtQ, toValue(now())]),
-      initRec(@[SaidQ, text(me & " keeps files here. Say (want D) for each digest you lack " &
+    k.mine.incl k.c.put(k.rooms[0], obj(initRec(@[byQ, k.speaker.by]), initRec(@[atQ, toValue(now())]),
+      initRec(@[saidQ, text(me & " keeps files here. Say (want D) for each digest you lack " &
         "and it puts what it holds; say (keep D) and it fetches D and all under it, " &
         "and says (kept D) once it holds them.")])))
 
@@ -203,7 +203,7 @@ proc passed(k: Keeper, p: Passed) =
   if p.q in k.asked and verifies(p.q, p.said): k.content(p.q, p.said)
 
 proc heard(k: Keeper, h: Heard) =
-  if h.q == HereQ:
+  if h.q == hereQ:
     if k.since < 0 and h.answer == k.here:
       k.since = h.rank
       k.caughtUp()
@@ -216,7 +216,7 @@ proc heard(k: Keeper, h: Heard) =
   if not k.listens(h.q) or h.byOf.isNone: return
   if h.answer in k.offers: k.settle(h)
   if k.isMe(h.byOf.get):
-    for d in h.said.answers(ReQ): k.saidRe.incl d
+    for d in h.said.answers(reQ): k.saidRe.incl d
   if h.answer in k.mine: return
   if h.said.answers(WantQ).next.isNone and h.said.answers(KeepQ).next.isNone: return
   if not k.toIt(h): return
@@ -231,13 +231,13 @@ proc reach(k: Keeper): Client =
     k.waiting.setLen 0
     k.c.onHeard = (h: Heard) => k.heard(h)
     k.c.onPassed = (p: Passed) => k.passed(p)
-    for q in @[HereQ, ownRoom(k.speaker.by)] & k.rooms:
+    for q in @[hereQ, ownRoom(k.speaker.by)] & k.rooms:
       k.c.ask q
     for r in k.rooms:
-      if not r.isKind(bRec) or r.items.len != 2 or r.head != ForQ:
-        discard k.c.put(RoomsQ, r)
+      if not r.isKind(bRec) or r.items.len != 2 or r.head != forQ:
+        discard k.c.put(roomsQ, r)
     for d in k.asked: k.c.ask d
-    k.here = k.c.put(HereQ, k.speaker.here)
+    k.here = k.c.put(hereQ, k.speaker.here)
   k.c
 
 var running: Client   # for ctrl-c, which can't close over anything

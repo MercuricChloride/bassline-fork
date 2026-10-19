@@ -81,8 +81,8 @@ proc called*(jam: Option[Value]): string =
 proc ownRoom*(id: Value): Value =
   ## someone's own room: (for NAME), by the first name they go by
   for n in identities(id):
-    if n.kind in {bSym, bText}: return initRec(@[ForQ, n])
-  initRec(@[ForQ, id])
+    if n.kind in {bSym, bText}: return initRec(@[forQ, n])
+  initRec(@[forQ, id])
 
 proc ask*(c: Client, q: Value)
 proc put*(c: Client, q, a: Value): Value
@@ -92,12 +92,12 @@ proc stays(c: Client, h: Heard) =
   ## follows its own here, and says it again when it hears after it that
   ## it is gone
   if c.here.isNone or c.leaving: return
-  if h.q == HereQ and h.answer == c.here.get:
+  if h.q == hereQ and h.answer == c.here.get:
     c.hereRank = h.rank
-  elif h.q == GoneQ and c.hereRank >= 0 and h.rank > c.hereRank:
-    let by = h.said.answer(ByQ)
+  elif h.q == goneQ and c.hereRank >= 0 and h.rank > c.hereRank:
+    let by = h.said.answer(byQ)
     if by.isSome and sharesIdentity(by.get, c.speaker.by):
-      discard c.put(HereQ, c.speaker.here)
+      discard c.put(hereQ, c.speaker.here)
 
 proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
   ## a line to the jam at `place`, keeping what `was`, a line gone, was
@@ -117,7 +117,7 @@ proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
     if first:
       first = false
       let h = heard(v)
-      if h.isSome and h.get.q == JamQ:
+      if h.isSome and h.get.q == jamQ:
         if c.jam.isSome and h.get.said != c.jam.get:
           c.elsewhere = some h.get.said
           c.conn.close()
@@ -137,7 +137,7 @@ proc dial*(place: Place, speaker: Speaker, was: Client = nil): Client =
     true
   let pumping = c.conn.pump(arrived)
   pumping.addCallback(() => (block: c.closed = true))
-  c.ask JamQ
+  c.ask jamQ
   if c.jam.isSome:
     # a jam that doesn't say which it is is taken as the one it was
     let until = epochTime() + 2
@@ -162,14 +162,14 @@ proc put*(c: Client, q, a: Value): Value =
   ## puts `a` as an answer to `q`, answering the answer as the jam will
   ## keep it, to know it when it is told back. Putting a here asks who
   ## is here and gone, so the client hears if it is called gone after it
-  if q == HereQ: c.ask HereQ
+  if q == hereQ: c.ask hereQ
   let v = c.speaker.put(q, a)
   discard c.send(v)
   result = if c.speaker.key.isSome: v else: a
-  if q == HereQ:
+  if q == hereQ:
     c.here = some result
     c.hereRank = -1
-    c.ask GoneQ
+    c.ask goneQ
 
 proc heardSearch*(c: Client): Search[Value, Value] =
   ## a question to what the jam has told the client answers it, taken out
@@ -207,14 +207,14 @@ proc hello*(c: Client): Value {.discardable.} =
   ## there are and what is for them, and then that the speaker is here,
   ## answering that as the jam will keep it: once the jam tells it back,
   ## it has told what it had for everything asked before
-  for q in [HereQ, GoneQ, RoomsQ, initRec(@[ForQ, c.speaker.name])]:
+  for q in [hereQ, goneQ, roomsQ, initRec(@[forQ, c.speaker.name])]:
     c.ask q
-  c.put(HereQ, c.speaker.here)
+  c.put(hereQ, c.speaker.here)
 
 proc bye*(c: Client) =
   ## that the speaker has stopped listening, sent before the line closes
   c.leaving = true
-  discard c.put(GoneQ, c.speaker.gone)
+  discard c.put(goneQ, c.speaker.gone)
   try: discard waitFor c.conn.flush().withTimeout(1000)
   except CatchableError: discard
   c.conn.close()

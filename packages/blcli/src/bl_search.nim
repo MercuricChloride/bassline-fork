@@ -41,9 +41,9 @@ proc findOver(query: seq[Value], take: int) =
     ## the find as it is asked now: given what is known, when it names nothing
     if fd.subjects.len > 0: return base
     var asked = base.copy
-    for k in known.members: asked.incl initRec(@[OfQ, k])
-    asked.incl initRec(@[OfQ, describe([SearchSpaceKind], sym"stdin",
-                                       initRec(@[HoldsQ, records.copy]))])
+    for k in known.members: asked.incl initRec(@[ofQ, k])
+    asked.incl initRec(@[ofQ, describe([searchSpace], sym"stdin",
+                                       initRec(@[holdsQ, records.copy]))])
     asked
   var written = initSet()
   var taken = 0

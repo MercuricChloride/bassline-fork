@@ -76,13 +76,13 @@ proc serve(t: Tool, a: Args) =
   let at = $Place(kind: tcpPlace, host: place.host, port: listener.port)
   chatter "listening on " & at & ", as " & called &
     (if a.has("clave"): ", taking signed values only" else: "") &
-    (if key.isSome: ", stamping what it keeps under " & $initRec(@[StampsQ, name]) else: "") &
+    (if key.isSome: ", stamping what it keeps under " & $initRec(@[stampsQ, name]) else: "") &
     (if passes.len > 0: ", passing through what fits " & $passes.len &
                         (if passes.len == 1: " shape" else: " shapes") else: "")
   var about = @[(sym"served", text(at)), (sym"pid", toValue(getCurrentProcessId())),
                 (sym"since", toValue(now()))]
   if path.len > 0: about.add (sym"kept", text(path))
-  running(initRec(@[JamQ, name, initDict(about)]))
+  running(initRec(@[jamQ, name, initDict(about)]))
   if path.len > 0:
     served(path, at)
     chatter "keeping what is put in " & path

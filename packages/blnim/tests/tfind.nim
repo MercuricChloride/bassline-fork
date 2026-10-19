@@ -58,17 +58,17 @@ suite "finds":
     let all = find(subjects = [repo], holes = vs("p", "x"), wheres = vs("(p x)"), gives = vs("kind"))
     check answers(all).len == 11  # (odd !(within z)) is passed over
     let once = find(subjects = [repo], holes = vs("p", "x"), wheres = vs("(p x)"),
-                    gives = vs("kind"), kinds = [DistinctKind])
+                    gives = vs("kind"), kinds = [distinctKind])
     check answers(once) == vs("kind")
 
   test "counts as it finds, never a total":
     let q = find(subjects = [repo], holes = vs("p"), wheres = vs("(p file)"), gives = vs("p"),
-                 kinds = [CountKind])
+                 kinds = [countKind])
     check answers(q) == vs("1", "2")
 
   test "says why: the parts whose records answered":
     let q = find(subjects = [repo], holes = vs("a"), wheres = vs("(help a)"), gives = vs("a"),
-                 kinds = [WhyKind])
+                 kinds = [why])
     check answers(q) == vs("(why \"ask a path\" {!{(identity repo)}})")
     let row = rows(find(subjects = [repo], holes = vs("a"), wheres = vs("(help a)")))().get
     check row.why == @[Because(clause: v("(help a)"), part: v("!{(identity repo)}"),
@@ -95,7 +95,7 @@ suite "forms":
 
   test "as binds a hole to what fits, whatever its mark":
     let q = find(subjects = [repo], holes = vs("h", "a"), wheres = vs("(h !(as a))"),
-                 gives = vs("a"), kinds = [DistinctKind])
+                 gives = vs("a"), kinds = [distinctKind])
     check v("!(within z)") in answers(q)
     let r = find(subjects = [repo], holes = vs("r"), wheres = vs("!(as r (help))"), gives = vs("r"))
     check answers(r) == vs("(help \"ask a path\")")
@@ -269,14 +269,14 @@ suite "subjects":
     let one = v("!{!(kind search-space) (identity one) (holds {(n 1)})}")
     let two = v("!{!(kind search-space) (identity two) (holds {(n 1)})}")
     let q = find(subjects = [one, two], holes = vs("x"), wheres = vs("(n x)"), gives = vs("x"),
-                 kinds = [WhyKind])
+                 kinds = [why])
     check answers(q).sorted == vs("(why 1 {!{(identity one)}})", "(why 1 {!{(identity two)}})").sorted
 
   test "says why for a clause that only checks, once for each part":
     let one = v("!{!(kind search-space) (identity one) (holds {(ready yes)})}")
     let two = v("!{!(kind search-space) (identity two) (holds {(ready yes)})}")
     let q = find(subjects = [one, two], wheres = vs("(ready yes)"), gives = vs("ok"),
-                 kinds = [WhyKind])
+                 kinds = [why])
     check answers(q).sorted == vs("(why ok {!{(identity one)}})", "(why ok {!{(identity two)}})").sorted
 
   test "what each binding leads to takes turns, so an endless subject starves none":
@@ -358,7 +358,7 @@ suite "a find as a search":
     let s = v("!{!(kind search-space) (identity s) (holds {(r o)})}")
     let inner = v("!{!(kind search-space) !(kind find) (identity i) (hole [x]) (where ([x] v)) (gives [x])}")
     let q = find(subjects = [s], holes = vs("x"), wheres = vs("(r x)"), gives = [inner])
-    check answers(q) == @[initSet(toSeq(inner.members) & initRec(@[OfQ, s]), true)]
+    check answers(q) == @[initSet(toSeq(inner.members) & initRec(@[ofQ, s]), true)]
 
   test "a gives can carry a find, its own holes kept and the subjects named":
     let inner = find(holes = vs("f"), wheres = vs("(d (has f))"), gives = vs("f"), id = v("inner"))

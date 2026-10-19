@@ -59,22 +59,10 @@ export rewrite
 
 refuseWith BasslineError
 
-let
-  FindKind* = sym"find"
-  DistinctKind* = sym"distinct"
-  CountKind* = sym"count"
-  WhyKind* = sym"why"
-  OfQ* = sym"of"          ## what a find asks of
-  HoleQ* = sym"hole"
-  AskedQ* = sym"asked"
-  WhereQ* = sym"where"
-  GivesQ* = sym"gives"
-  WhyQ* = sym"why"
-  WithinForm* = sym"within"
-  AnyForm* = sym"any"
-  AllForm* = sym"all"
-  AsForm* = sym"as"
-  QuoteForm* = sym"quote"
+blet"{why hole where within quote}"
+# ofQ: what a find asks of
+blet"""{find-kind: find distinct-kind: distinct count-kind: count of-q: of
+  asked-q: asked gives-q: gives any-form: any all-form: all as-form: as}"""
 
 type
   Find* = object
@@ -128,11 +116,11 @@ type
     all*: () -> Stream[Hit]
 
 proc isFind*(v: Value): bool =
-  v.hasKind(SearchSpaceKind) and v.hasKind(FindKind)
+  v.hasKind(searchSpace) and v.hasKind(findKind)
 
 proc isForm*(p: Value): bool =
   ## whether `p` is read as a form in a clause
-  p.isKind(bRec, marked) and p.head in [WithinForm, AnyForm, AllForm, AsForm, QuoteForm]
+  p.isKind(bRec, marked) and p.head in [within, anyForm, allForm, asForm, quote]
 
 proc isFrame(v: Value): bool =
   v.isKind({bList, bRec, bDict, bSet})
@@ -145,12 +133,12 @@ proc checkForms(c: Value, holes: BSet) =
   if c in holes: return
   if isForm(c):
     let n = c.items.len - 1
-    if c.head == QuoteForm:
+    if c.head == quote:
       guard n == 1, "!(quote V) quotes one value: " & $c
       return
-    guard c.head != WithinForm or n == 1,
+    guard c.head != within or n == 1,
       "!(within P) has one part to look for: " & $c
-    guard c.head != AsForm or (n in 1..2 and c.items[1] in holes),
+    guard c.head != asForm or (n in 1..2 and c.items[1] in holes),
       "!(as H P) binds a hole H, to what fits P if it says one: " & $c
     guard n > 0, "!(any …) and !(all …) need a part: " & $c
   if c.isFrame:
@@ -161,18 +149,18 @@ proc fromValue*(T: typedesc[Find], v: Value): Find =
   ## counting together with saying why, an asked hole that isn't a hole, and
   ## a form without what it needs
   guard isFind(v), "not a find: " & $v
-  let readable = [SearchSpaceKind, FindKind, DistinctKind, CountKind, WhyKind]
+  let readable = [searchSpace, findKind, distinctKind, countKind, why]
   let unread = v.kinds.filters(it notin readable).next
   guard unread.isNone, "a kind a find doesn't read, " & $unread.get & ", in " & $v
   result = Find(
-    subjects: v.answers(OfQ).toSeq,
-    holes: toBSet(v.answers(HoleQ)),
-    asked: v.answers(AskedQ).toSeq,
-    wheres: v.answers(WhereQ).toSeq,
-    gives: v.answers(GivesQ).toSeq,
-    once: v.hasKind(DistinctKind),
-    counting: v.hasKind(CountKind),
-    sayingWhy: v.hasKind(WhyKind))
+    subjects: v.answers(ofQ).toSeq,
+    holes: toBSet(v.answers(hole)),
+    asked: v.answers(askedQ).toSeq,
+    wheres: v.answers(where).toSeq,
+    gives: v.answers(givesQ).toSeq,
+    once: v.hasKind(distinctKind),
+    counting: v.hasKind(countKind),
+    sayingWhy: v.hasKind(why))
   for h in result.asked:
     guard h in result.holes, "asked binds a hole: " & $h
   for c in result.wheres: checkForms(c, result.holes)
@@ -185,10 +173,10 @@ proc find*(subjects: openArray[Value] = []; holes: openArray[Value] = [];
            id = randomId()): Value =
   ## a find written down, an object of its kinds going by `id`
   var more: seq[Value]
-  for (q, xs) in [(OfQ, @subjects), (HoleQ, @holes), (AskedQ, @asked),
-                  (WhereQ, @wheres), (GivesQ, @gives)]:
+  for (q, xs) in [(ofQ, @subjects), (hole, @holes), (askedQ, @asked),
+                  (where, @wheres), (givesQ, @gives)]:
     for x in xs: more.add initRec(@[q, x])
-  describe(@[SearchSpaceKind, FindKind] & @kinds, id, more)
+  describe(@[searchSpace, findKind] & @kinds, id, more)
 
 # ================ subjects ================
 
@@ -222,9 +210,11 @@ proc held*(d: Value, bodies: seq[Value], ranked, skipRefused: bool): Subject =
   ## refused unless refusals are passed over
   let part = identityOf d
   proc holds(r: Value): bool =
-    if r.isKind(bRec) and r.items.len == 1: return false
-    result = r.isKind(bRec, unmarked) and
-      (if ranked: r.items.len == 3 and natural(r.items[1]) else: r.items.len == 2)
+    matchValue r:
+    of "($_) {any-mark}": return false  # a question, not an answer
+    of "($_ $_)": result = not ranked
+    of "($_ $rank $_)": result = ranked and natural(rank)
+    else: discard
     if not result and not skipRefused:
       refuse "not a (query " & (if ranked: "rank " else: "") & "answer) record: " & $r
   proc hit(r: Value): Hit = Hit(record: r, part: part, ranked: ranked)
@@ -277,9 +267,9 @@ proc joined*(kind: Value, parts: seq[Subject]): Subject =
   ## parts joined as a composite of `kind` joins them: one after another for
   ## a cat, merged by rank for a merge, and otherwise taking turns
   proc join(each: (Subject) -> Stream[Hit]): Stream[Hit] =
-    if kind == CatKind: return catFrom initStream(parts).maps(each(it))
+    if kind == catKind: return catFrom initStream(parts).maps(each(it))
     let streams = initStream(parts).maps(each(it)).toSeq
-    if kind == MergeKind: merge(rankOrder, streams) else: alt(streams)
+    if kind == mergeKind: merge(rankOrder, streams) else: alt(streams)
   Subject(headed: (qs: seq[Question]) => join(p => p.headed(qs)),
           all: () => join(p => p.all()))
 
@@ -304,29 +294,26 @@ proc andThen(a, b: Fit): Fit =
 
 proc fitForm(part, v: Value, fit: (Value, Value) -> Fit): Fit =
   ## every extension of bindings under which `v` fits the form `part`
-  let args = part.items.data[1 .. ^1]
-  if part.head == QuoteForm:
-    let quoted = args[0]
+  matchValue part:
+  of "!(quote $quoted)":
     return (b: Value) => (if quoted == v: just(b) else: empty(Value))
-  if part.head == AnyForm:
-    let fits = initStream(args).maps(fit(it, v)).toSeq
+  of "!(any &parts)":
+    let fits = initStream(parts).maps(fit(it, v)).toSeq
     return (b: Value) => alt(initStream(fits).maps(it(b)).toSeq)
-  if part.head == AsForm:
-    let hole = args[0]
-    let inner = if args.len == 2: some args[1] else: none(Value)
+  of "!(as $hole &inner)":
     return (b: Value) => (block:
       if hole in b.dict and b.dict[hole] != v: return empty(Value)
       var bound = b
       if hole notin b.dict:
         bound = b.copy
         bound[hole] = v
-      if inner.isNone: just(bound) else: fit(inner.get, v)(bound))
-  if part.head == AllForm:
-    result = fit(args[0], v)
-    for p in args[1 .. ^1]: result = result.andThen(fit(p, v))
-    return
-  let inner = args[0]  # within: v or anything in it
-  (b: Value) => walk(v).flatMaps(fit(inner, it)(b)).unique
+      if inner.len == 0: just(bound) else: fit(inner[0], v)(bound))
+  of "!(all &parts)":
+    result = fit(parts[0], v)
+    for p in parts[1 .. ^1]: result = result.andThen(fit(p, v))
+  else:
+    let inner = part.items[1]  # within: v or anything in it
+    return (b: Value) => walk(v).flatMaps(fit(inner, it)(b)).unique
 
 proc fitsFor(holes: BSet, wild: Value): (Value, Value) -> Fit =
   ## the fits of a find's clauses, the forms read their own way, and `wild`,
@@ -359,7 +346,7 @@ proc unboundIn(c: Value, holes: BSet, b: Value): int =
     if p in holes:
       if p notin b.dict: open.incl p
       return
-    if isForm(p) and p.head == QuoteForm: return
+    if isForm(p) and p.head == quote: return
     if p.isFrame:
       for x in p.parts: look(x)
   look c
@@ -372,13 +359,12 @@ proc exact(v: Value, holes: BSet, b: Value): bool =
   ## more than itself, and is never exact
   if v in holes: return v in b.dict
   if isForm(v):
-    let args = v.items.data[1 .. ^1]
-    if v.head == QuoteForm: return true
-    if v.head == AsForm:
-      return args[0] in b.dict or (args.len == 2 and exact(args[1], holes, b))
-    if v.head == AllForm:
-      return initStream(args).exists(a => exact(a, holes, b))
-    return false
+    matchValue v:
+    of "!(quote $_)": return true
+    of "!(as $hole)": return hole in b.dict
+    of "!(as $hole $part)": return hole in b.dict or exact(part, holes, b)
+    of "!(all &parts)": return initStream(parts).exists(a => exact(a, holes, b))
+    else: return false
   not v.isFrame
 
 proc settled(v: Value, holes: BSet, b: Value): bool =
@@ -393,12 +379,15 @@ proc valueOf(v: Value, holes: BSet, b: Value): Value =
   ## forms what they fit
   if v in holes: return b.dict[v]
   if isForm(v):
-    let args = v.items.data[1 .. ^1]
-    if v.head == QuoteForm: return args[0]
-    if v.head == AsForm:
-      return if args[0] in b.dict: b.dict[args[0]] else: valueOf(args[1], holes, b)
-    for p in args:
-      if exact(p, holes, b): return valueOf(p, holes, b)
+    matchValue v:
+    of "!(quote $quoted)": return quoted
+    of "!(as $hole)": return b.dict[hole]
+    of "!(as $hole $part)":
+      return if hole in b.dict: b.dict[hole] else: valueOf(part, holes, b)
+    of "!(all &parts)":
+      for p in parts:
+        if exact(p, holes, b): return valueOf(p, holes, b)
+    else: discard
   if v.isFrame: return v.map(p => valueOf(p, holes, b))
   v
 
@@ -433,11 +422,11 @@ proc headsOf(p: Value, holes: BSet, b: Value): Option[seq[Question]] =
   if exact(p, holes, b): return some @[Question(exact: some valueOf(p, holes, b))]
   if p in holes: return
   if isForm(p):
-    let args = p.items.data[1 .. ^1]
-    if p.head == AsForm and args.len == 2: return headsOf(args[1], holes, b)
-    if p.head == AllForm: return firstOf initStream(args).maps(headsOf(it, holes, b)).toSeq
-    if p.head == AnyForm: return unionOf initStream(args).maps(headsOf(it, holes, b)).toSeq
-    return
+    matchValue p:
+    of "!(as $_ $part)": return headsOf(part, holes, b)
+    of "!(all &parts)": return firstOf initStream(parts).maps(headsOf(it, holes, b)).toSeq
+    of "!(any &parts)": return unionOf initStream(parts).maps(headsOf(it, holes, b)).toSeq
+    else: return
   if not p.isKind({bList, bRec}): return
   var lead: seq[Value]
   for x in p.items.data:
@@ -454,11 +443,11 @@ proc questionsOf(c: Value, holes: BSet, b: Value): Option[seq[Question]] =
   if exact(c, holes, b): return questionIn valueOf(c, holes, b)
   if c in holes: return
   if isForm(c):
-    let args = c.items.data[1 .. ^1]
-    if c.head == AsForm and args.len == 2: return questionsOf(args[1], holes, b)
-    if c.head == AllForm: return firstOf initStream(args).maps(questionsOf(it, holes, b)).toSeq
-    if c.head == AnyForm: return unionOf initStream(args).maps(questionsOf(it, holes, b)).toSeq
-    return
+    matchValue c:
+    of "!(as $_ $part)": return questionsOf(part, holes, b)
+    of "!(all &parts)": return firstOf initStream(parts).maps(questionsOf(it, holes, b)).toSeq
+    of "!(any &parts)": return unionOf initStream(parts).maps(questionsOf(it, holes, b)).toSeq
+    else: return
   # an atom, list, dict or set fits no record
   if not c.isKind(bRec): return some newSeq[Question]()
   let heads = headsOf(c.head, holes, b)
@@ -472,14 +461,21 @@ proc rankless(c, wild: Value, holes: BSet): Value =
   ## fields with `wild` in the rank's place, and so the record parts of the
   ## forms that meet the record itself. Holes and forms still meet the
   ## record as held, its rank and all
-  if not c.isKind(bRec) or c in holes: return c
-  if not isForm(c):
-    return if c.items.len == 2: initRec(@[c.items[0], wild, c.items[1]], c.mark) else: c
-  if c.head == AnyForm or c.head == AllForm:
-    return initRec(c.head & initStream(c.items.data[1 .. ^1]).maps(rankless(it, wild, holes)).toSeq, true)
-  if c.head == AsForm and c.items.len == 3:
-    return initRec(@[c.head, c.items[1], rankless(c.items[2], wild, holes)], true)
-  c
+  if c in holes: return c
+  matchValue c:
+  of "!(any &parts)":
+    let inner = initStream(parts).maps(rankless(it, wild, holes)).toSeq
+    bl"!(any @inner)"
+  of "!(all &parts)":
+    let inner = initStream(parts).maps(rankless(it, wild, holes)).toSeq
+    bl"!(all @inner)"
+  of "!(as $hole $part)":
+    let inner = rankless(part, wild, holes)
+    bl"!(as $hole $inner)"
+  elif isForm(c): c
+  of "($q $a)": bl"($q $wild $a)"
+  of "!($q $a)": bl"!($q $wild $a)"
+  else: c
 
 proc step(c: Value, p: Pending, x: Fitting): Stream[Pending] =
   ## every extension of `p` under which one of the subjects' records fits the
@@ -532,7 +528,7 @@ proc needs(w: Value, holes: BSet, into: var Value, kept = newBSet()) =
     return
   if w in kept: return
   if w.isKind(bSet) and isFind(w):
-    let own = toBSet(w.answers(HoleQ))
+    let own = toBSet(w.answers(hole))
     let outer = toBSet(holes.between(always, always).filters(it notin own))
     let keep = kept + own
     for m in w.members: needs(m, outer, into, keep)
@@ -548,7 +544,7 @@ proc fill(w, b: Value, holes: BSet, subjects: seq[Value], kept = newBSet()): Val
   if w in holes: return b.dict[w]
   if w in kept: return w
   if w.isKind(bSet) and isFind(w):
-    let own = toBSet(w.answers(HoleQ))
+    let own = toBSet(w.answers(hole))
     let outer = toBSet(holes.between(always, always).filters(it notin own))
     let keep = kept + own
     var used = initSet()
@@ -556,15 +552,18 @@ proc fill(w, b: Value, holes: BSet, subjects: seq[Value], kept = newBSet()): Val
     let by = used.members.maps((it, b.dict[it])).toSeq
     var members: seq[Value]
     for m in w.members:
-      let name = m.isKind(bRec, unmarked) and m.items.len == 2 and m.head == IdentityQ
-      if name and used.len > 0:
-        # a name goes with every binding the filling used
-        members.add initRec(@[IdentityQ, initList(@[fill(m.items[1], b, outer, subjects, keep),
-                                                    initDict(by)])])
-        continue
+      matchValue m:
+      of "(identity $name)":
+        if used.len > 0:
+          # a name goes with every binding the filling used
+          let filled = fill(name, b, outer, subjects, keep)
+          let bindings = initDict(by)
+          members.add bl"(identity [$filled $bindings])"
+          continue
+      else: discard
       members.add fill(m, b, outer, subjects, keep)
-    if w.answers(OfQ).next.isNone:
-      for s in subjects: members.add initRec(@[OfQ, s])
+    if w.answers(ofQ).next.isNone:
+      for s in subjects: members.add initRec(@[ofQ, s])
     return initSet(members, true)
   if w.isFrame: return w.map(x => fill(x, b, holes, subjects, kept))
   w
@@ -592,7 +591,7 @@ proc rows*(fd: Find, asked: Option[Value], subjects: seq[Subject]): Stream[Row] 
       inc count
       answer = num count
     elif fd.sayingWhy:
-      answer = initRec(@[WhyQ, a, parts])
+      answer = initRec(@[why, a, parts])
     some Row(answer: answer, bindings: p.b, why: p.why)
   proc rowsOf(p: Pending): Stream[Row] =
     ## the rows a binding found makes: each gives it binds wholly, written

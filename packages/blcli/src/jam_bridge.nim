@@ -43,11 +43,11 @@ type
 proc isUp(e: End): bool = e.c != nil and not e.c.closed
 
 proc isStamps(q: Value): bool =
-  q.isKind(bRec, unmarked) and q.items.len == 2 and q.head == StampsQ
+  q.isKind(bRec, unmarked) and q.items.len == 2 and q.head == stampsQ
 
 proc follow(b: Bridge, q: Value) =
   ## asks both `q`, from now on
-  if q in b.asking or q == JamQ or q.isStamps: return
+  if q in b.asking or q == jamQ or q.isStamps: return
   b.asking.add q
   for e in b.ends:
     if e.isUp: e.c.ask q
@@ -72,10 +72,10 @@ proc heard(b: Bridge, i: int, h: Heard) =
   ## what end `i` told: followed where it names questions, and passed on
   let here = b.ends[i]
   here.holds.incl initRec(@[h.q, h.answer])
-  if h.q == JamQ:
+  if h.q == jamQ:
     let name = identities(h.said).toSeq.filterIt(it.isKind({bSym, bText}))
     if name.len > 0:
-      let stamps = initRec(@[StampsQ, name[0]])
+      let stamps = initRec(@[stampsQ, name[0]])
       if stamps notin here.own:
         here.own.add stamps
         here.c.ask stamps
@@ -84,9 +84,9 @@ proc heard(b: Bridge, i: int, h: Heard) =
     let s = stampOf(h)
     if s.isSome: b.follow(s.get.q)
     return
-  if h.q == RoomsQ: b.follow(h.said)
-  elif h.q in [HereQ, GoneQ]:
-    let by = h.said.answer(ByQ)
+  if h.q == roomsQ: b.follow(h.said)
+  elif h.q in [hereQ, goneQ]:
+    let by = h.said.answer(byQ)
     if by.isSome: b.follow(ownRoom(by.get))
   for q in h.said.answers(WantQ): b.follow(q)
   b.pass(i, h)
@@ -96,7 +96,7 @@ proc reach(b: Bridge, i: int) =
   let e = b.ends[i]
   e.c = dial(e.place, b.speaker, e.c)
   e.c.onHeard = (h: Heard) => b.heard(i, h)
-  for q in [JamQ, HereQ, GoneQ, RoomsQ].toSeq & b.asking & e.own:
+  for q in [jamQ, hereQ, goneQ, roomsQ].toSeq & b.asking & e.own:
     e.c.ask q
 
 proc down(b: Bridge): bool =

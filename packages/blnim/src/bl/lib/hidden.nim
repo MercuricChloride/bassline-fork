@@ -102,16 +102,15 @@ type
 # hidden whole has evidence's leaf for its preimage, so an unsalted
 # leaf's node is evidence's leaf node by construction
 
-let LeafHead = leaf(null()).head   ## evidence's, read back from a leaf
-
 proc leaf*(v: Value, salt: Value): Value =
   ## (leaf V SALT): the preimage of a part hidden whole and blinded
-  initRec(@[LeafHead, v, salt])
+  bl"(leaf $v $salt)"
 
 proc frame*(kind: Kind, mark: bool, root: Root): Value =
   ## (KIND (root N D)), marked as the frame is: the preimage of a frame
   ## hidden by its parts
-  initRec(@[sym($kind), root.toValue], mark)
+  let head = sym($kind)
+  bl("($head $root)", mark)
 
 proc frameKind(v: Value): Option[Kind] =
   ## the frame kind an unmarked symbol names, if one
@@ -121,20 +120,20 @@ proc frameKind(v: Value): Option[Kind] =
 
 proc leafOf*(node: Value): Option[Value] =
   ## the value a leaf node holds, if `node` reads as one
-  if not node.isKind(bRec, unmarked) or node.head != LeafHead or
-     node.items.len notin 2 .. 3: return none(Value)
-  if node.items.len == 3 and not node.items[2].isKind(bBytes, unmarked): return none(Value)
-  some node.items[1]
+  matchValue node:
+  of "(leaf $v)": some v
+  of "(leaf $v $salt)":
+    if salt.isKind(bBytes, unmarked): some v else: none(Value)
+  else: none(Value)
 
 proc frameOf*(node: Value): Option[tuple[kind: Kind, mark: bool, root: Root]] =
   ## the frame a node stands for, if `node` reads as one
   type Frame = tuple[kind: Kind, mark: bool, root: Root]
-  if not node.isKind(bRec) or node.items.len != 2: return none(Frame)
-  let k = frameKind(node.head)
-  if k.isNone: return none(Frame)
-  let r = Root.maybeLoad(node.items[1])
-  if r.isNone: return none(Frame)
-  some (k.get, node.mark, r.get)
+  matchValue node:
+  of "($kind $root) {any-mark}":
+    let (k, r) = (frameKind(kind), Root.maybeLoad(root))
+    if k.isSome and r.isSome: some (k.get, node.mark, r.get) else: none(Frame)
+  else: none(Frame)
 
 proc readNode(node: Value) =
   guard leafOf(node).isSome or frameOf(node).isSome,
@@ -143,7 +142,8 @@ proc readNode(node: Value) =
 # ================ steps ================
 
 proc toValue*(s: Step): Value =
-  initRec(@[sym($s.kind), toValue(s.count), toValue(s.index), initList(s.path)], s.mark)
+  let (head, n, i, path) = (sym($s.kind), s.count, s.index, s.path)
+  bl("($head $n $i $path)", s.mark)
 
 proc count(v: Value): Option[int] =
   ## an unmarked count, if `v` is one
@@ -154,18 +154,19 @@ proc count(v: Value): Option[int] =
 proc stepOf*(v: Value): Option[Step] =
   ## the step `v` spells, if it reads as one: (KIND N I [SIB …]), marked
   ## as the frame is, I a place among N
-  if not v.isKind(bRec) or v.items.len != 4: return none(Step)
-  let k = frameKind(v.head)
-  let (n, i) = (count(v.items[1]), count(v.items[2]))
-  let path = v.items[3]
-  if k.isNone or n.isNone or i.isNone or i.get >= n.get or
-     not path.isKind(bList, unmarked): return none(Step)
-  some Step(kind: k.get, mark: v.mark, count: n.get, index: i.get, path: path.items.data)
+  matchValue v:
+  of "($kind $width $index [&path]) {any-mark}":
+    let (k, n, i) = (frameKind(kind), count(width), count(index))
+    if k.isSome and n.isSome and i.isSome and i.get < n.get:
+      some Step(kind: k.get, mark: v.mark, count: n.get, index: i.get, path: path)
+    else: none(Step)
+  else: none(Step)
 
 proc place*(s: Step): Value =
   ## the step without its siblings, (KIND N I) marked as the frame is:
   ## where a part sits, said without the proof
-  initRec(@[sym($s.kind), toValue(s.count), toValue(s.index)], s.mark)
+  let (head, n, i) = (sym($s.kind), s.count, s.index)
+  bl("($head $n $i)", s.mark)
 
 proc way*(s: Shown): seq[Step] =
   ## the way down, its steps read; refused where one doesn't read

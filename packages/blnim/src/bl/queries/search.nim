@@ -164,13 +164,13 @@ proc more*(step: Search[Value, Value], id = randomId(), via = false):
         if w.value notin expanded.els:
           expanded.incl w.value
           next.add w
-        return some(if via: initRec(@[ViaKind, initList(w.path), w.value])
+        return some(if via: initRec(@[viaKind, initList(w.path), w.value])
                     else: w.value))
   let denote =
     if step.denotable:
-      () => describe(if via: @[SearchSpaceKind, MoreKind, ViaKind]
-                     else: @[SearchSpaceKind, MoreKind],
-                     id, initRec(@[PartsQ, initList(@[step.toValue])]))
+      () => describe(if via: @[searchSpace, moreKind, viaKind]
+                     else: @[searchSpace, moreKind],
+                     id, initRec(@[partsQ, initList(@[step.toValue])]))
     else: nil
   newSearch[Value, Value](ask, denote, k(id))
 
@@ -184,9 +184,9 @@ proc byRank*[R: Ranked](streams: varargs[Stream[R]]): Stream[R] =
 proc denoteParts[A](kind, id: Value, parts: seq[Value]): Value =
   ## a composite written down: a search space of its kind, ranked when its
   ## answers are
-  let ks = when A is Ranked: @[SearchSpaceKind, kind, RankedKind]
-           else: @[SearchSpaceKind, kind]
-  describe(ks, id, initRec(@[PartsQ, initList(parts)]))
+  let ks = when A is Ranked: @[searchSpace, kind, rankedKind]
+           else: @[searchSpace, kind]
+  describe(ks, id, initRec(@[partsQ, initList(parts)]))
 
 proc partsDenoter[Q, A](kind, id: Value, parts: seq[Search[Q, A]]): () -> Value =
   ## a composite's denotation, if every part has one
@@ -198,7 +198,7 @@ proc cat*[Q, A](parts: openArray[Search[Q, A]], id = randomId()): Search[Q, A] =
   ## it has nothing more: a scope, then the scope around it
   let ps = @parts
   newSearch[Q, A]((q: Q) => initStream(ps).flatMaps(it.ask(q)),
-                  partsDenoter(CatKind, id, ps), k(id))
+                  partsDenoter(catKind, id, ps), k(id))
 
 proc asked[Q, A](ps: seq[Search[Q, A]], q: Q): seq[Stream[A]] =
   ## each part's stream for `q`
@@ -207,7 +207,7 @@ proc asked[Q, A](ps: seq[Search[Q, A]], q: Q): seq[Stream[A]] =
 proc alt*[Q, A](parts: openArray[Search[Q, A]], id = randomId()): Search[Q, A] =
   ## the parts' answers taking turns, so no part starves the others
   let ps = @parts
-  newSearch[Q, A]((q: Q) => alt(ps.asked(q)), partsDenoter(AltKind, id, ps), k(id))
+  newSearch[Q, A]((q: Q) => alt(ps.asked(q)), partsDenoter(altKind, id, ps), k(id))
 
 proc feed*[Q, M, A](first: Search[Q, M], then: Search[M, A],
                     id = randomId()): Search[Q, A] =
@@ -215,7 +215,7 @@ proc feed*[Q, M, A](first: Search[Q, M], then: Search[M, A],
   ## as they arrive
   let denote =
     if first.denotable and then.denotable:
-      () => denoteParts[A](FeedKind, id, @[first.toValue, then.toValue])
+      () => denoteParts[A](feedKind, id, @[first.toValue, then.toValue])
     else: nil
   newSearch[Q, A]((q: Q) => altFrom(first.ask(q).maps(then.ask(it))), denote, k(id),
                   if first.fanout == one and then.fanout == one: one else: many)
@@ -225,7 +225,7 @@ proc merge*[Q; R: Ranked](parts: openArray[Search[Q, R]], id = randomId()):
   ## ranked parts' answers merged by rank, lowest first; on a tie the
   ## earlier part goes first
   let ps = @parts
-  newSearch[Q, R]((q: Q) => byRank(ps.asked(q)), partsDenoter(MergeKind, id, ps), k(id))
+  newSearch[Q, R]((q: Q) => byRank(ps.asked(q)), partsDenoter(mergeKind, id, ps), k(id))
 
 # ================ interpreting a denotation ================
 
@@ -247,10 +247,12 @@ proc readBack[A](records: Stream[Value], ranked, skipRefused: bool): Stream[A] =
   ## a rank that isn't a natural) is refused like one whose answer A's
   ## reading refuses
   mixin fromValue
-  let width = if ranked: 3 else: 2
   proc held(r: Value): bool =
-    if r.items.len == 1: return false  # a question, not an answer
-    result = r.items.len == width and (not ranked or natural(r.items[1]))
+    matchValue r:
+    of "($_) {any-mark}": return false  # a question, not an answer
+    of "($_ $_) {any-mark}": result = not ranked
+    of "($_ $rank $_) {any-mark}": result = ranked and natural(rank)
+    else: discard
     if not result and not skipRefused:
       refuse "not a (query " & (if ranked: "rank " else: "") & "answer) record: " & $r
   proc read(r: Value): Option[A] =
@@ -275,14 +277,14 @@ proc dictAsk[Q, A](d: BDict, skipRefused: bool): (Q) -> Stream[A] =
     readBack[A](just(initRec(@[query, d[query]])), false, skipRefused))
 
 proc spaceKinds[A](): seq[Value] =
-  when A is Ranked: @[SearchSpaceKind, RankedKind] else: @[SearchSpaceKind]
+  when A is Ranked: @[searchSpace, rankedKind] else: @[searchSpace]
 
 proc searchOver*[Q, A](space: BSet, id: Value, skipRefused = false): Search[Q, A] =
   ## a search over a set of records held now, which may still grow: each
   ## ask sees it as it stands, and a stream keeps seeing what is added
   ## past where it has got to. Written down, it is a copy of the set as
   ## it stands then, so the value never changes after
-  let copied = () => describe(spaceKinds[A](), id, initRec(@[HoldsQ, initSet(space.copy)]))
+  let copied = () => describe(spaceKinds[A](), id, initRec(@[holdsQ, initSet(space.copy)]))
   newSearch[Q, A](setAsk[Q, A](space, skipRefused), copied, k(id), many)
 
 proc searchOver*[Q, A](space: BDict, id: Value, skipRefused = false): Search[Q, A] =
@@ -290,7 +292,7 @@ proc searchOver*[Q, A](space: BDict, id: Value, skipRefused = false): Search[Q, 
   ## copy taken to write it down
   when A is Ranked:
     {.error: "a ranked search has any number of answers, so no dict".}
-  let copied = () => describe([SearchSpaceKind], id, initRec(@[HoldsQ, initDict(space.copy)]))
+  let copied = () => describe([searchSpace], id, initRec(@[holdsQ, initDict(space.copy)]))
   newSearch[Q, A](dictAsk[Q, A](space, skipRefused), copied, k(id), one)
 
 proc compositeOf*(d: Value, ranked: bool): Value =
@@ -300,13 +302,13 @@ proc compositeOf*(d: Value, ranked: bool): Value =
   ## kind how its parts are read. Refuses a kind it can't carry out, two
   ## ways of reading the parts at once, and a space ranked otherwise than
   ## `ranked`, and `via` but on a `more`
-  let composites = [CatKind, AltKind, FeedKind, MergeKind, MoreKind]
+  let composites = [catKind, altKind, feedKind, mergeKind, moreKind]
   let unread = d.kinds.filters(
-    it notin composites and it notin [SearchSpaceKind, RankedKind, ViaKind]).next
+    it notin composites and it notin [searchSpace, rankedKind, viaKind]).next
   guard unread.isNone, "a kind this doesn't read, " & $unread.get & ", in " & $d
-  guard not d.hasKind(ViaKind) or d.hasKind(MoreKind),
+  guard not d.hasKind(viaKind) or d.hasKind(moreKind),
     "via is the way a more reached its answers: " & $d
-  guard d.hasKind(RankedKind) == ranked,
+  guard d.hasKind(rankedKind) == ranked,
     (if ranked: "an unranked space, read as ranked: "
      else: "a ranked space, read as unranked: ") & $d
   let found = d.kinds.filters(it in composites).take(2)
@@ -317,7 +319,7 @@ proc spaceBodies*(d: Value, ranked: bool): seq[Value] =
   ## everything a denoted space holds: every `holds` answer, each a set of
   ## records or, unranked, a dict. Refuses a space holding nothing, and a
   ## body it can't hold
-  result = d.answers(HoldsQ).taps(guard(
+  result = d.answers(holdsQ).taps(guard(
     it.isKind(bSet, unmarked) or (not ranked and it.isKind(bDict, unmarked)),
     "a space holds sets of records" & (if ranked: "" else: " or dicts") & ": " & $d)).toSeq
   guard result.len > 0, "a space that holds nothing said: " & $d
@@ -374,29 +376,32 @@ proc combine[Q, A](kind: Value, ps: seq[Search[Q, A]], id: Value): Search[Q, A] 
   ## another for a cat, merged by rank for a merge, and otherwise taking
   ## turns, as an alt's parts do and a feed's streams do
   when A is Ranked:
-    if kind == MergeKind: return merge(ps, id)
-  if kind == CatKind: cat(ps, id) else: alt(ps, id)
+    if kind == mergeKind: return merge(ps, id)
+  if kind == catKind: cat(ps, id) else: alt(ps, id)
 
 proc composite[Q, A](kind, parts, id: Value, via, skipRefused: bool,
                      resolve: Search[Value, Value], followed: BSet): Search[Q, A] =
   ## the composite one list of parts stands for
   mixin toValue
   guard parts.isKind(bList, unmarked), "a composite's parts are a list: " & $parts
-  if kind == MoreKind:
-    guard parts.items.len == 1, "a more has one part: " & $parts
-    when A is Ranked:
-      refuse "a more's answers are not ranked: " & $parts
-    else:
-      let walking = more(interpret[Value, Value](parts.items[0], skipRefused,
-                                                 resolve, followed), id, via)
-      return newSearch[Q, A](
-        (q: Q) => walking.ask(q.toValue).filterMaps(reading[A](it, skipRefused)),
-        nil, k(id))
-  if kind == FeedKind:
-    guard parts.items.len == 2, "a feed has two parts: " & $parts
-    return feed(
-      interpret[Q, Value](parts.items[0], skipRefused, resolve, followed),
-      interpret[Value, A](parts.items[1], skipRefused, resolve, followed), id)
+  if kind == moreKind:
+    matchValue parts:
+    of "[$part]":
+      when A is Ranked:
+        refuse "a more's answers are not ranked: " & $parts
+      else:
+        let walking = more(interpret[Value, Value](part, skipRefused, resolve, followed),
+                           id, via)
+        return newSearch[Q, A](
+          (q: Q) => walking.ask(q.toValue).filterMaps(reading[A](it, skipRefused)),
+          nil, k(id))
+    else: refuse "a more has one part: " & $parts
+  if kind == feedKind:
+    matchValue parts:
+    of "[$first-part $then-part]":
+      return feed(interpret[Q, Value](firstPart, skipRefused, resolve, followed),
+                  interpret[Value, A](thenPart, skipRefused, resolve, followed), id)
+    else: refuse "a feed has two parts: " & $parts
   combine(kind, initStream(parts.items.data).maps(interpret[Q, A](it, skipRefused, resolve, followed)).toSeq, id)
 
 proc interpret[Q, A](d: Value, skipRefused: bool,
@@ -404,7 +409,7 @@ proc interpret[Q, A](d: Value, skipRefused: bool,
   ## the search `d` stands for, `followed` the names already followed on
   ## the way to it
   mixin toValue
-  if not d.hasKind(SearchSpaceKind):
+  if not d.hasKind(searchSpace):
     guard d.kinds.next.isNone, "neither a search nor names of one: " & $d
     return named[Q, A](d, skipRefused, resolve, followed)
   if isFind(d):
@@ -418,10 +423,10 @@ proc interpret[Q, A](d: Value, skipRefused: bool,
   let kind = compositeOf(d, A is Ranked)
   if kind.isKind(bNil):
     return space[Q, A](d, skipRefused)
-  guard kind != MergeKind or A is Ranked, "a merge is of ranked searches: " & $d
+  guard kind != mergeKind or A is Ranked, "a merge is of ranked searches: " & $d
   let id = identityOf d
-  let made = d.answers(PartsQ).maps(
-    composite[Q, A](kind, it, id, d.hasKind(ViaKind), skipRefused, resolve, followed)).toSeq
+  let made = d.answers(partsQ).maps(
+    composite[Q, A](kind, it, id, d.hasKind(viaKind), skipRefused, resolve, followed)).toSeq
   guard made.len > 0, "a composite with no parts said: " & $d
   let whole = if made.len == 1: made[0] else: combine(kind, made, id)
   whole.writtenAs(k(d), k(id))
@@ -476,34 +481,36 @@ proc subjectOf(v: Value, resolve: Search[Value, Value], how: Asking,
   ## find asks of directly may be any object, ranked or not
   if not v.isObject or v.kinds.next.isNone:
     return namedSubject(v, resolve, how, within)
-  if not v.hasKind(SearchSpaceKind):
+  if not v.hasKind(searchSpace):
     guard within.isNone, "neither a search nor names of one: " & $v
     return thing(v)
   if isFind(v):
     guard within != some(true), "a find's answers are not ranked: " & $v
     return asSubject(findAsked(v, resolve, how))
-  let ranked = within.get(v.hasKind(RankedKind))
+  let ranked = within.get(v.hasKind(rankedKind))
   let kind = compositeOf(v, ranked)
   if kind.isKind(bNil): return held(v, spaceBodies(v, ranked), ranked, how.skipRefused)
-  guard kind != MergeKind or ranked, "a merge is of ranked searches: " & $v
-  if kind == MoreKind:
+  guard kind != mergeKind or ranked, "a merge is of ranked searches: " & $v
+  if kind == moreKind:
     guard not ranked, "a more's answers are not ranked: " & $v
     return asSubject(interpret[Value, Value](v, how.skipRefused, resolve, how.followed))
-  let lists = v.answers(PartsQ).toSeq
+  let lists = v.answers(partsQ).toSeq
   guard lists.len > 0, "a composite with no parts said: " & $v
   # each list of parts joined as the kind joins them, and several lists so
   # too; a feed's first part answers what its second is asked
   var made: seq[Subject]
   for l in lists:
     guard l.isKind(bList, unmarked), "a composite's parts are a list: " & $l
-    if kind == FeedKind:
-      guard l.items.len == 2, "a feed has two parts: " & $l
-      made.add fed(subjectOf(l.items[0], resolve, how, some false),
-                   subjectOf(l.items[1], resolve, how, some ranked))
+    if kind == feedKind:
+      matchValue l:
+      of "[$first-part $then-part]":
+        made.add fed(subjectOf(firstPart, resolve, how, some false),
+                     subjectOf(thenPart, resolve, how, some ranked))
+      else: refuse "a feed has two parts: " & $l
       continue
     made.add joined(kind, initStream(l.items.data).maps(subjectOf(it, resolve, how, some ranked)).toSeq)
   if made.len == 1: made[0]
-  else: joined(if kind == FeedKind: AltKind else: kind, made)
+  else: joined(if kind == feedKind: altKind else: kind, made)
 
 proc rowsAsked(d: Value, asked: Option[Value], resolve: Search[Value, Value],
                how: Asking, subjects: seq[Subject] = @[]): Stream[Row] =

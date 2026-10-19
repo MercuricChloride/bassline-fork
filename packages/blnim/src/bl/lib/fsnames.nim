@@ -26,13 +26,12 @@ import ../[core, queries]
 import ./[fs, jam]
 import ./crypto/clave
 
-let
-  AliasHead* = sym"alias"
-  AliasesQ* = sym"aliases"  ## the names that have been aliased
+blet"{alias-head: alias}"
+blet"{aliases}"  # the names that have been aliased
 
 proc aliasQ*(name: Value): Value =
   ## the question an alias for `name` answers, (alias NAME)
-  initRec(@[AliasHead, name])
+  initRec(@[aliasHead, name])
 
 proc alias*(kp: Keypair, name, d: Value): Value =
   ## the value that puts `d` as what `name` names, signed by `kp`
@@ -48,10 +47,11 @@ type Alias* = object
 proc aliasOf*(h: Heard): Option[Alias] =
   ## the alias a told answer is, if it is one: a signed put to
   ## (alias NAME) whose answer is a digest
-  if h.signer.isNone or not h.q.isKind(bRec, unmarked) or h.q.items.len != 2 or
-     h.q.head != AliasHead or not Digest.fits(h.said):
-    return none(Alias)
-  some Alias(name: h.q.items[1], digest: h.said, signer: h.signer.get, rank: h.rank)
+  if h.signer.isNone or not Digest.fits(h.said): return none(Alias)
+  matchValue h.q:
+  of "(alias $name)":
+    some Alias(name: name, digest: h.said, signer: h.signer.get, rank: h.rank)
+  else: none(Alias)
 
 proc aliasesOf*(local: BVar[Value, Ranked[Value]], name: Value): seq[Alias] =
   ## every alias for `name` a reader has been told, whoever signed it,

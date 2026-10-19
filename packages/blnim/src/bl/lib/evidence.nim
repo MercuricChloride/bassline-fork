@@ -95,11 +95,10 @@ moldable """{
   (struct changed {exact (rep record)} (before opening) (after opening))
 }"""
 
-let
-  CheckpointsQ* = sym"checkpoints"  ## (checkpoints Q): where checkpoints of Q go
-  SlotHead* = sym"slot"
-  LeafHead = sym"leaf"
-  NodeHead = sym"node"
+blet"{checkpoints}"  # (checkpoints Q): where checkpoints of Q go
+blet"{slot-head: slot}"
+blet("{node}", false)
+blet("{leaf-head: leaf}", false)
 
 proc count(n: BNum, what: string): int =
   guard n.isInt and n.toInt >= 0, what & " is a count"
@@ -125,14 +124,14 @@ proc nodeDigest*(preimage: Value): Value =
 
 proc leaf*(v: Value): Value =
   ## a leaf's preimage, (leaf V)
-  initRec(@[LeafHead, v])
+  initRec(@[leafHead, v])
 
 proc leafNode*(v: Value): Value =
   ## a leaf's node, the digest of (leaf V)
   nodeDigest(leaf(v))
 
 proc innerNode(l, r: Value): Value =
-  nodeDigest(initRec(@[NodeHead, l, r]))
+  nodeDigest(initRec(@[node, l, r]))
 
 proc splitAt(n: int): int =
   ## the greatest power of two below n, for n of two or more
@@ -143,7 +142,7 @@ proc treeRoot*(nodes: openArray[Value]): Value =
   ## are digests of other things, such as a frame's parts each hidden
   ## by its own node
   case nodes.len
-  of 0: nodeDigest(initRec(@[NodeHead]))
+  of 0: nodeDigest(initRec(@[node]))
   of 1: nodes[0]
   else:
     let k = splitAt(nodes.len)
@@ -259,7 +258,7 @@ proc holds*(g: Growth): bool =
 
 proc checkpointsQ*(q: Value): Value =
   ## where checkpoints of `q` are put
-  initRec(@[CheckpointsQ, q])
+  initRec(@[checkpoints, q])
 
 proc leaves*(local: BVar[Value, Ranked[Value]], q: Value, through: int): seq[Value] =
   ## the digests of the answers a reader heard to `q` through rank
@@ -271,7 +270,7 @@ proc jamOf*(local: BVar[Value, Ranked[Value]]): Option[Value] =
   ## (jam). A reader's space holds what one jam told it, as its ranks
   ## are that jam's; a space answering (jam) twice was told by two, and
   ## names neither
-  let told = local[JamQ].toSeq
+  let told = local[jamQ].toSeq
   if told.len != 1: return none(Value)
   let o = opened(told[0].answer)
   if o.isNone: return none(Value)
@@ -302,12 +301,13 @@ proc slot*(said: Value, signer: Key): Option[Value] =
   ## order
   let s = stampOf(said, signer)
   if s.isSome:
-    return some initRec(@[SlotHead, signer.toValue, null(), toValue(s.get.rank)])
-  if not said.isKind(bRec, unmarked) or said.items.len != 2: return none(Value)
-  let (q, a) = (said.items[0], said.items[1])
-  let c = Checkpoint.maybeLoad(a)
-  if c.isSome and q == checkpointsQ(c.get.q):
-    return some initRec(@[SlotHead, c.get.over, q, c.get.rank.toValue])
+    return some initRec(@[slotHead, signer.toValue, null(), toValue(s.get.rank)])
+  matchValue said:
+  of "($q $a)":
+    let c = Checkpoint.maybeLoad(a)
+    if c.isSome and q == checkpointsQ(c.get.q):
+      return some initRec(@[slotHead, c.get.over, q, c.get.rank.toValue])
+  else: discard
   none(Value)
 
 proc equivocation*(a, b: Value): Equivocation =

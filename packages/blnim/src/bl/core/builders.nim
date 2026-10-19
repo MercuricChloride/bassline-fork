@@ -224,8 +224,9 @@ func `[]=`*(a: var Value, k, v: Value) =
   a.expectKind({bList, bRec, bDict})
   if a.kind == bDict:
     a.dict[k] = v
-  k.expectKind(bNum)
-  a.items[k.num.toInt] = v
+  else:
+    k.expectKind(bNum)
+    a.items[k.num.toInt] = v
 
 func atPath*(a: Value, path: varargs[Value]): Value =
   guard path.len >= 1, "path cant be empty"

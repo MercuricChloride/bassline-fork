@@ -197,7 +197,7 @@ proc run*(t: Tool, a: Args) =
   let wait = t.intOpt(a, "wait", 500, lo = 1)
   let ask =
     if a.has("silent"): ""
-    else: t.speakerFrom(a, signs = true).ask(JamQ).ce.toString
+    else: t.speakerFrom(a, signs = true).ask(jamQ).ce.toString
   if stdout.isatty:
     chatter "what is found is written as CE: bl jam scan | bl cat reads it"
   chatter "looking on " & nets.mapIt($it).join(", ") & ", port" &

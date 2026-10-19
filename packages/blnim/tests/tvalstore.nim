@@ -7,7 +7,7 @@
 import std/[algorithm, sequtils, unittest]
 import bl/[core, store]
 from bl/queries import prefixes
-import bl/lib/[blah, blmacro]
+import bl/lib/blah
 import ./corpus
 
 # the elements: every corpus value, plus random ones
@@ -51,7 +51,7 @@ suite "store/values door":
       check v in s2                               # Value overload
       check v.toView in s2                        # ValueView overload
     check sym"nowhere-near-the-store" notin s2
-    check (bl !absent(1, 2)) notin s2
+    check bl"!(absent 1 2)" notin s2
 
   test "items is every element, once, in canonical order":
     check bytesOf(toSeq(snap.items)) == ordered.mapIt(ce it)
@@ -86,14 +86,14 @@ suite "store/values door":
 
   test "under a marked query never crosses into unmarked values":
     var d = createMemDb()
-    let plain = bl person("alice", 30)
-    let acted = bl !person("alice", 30)
+    let plain = bl"""(person "alice" 30)"""
+    let acted = bl"""!(person "alice" 30)"""
     d.withTx:
       d.incl plain
       d.incl acted
     let s = d.snapshot()
-    check bytesOf(toSeq(s.under(bl person("alice")))) == @[ce plain]
-    check bytesOf(toSeq(s.under(bl !person("alice")))) == @[ce acted]
+    check bytesOf(toSeq(s.under(bl"""(person "alice")"""))) == @[ce plain]
+    check bytesOf(toSeq(s.under(bl"""!(person "alice")"""))) == @[ce acted]
     d.close()
 
   test "low / high decode the bounds":

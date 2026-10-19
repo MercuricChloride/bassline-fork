@@ -83,11 +83,11 @@ proc listing*(name, log: string): Value =
     let h = heard(r)
     if h.isNone: continue
     let said = h.get.said
-    if h.get.q == RoomsQ: rooms.incl said
+    if h.get.q == roomsQ: rooms.incl said
     if not said.isObject: continue
-    if h.get.q == HereQ:
-      for by in said.answers(ByQ): who.incl named(by)
-    for at in said.answers(AtQ):
+    if h.get.q == hereQ:
+      for by in said.answers(byQ): who.incl named(by)
+    for at in said.answers(atQ):
       if at.isKind(bNum) and at.num.isInt:
         let ms = at.num.toInt
         if began.isNone or ms < began.get: began = some ms
@@ -98,7 +98,7 @@ proc listing*(name, log: string): Value =
   if last.isSome: entries.add (sym"last", toValue(last.get))
   let at = servedAt(log)
   if at.isSome: entries.add (sym"served", at.get)
-  initRec(@[JamQ, sym(name), initDict(entries)])
+  initRec(@[jamQ, sym(name), initDict(entries)])
 
 proc list*(t: Tool, a: Args) =
   if a.positional.len > 0:
@@ -173,7 +173,7 @@ proc describe(pid: int, what: Value): string =
   if what.head == sym"bridge" and ends.isSome:
     "the bridge between " & ends.get.items.data.mapIt(it.text).join(" and ") &
       " (pid " & $pid & ")"
-  elif what.head == JamQ and what.items.len == 3:
+  elif what.head == jamQ and what.items.len == 3:
     "jam " & what.items[1].text &
       (if served.isSome and served.get.isKind(bText): " at " & served.get.text else: "") &
       " (pid " & $pid & ")"
@@ -189,7 +189,7 @@ proc fits(pid: int, what: Value, s: string): bool =
     let (want, have) = (s.rsplit(':', 1)[1], served.get.text.rsplit(':', 1)[1])
     return want == have
   if s == "bridge" and what.head == sym"bridge": return true
-  what.head == JamQ and what.items.len == 3 and what.items[1].isKind({bSym, bText}) and
+  what.head == jamQ and what.items.len == 3 and what.items[1].isKind({bSym, bText}) and
     what.items[1].text == s
 
 proc listRunning*(t: Tool, a: Args) =

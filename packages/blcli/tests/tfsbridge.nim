@@ -4,7 +4,7 @@
 import std/sugar
 import cli
 import bl/lib/fs
-from bl/lib/jam import Heard, ByQ, nameOf
+from bl/lib/jam import Heard, byQ, nameOf
 
 proc keeper(s: Serving, keep, name: string): Process =
   ## `bl jam keep` as `name` on the jam `s`, keeping in `keep`
@@ -35,12 +35,12 @@ proc saying(vs: seq[Value], by: string, q: Value): seq[Heard] =
   for v in vs:
     let h = heard(v)
     if h.isSome and h.get.q == fsRoom:
-      let who = h.get.said.answer(ByQ)
+      let who = h.get.said.answer(byQ)
       if who.isSome and nameOf(who.get) == by and h.get.said.answer(q).isSome:
         result.add h.get
 
 proc spoke(vs: seq[Value], by: string): bool =
-  vs.saying(by, ByQ).len > 0
+  vs.saying(by, byQ).len > 0
 
 proc bytesFor(n: int, seed: int): seq[byte] =
   ## n bytes that cut into several chunks, the same for the same seed

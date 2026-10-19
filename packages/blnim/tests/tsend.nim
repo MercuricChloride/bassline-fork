@@ -3,7 +3,6 @@
 
 import std/unittest
 import bl/core
-import bl/lib/blmacro
 import bl/queries
 
 template refuses(call: untyped) =
@@ -18,37 +17,37 @@ proc collecting(into: ref seq[(Value, Value)], taking = true): Send[Value, Value
 suite "send":
   test "a send says whether it took what it was told":
     let got = new seq[(Value, Value)]
-    check collecting(got).send(bl q, bl a)
-    check got[] == @[(bl q, bl a)]
-    check not collecting(got, taking = false).send(bl q, bl b)
+    check collecting(got).send(bl"q", bl"a")
+    check got[] == @[(bl"q", bl"a")]
+    check not collecting(got, taking = false).send(bl"q", bl"b")
 
   test "written down only if it has a denotation, by what it sends to":
-    let s = newSend[Value, Value]((q, a) => true, k(bl(!{!kind(send), !to(p)})))
-    check s.toValue == bl(!{!kind(send), !to(p)})
+    let s = newSend[Value, Value]((q, a) => true, k(bl"!{!(kind send) !(to p)}"))
+    check s.toValue == bl"!{!(kind send) !(to p)}"
     refuses newSend[Value, Value]((q, a) => true).toValue
 
   test "a tee tells every part, taken if any took it":
     let (a, b) = (new seq[(Value, Value)], new seq[(Value, Value)])
     let t = tee([collecting(a), collecting(b, taking = false)])
-    check t.send(bl q, bl 1)
-    check a[] == @[(bl q, bl 1)]
-    check not tee([collecting(b, taking = false)]).send(bl q, bl 2)
+    check t.send(bl"q", bl"1")
+    check a[] == @[(bl"q", bl"1")]
+    check not tee([collecting(b, taking = false)]).send(bl"q", bl"2")
     check not t.denotable                      # its parts have no denotation
 
   test "a tee written down sends to everything its parts send to":
     proc into(id: Value): Send[Value, Value] =
       newSend[Value, Value]((q, a) => true, k(sendTo id))
-    check sendTo(bl a) == bl(!{!kind(send), !to(a)})
-    check tee([into(bl a), into(bl b)]).toValue == bl(!{!kind(send), !to(a), !to(b)})
+    check sendTo(bl"a") == bl"!{!(kind send) !(to a)}"
+    check tee([into(bl"a"), into(bl"b")]).toValue == bl"!{!(kind send) !(to a) !(to b)}"
 
 suite "sends read back":
   test "reading a send back is a search from identities to sends":
     let here = new seq[(Value, Value)]
     var known: seq[Send[Value, Value]]
     let reach = newSearch[Value, Send[Value, Value]](
-      d => initStream(if d == bl(p): known else: @[]))
-    check reach.ask(bl p).toSeq.len == 0   # nothing yet
+      d => initStream(if d == bl"p": known else: @[]))
+    check reach.ask(bl"p").toSeq.len == 0   # nothing yet
     known.add collecting(here)
-    for s in reach.ask(bl p):
-      check s.send(bl q, bl 2)
-    check here[] == @[(bl q, bl 2)]
+    for s in reach.ask(bl"p"):
+      check s.send(bl"q", bl"2")
+    check here[] == @[(bl"q", bl"2")]

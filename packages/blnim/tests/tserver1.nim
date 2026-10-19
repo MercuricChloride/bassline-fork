@@ -4,7 +4,7 @@
 import std/[unittest, asyncdispatch, asyncnet, nativesockets, posix, sequtils]
 from std/strutils import repeat
 import bl/core
-import bl/lib/[blmacro, server]
+import bl/lib/server
 
 template listen(send: untyped, observe: Observer = nil): Listener =
   newListener(Port(0), send, observe, "127.0.0.1")
@@ -41,11 +41,11 @@ func kinds(es: seq[EdgeEvent]): seq[EdgeKind] =
 func count(es: seq[EdgeEvent], k: EdgeKind): int =
   es.countIt(it.kind == k)
 
-let corpus = @[bl(1), bl "two", bl(!add(1, 2)), bl(!go), bl(!42), bl [],
-               bl {3, 2}, bl {k: nil}, bl(!{7}), bl x"dead_beef",
-               bl(n"123456789012345678901234567890"),
-               bl(n"-98765432109876543210"),
-               bl(quote(!"hello", [n"18446744073709551616"]))]
+let corpus = @[bl"1", text"two", bl"!(add 1 2)", bl"go!", bl"42!", bl"[]",
+               bl"{3 2}", bl"{k: nil}", bl"!{7}", bl"0xdead_beef",
+               bl"123456789012345678901234567890",
+               bl"-98765432109876543210",
+               bl"""(quote "hello"! [18446744073709551616])"""]
 
 suite "listener":
   test "values arrive in order and intact across awkward chunk splits":
@@ -81,7 +81,7 @@ suite "listener":
         doAssert send(v)
       await waitUntil(proc(): bool = arrived.len >= corpus.len + 1)
       c.close()
-      refused = not send(bl late)
+      refused = not send(bl"late")
     within run()
     check arrived == corpus & big
     check refused
@@ -114,8 +114,8 @@ suite "listener":
     proc observe(e: EdgeEvent) = events.add e
     let l = listen(onValue, observe)
     asyncCheck l.serve()
-    let whole = bl(first)
-    let half = ce(bl(second(1, 2, 3)))
+    let whole = bl"first"
+    let half = ce(bl"(second 1 2 3)")
     proc run() {.async.} =
       let c = await dial(l)
       doAssert c.write(whole)
@@ -148,17 +148,17 @@ suite "listener":
       # a client pump ends when the listener hangs up on it
       let badHungUp = bad.pump(proc(v: Value): bool = true)
       let goodHungUp = good.pump(proc(v: Value): bool = true)
-      doAssert good.write(bl(before))
+      doAssert good.write(bl"before")
       doAssert bad.write([0'u8]) # tag 0: the decoder must refuse
       await badHungUp
-      doAssert good.write(bl(after))
+      doAssert good.write(bl"after")
       await waitUntil(proc(): bool = arrived.len >= 2)
       goodHeard = not goodHungUp.finished
       bad.close()
       good.close()
     within run()
     check goodHeard
-    check arrived == @[bl(before), bl(after)]
+    check arrived == @[bl"before", bl"after"]
     check events.count(edgeMalformed) == 1
     check events.filterIt(it.kind == edgeMalformed)[0].error of CodecError
     l.close()
@@ -168,7 +168,7 @@ suite "listener":
     var arrived: seq[Value]
     var events: seq[EdgeEvent]
     proc onValue(v: Value): bool =
-      if v == bl(boom):
+      if v == bl"boom":
         var xs: seq[int]
         discard xs[3] # IndexDefect from app code
       arrived.add v
@@ -180,15 +180,15 @@ suite "listener":
       let c1 = await dial(l)
       let c2 = await dial(l)
       let hungUp = c1.pump(proc(v: Value): bool = true)
-      doAssert c1.write(bl(boom))
+      doAssert c1.write(bl"boom")
       await hungUp
-      doAssert c2.write(bl(fine))
+      doAssert c2.write(bl"fine")
       await waitUntil(proc(): bool = arrived.len >= 1)
       c1.close()
       c2.close()
     within run()
     check events.count(edgeFailed) == 1
-    check arrived == @[bl(fine)]
+    check arrived == @[bl"fine"]
     l.close()
     settle()
 

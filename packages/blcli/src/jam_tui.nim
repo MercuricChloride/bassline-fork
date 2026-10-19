@@ -135,7 +135,7 @@ proc wrap(s: string, width: int): seq[string] =
 # ================ what a room shows ================
 
 proc label(room: Value): string =
-  if room.kind == bRec and room.items.len == 2 and room.head == ForQ:
+  if room.kind == bRec and room.items.len == 2 and room.head == forQ:
     "@" & nameOf(room.items[1])
   elif room.kind == bSym: "#" & room.text
   else: $room
@@ -148,13 +148,13 @@ proc forMe(t: Tui, said: Value): bool =
 
 proc body(said: Value): Seg =
   ## what a message says, as text when it is text
-  let s = said.answer(SaidQ)
+  let s = said.answer(saidQ)
   if s.isNone: ($said, Dim)
   elif s.get.kind == bText: (s.get.text, "")
   else: ($s.get, Red)
 
 proc clock(said: Value): string =
-  let at = said.answer(AtQ)
+  let at = said.answer(atQ)
   if at.isNone or at.get.kind != bNum or not at.get.num.isInt: return "     "
   fromUnix(at.get.num.toInt div 1000).local.format("HH:mm")
 
@@ -181,7 +181,7 @@ proc rowsOf(t: Tui, h: Heard, room: Page, width: int): seq[Row] =
   ## a message as rows: when, where the jam heard it, who, and what they
   ## said, then what it answers
   let said = h.said
-  let by = said.answer(ByQ)
+  let by = said.answer(byQ)
   if by.isNone:                             # not a message: shown as it is
     for i, line in wrap($said, max(10, width - 12)):
       result.add @[((if i == 0: "      #" & alignLeft($h.rank, 5) else: spaces(12)), Dim),
@@ -200,13 +200,13 @@ proc rowsOf(t: Tui, h: Heard, room: Page, width: int): seq[Row] =
                    (who, (if t.isMe(by.get): BoldRed else: Bold)),
                    ("  " & line, style)]
     else: result.add @[(spaces(pad) & line, style)]
-  for d in said.answers(ReQ):
+  for d in said.answers(reQ):
     var answered = "   ↳ something not heard here"
     if $d in room.byDigest:
       let other = room.byDigest[$d]
       let lines = body(other.said).text.splitLines
       answered = "   ↳ #" & $other.rank & " " &
-        nameOf(other.said.answer(ByQ).get(sym"?")) & ": " & lines[0] &
+        nameOf(other.said.answer(byQ).get(sym"?")) & ": " & lines[0] &
         (if lines.len > 1: " …" else: "")
     result.add @[(spaces(columns(lead)) & fit(answered, max(10, width - columns(lead))), Dim)]
 
@@ -347,8 +347,8 @@ proc open(t: Tui, room: Value) =
     t.unread.add 0
     t.current = t.rooms.high
     t.c.ask room
-    if not (room.kind == bRec and room.items.len == 2 and room.head == ForQ):
-      discard t.c.put(RoomsQ, room)
+    if not (room.kind == bRec and room.items.len == 2 and room.head == forQ):
+      discard t.c.put(roomsQ, room)
   t.unread[t.current] = 0
   t.scroll = 0
 
@@ -358,7 +358,7 @@ proc mentions(text: string): seq[Value] =
   for word in strutils.splitWhitespace(text):
     if word.len > 1 and word[0] == '@':
       let name = sym(word[1 .. ^1].strip(chars = {',', '.', ':', ';', '!', '?'}))
-      result.add(if name == sym"here": AllName else: name)
+      result.add(if name == sym"here": allName else: name)
 
 proc speak(t: Tui, room, said: Value, text: string, re: seq[Value] = @[]) =
   let m = t.c.speaker.message(said, re, mentions(text))
@@ -385,7 +385,7 @@ proc command(t: Tui, line: string) =
       let parts = rest.split(maxsplit = 1)
       if parts.len < 2: t.notice = "/msg NAME TEXT"
       else:
-        let to = initRec(@[ForQ, sym(parts[0])])
+        let to = initRec(@[forQ, sym(parts[0])])
         t.open(to)
         t.speak(to, toValue(parts[1]), parts[1])
     of "/re":
@@ -401,7 +401,7 @@ proc command(t: Tui, line: string) =
     of "/who":
       t.notice = "here: " & t.c.local.who.mapIt(nameOf(it)).join(", ")
     of "/rooms":
-      let rooms = t.c.local.heardIn(RoomsQ).maps(label(it.said)).toSeq
+      let rooms = t.c.local.heardIn(roomsQ).maps(label(it.said)).toSeq
       t.notice = "rooms: " & rooms.join(" ")
     of "/quit", "/q": t.quit = true
     of "/help", "/h":
@@ -429,11 +429,11 @@ proc heard(t: Tui, h: Heard) =
   ## not shown counts it
   t.said.keepItIf(not (it.room == h.q and it.kept == h.answer))
   t.page(h.q).take h
-  if h.q in [HereQ, GoneQ]: t.hereKnown = false
-  let by = h.said.answer(ByQ)
-  if h.q == HereQ and by.isSome and not t.isMe(by.get):
+  if h.q in [hereQ, goneQ]: t.hereKnown = false
+  let by = h.said.answer(byQ)
+  if h.q == hereQ and by.isSome and not t.isMe(by.get):
     t.notice = nameOf(by.get) & " is here"
-  elif h.q == GoneQ and by.isSome and not t.isMe(by.get):
+  elif h.q == goneQ and by.isSome and not t.isMe(by.get):
     t.notice = nameOf(by.get) & " is gone"
   let i = t.rooms.find(h.q)
   if i >= 0 and i != t.current: inc t.unread[i]
@@ -646,8 +646,8 @@ proc keepUp(t: Tui) =
   t.c = c
   for room in t.rooms:
     c.ask room
-    if not (room.kind == bRec and room.items.len == 2 and room.head == ForQ):
-      discard c.put(RoomsQ, room)
+    if not (room.kind == bRec and room.items.len == 2 and room.head == forQ):
+      discard c.put(roomsQ, room)
   c.hello()
   t.notice = "on the jam again"
   t.dirty = true
@@ -684,7 +684,7 @@ proc run*(t: Tool, a: Args) =
   for r in rooms:
     try: tui.open(roomArg(r))
     except ValueError: t.misuse "not a room: " & r
-  tui.open(initRec(@[ForQ, c.speaker.name]))
+  tui.open(initRec(@[forQ, c.speaker.name]))
   tui.current = 0
   utf8Locale()
   raw()

@@ -104,11 +104,11 @@ proc putAlias(f: Fs, name, d: Value) =
   let r = f.putAndWait(aliasQ(name), d)
   emit initRec(@[sym"put", aliasQ(name), if r < 0: null() else: toValue(r)])
   if r < 0: fail "the jam at " & $f.place & " passed the alias on and kept nothing"
-  discard f.line.put(AliasesQ, name)
+  discard f.line.put(aliases, name)
 
 proc caughtUp(f: Fs) =
   ## everything asked so far has been told: a here put after it is told back
-  discard f.putAndWait(HereQ, f.speaker.here)
+  discard f.putAndWait(hereQ, f.speaker.here)
 
 proc fetch(f: Fs, lacks: () -> seq[Value]): seq[Value] =
   ## asks the jam for what `lacks` says is lacking, and wants it in the
@@ -127,8 +127,8 @@ proc fetch(f: Fs, lacks: () -> seq[Value]): seq[Value] =
       for d in fresh:
         f.asked.incl d
         c.ask d
-      discard c.put(f.room, obj(@[initRec(@[ByQ, f.speaker.by]), initRec(@[AtQ, toValue(now())]),
-        initRec(@[SaidQ, text($f.speaker.name & " wants " & $fresh.len)])] &
+      discard c.put(f.room, obj(@[initRec(@[byQ, f.speaker.by]), initRec(@[atQ, toValue(now())]),
+        initRec(@[saidQ, text($f.speaker.name & " wants " & $fresh.len)])] &
         fresh.mapIt(initRec(@[WantQ, it]))))
     turn(50)
     result = lacks()
@@ -214,7 +214,7 @@ proc alias(t: Tool, a: Args) =
     discard f.named(name)
     for al in f.c.local.aliasesOf(name):
       if f.trusts(al.signer):
-        emit initRec(@[AliasHead, name, al.digest, bytes(@(al.signer))])
+        emit initRec(@[aliasHead, name, al.digest, bytes(@(al.signer))])
     return
   let given = try: valueArg(a.positional[1]) except ValueError as e: t.misuse e.msg
   let d = if Digest.fits(given): some(given)
