@@ -1,0 +1,104 @@
+; Bridges: parties on many machines, carrying topics between them.
+; Found with the prototype in this folder (fabric.nim, ring.nim,
+; owned.nim, schemes.nim), on parties served on [::1] standing for
+; machines.
+
+(idea "Each party has a gate, a program on its machine that owns (fabric in) and (fabric out). A bridge attends two parties and says into (fabric in) at each what it hears in (fabric out) at the other, so only gates hear bridges and only gates speak to them. A gate takes each saying once, by the party it was first said at and that party's order, and says it at its own party from a seat, one connection standing for each far speaker. Programs attend their own party only, and answer a far speaker by saying into msg.by as they would a near one.")
+
+; ================ what crosses, and as whom
+
+(law "What crosses is (carried P N S T V): at the party that goes by P, in its order N, S said V into T. Everything a bridge or gate adds is outside V.")
+(law "A bridge says only into (fabric in), as its own S at each end. It hears only (fabric out), where only the gate speaks, since the gate owns it.")
+(law "A gate says V into T from a seat standing for (P S). A far speaker is one name at each party, so saying into that name crosses back as (carried P' N' S' (seat P S) R) and the gate at P says R into S from a seat standing for (P' S').")
+(law "A party with no gate swallows what bridges say into it: nobody else hears (fabric in), and nothing is said into (fabric out) but by an owner.")
+(law "A bridge whose two ends are at one party closes, since both say the same P. Two addresses for one party show the same P.")
+
+(finding {about: status
+  what: "The party owns status at every machine, so no gate says into it. A gate carries (dead S) for near speakers whose sayings went out, and a far gate lets its seat for S go, so the far party says (dead SEAT) in its own status. A far speaker leaves the way a near one does."})
+
+; ================ by, and who really said it
+
+(finding {about: by
+  what: "On a far party everything is said by a seat, a name that party gave. S in an envelope is a sixteen byte name that means nothing off its own party, and any bridge can write any envelope, so it says only what the gate that sent it claims."})
+(law "Who said V is known from V alone: the speaker signs it, (signed V (signature eddsa-blake2b SIG KEY)). V crosses byte for byte, so the signature holds at every party. In ring.nim the cook checks it two parties away.")
+(finding {about: by
+  must-not: "put anything inside V: no hops, no stamps, no signature of its own, no unwrapping"
+  may: "sign its envelope with its machine's key, one signature per saying per gate, for gates that want to know which machine vouches for the carriage"})
+(finding {about: by
+  what: "A signature says who signed V, not who said it into T now. Anyone may say a signed value again, and the fabric carries that as a new saying. A speaker who cares signs the topic with the value."})
+
+; ================ loops
+
+(measured plain (ring 3) {again: [443 445 445] first: [407 407 407] lines: 2556})
+(measured plain (ring 5) {again: [259 256 256 256 256] first: [213 214 214 214 214] lines: 2354})
+(measured plain (mesh 5) {again: [204 192 192 192 192] first: [85 100 100 100 100] lines: 4372})
+(measured digest (ring 3) {again: [1 0 0] first: [1 1 2] lines: 3})
+(measured digest (ring 5) {again: [1 0 0 0 0] first: [1 1 1 2 1] lines: 5})
+(measured digest (mesh 5) {again: [1 0 0 0 0] first: [1 1 2 3 4] lines: 10})
+(measured hops (ring 3) {again: [1 2 2] first: [1 2 2] lines: 8})
+(measured hops (ring 5) {again: [1 2 2 2 2] first: [1 2 2 2 2] lines: 16})
+(measured hops (mesh 5) {again: [1 16 16 16 16] first: [1 16 16 16 16] lines: 128})
+(measured gates (ring 3) {again: [1 1 1] first: [1 1 1] lines: 12})
+(measured gates (ring 5) {again: [1 1 1 1 1] first: [1 1 1 1 1] lines: 20})
+(measured gates (mesh 5) {again: [1 1 1 1 1] first: [1 1 1 1 1] lines: 40})
+; first and again: how often each party's listener heard one order, and
+; then the same value said again. lines: what the bridges carried in all.
+
+(compare {
+  plain: "never stops: each copy said at a party is carried on by every other bridge there"
+  digest: "each bridge carries a value once, so loops stop at E lines, but two bridges into one party race and both carry (a mesh of 5 heard [1 1 2 3 4]), and a value said twice is carried once, so the second saying is lost. Memory: a digest per value per bridge"
+  hops: "(via [P …] V) stops loops but not duplicates: a party hears a saying once per simple path to it, 2 in a ring and 16 in a mesh of 5, and the value grows 17 bytes a hop and is not what the speaker said"
+  one-hop: "carrying only what a near speaker said reaches every party once in a full mesh with no memory, and nobody beyond a neighbour otherwise"
+  gates: "every party hears each saying once and a saying repeated is a new saying. A bridge carries each one once each way, 2E lines, one of them wasted when it carries back what it brought. Memory: [P N] per saying per gate. Envelope: about 40 bytes over V"
+  owners: "routing through an owner decides each topic in one place but only shapes who may speak. It stops loops only along a tree, which the home in the gates' configuration gives"})
+
+(finding {about: loops
+  what: "Bridges that hear topics can't tell a near speaker from a seat another gate holds, and announcing seats in a topic races the bridge's own subs. Letting only gates hear topics removes the question: a gate knows its own seats."})
+
+; ================ owned topics
+
+(finding {about: ownership
+  what: "An owner on one machine owns a topic at every party through the gates. The home gate carries T as usual. Every other gate holds T from a seat that owns it at its party, so what is said there, into T or into the holding seat, goes to that seat alone, crosses as (carried P N S (owner T) V), and at home a seat says it into T and so to whoever owns T there when it arrives. What the owner says comes back to every party from the holding seats. In owned.nim yan at party 2 asks and only dave at party 0 hears, his answer reaches yan, and his word reaches each party once."})
+(finding {about: handover
+  what: "Handover is local to the home party: when dave went, erin at party 0 had (desk) by her backoff, and parties 1 and 2 heard her from the same seats as before. A local owner at a far party is refused while its gate holds T, as zoe was, so moving the home to another machine is a change to the gates' configuration."})
+(finding {about: ownership
+  what: "Holding a topic because a broadcast for it was heard lets holders form a cycle with no owner, each passing to the next for ever. A home fixed in the gates' configuration rules it out: only the home gate sends broadcasts, and holders never do."})
+(finding {about: ownership
+  what: "Owner-alone holds on a party, not across the fabric. Once (owner T) is in (fabric out), any program at any party can hear it there."
+  smallest: "seal V to a key the home holds before it leaves, or say plainly that owner-alone holds only at the owner's own party"})
+(finding {about: ownership
+  what: "Which machine is home is each gate's own configuration, and nothing checks that they agree. Two gates given T among their topics make two homes, and a holding seat that reconnects can lose T to a local program in the gap. Ownership across machines is a choice each machine makes, never one fact."})
+(finding {about: order
+  what: "Along one path the owner's order holds, since every hop keeps order. Over several paths a gate takes whichever copy comes first, so two sayings from one origin can arrive swapped when one path is slower."})
+
+; ================ discovery
+
+(finding {about: discovery
+  what: "A party speaks first, (name N S P), so finding one asks nothing: fabric.nim's probe attends, reads one value and leaves. bl jam scan already finds parties unless --silent, since what comes back first is the party's name. It looks only at IPv4 /24s."})
+(finding {about: discovery
+  what: "Every machine reckons the same place for bassline, so that place can only be local: two machines holding it on one link conflict. A party others can bridge to needs a second place, the machine's address or the place of a value naming the machine, such as (party NAME), which every machine can reckon."})
+
+; ================ many machines
+
+(finding {about: hyper-connected
+  what: "Since gates take each saying once, a bridge more never makes anyone hear twice. It costs two connections and 2 lines per saying, k(k-1) lines per saying in a full mesh of k. A program can dial every party it finds and the fabric stays right. None of the programs in ring.nim or owned.nim know the fabric is there."})
+
+; ================ gaps
+
+(gap {need: "a party reachable from other machines"
+  smallest: "serve one party's state at two places, its own and the machine's, since serve makes a new party for each address"})
+(gap {need: "remote attendees kept out of a party that bridges reach"
+  why: "fabric.nim's bridge attends the far party itself, as a bridge is described, so that party seats a program from another machine"
+  smallest: "seat connections from other machines only to say into (fabric in) and hear (fabric out): a different party kernel, or the bridge split in two halves joined by a wire"})
+(gap {need: "a bound on what a gate remembers"
+  smallest: "forget [P N] once it is older than the slowest path, seconds"})
+(gap {need: "an origin's order over several paths"
+  smallest: "the origin gate counts what it sends per origin and topic, and far gates hold back gaps, paying a wait when a line is lost"})
+(gap {need: "seats that end"
+  why: "a (dead S) never comes from a machine that went away, and over two paths a death can overtake a saying, so a seat is made for a speaker already gone"
+  smallest: "a gate lets a seat go by its own rule, after a quiet while, with a carried (dead S) one reason among others. A seat let go comes back on the next saying"})
+(gap {need: "what an attendee says just after its own is refused"
+  why: "parties.nim flushes what waited right after (own …), and a refused own lets the connection go with those bytes unread, so a holding seat or a second gate loses what it said, and the gate has already marked it seen"
+  smallest: "the attendee keeps what it flushed until the connection outlasts Lasting, and says it again on the next"})
+(gap {need: "lines carried back to where they came from"
+  smallest: "a bridge remembers [P N] it carried one way for a moment and doesn't carry it back: E lines instead of 2E, for memory per bridge"})

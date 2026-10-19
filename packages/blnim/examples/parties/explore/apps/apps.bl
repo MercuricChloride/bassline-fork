@@ -1,0 +1,199 @@
+; Five applications as nothing but participants at parties: topics,
+; owners, plain participants and bridges. Line counts are code lines
+; (no blanks or comments). A bridge is two halves, one on each machine,
+; each attending its own party, joined by one TCP wire of CE values.
+
+(app jam {
+  topics: {
+    (room NAME): "posts, presence and catch-up for one room"
+    (room lobby): "which rooms there are, and asking for one"
+  }
+  owners: {keeper: [(room lobby) (room NAME)]}
+  programs: [
+    (program keeper {lines: 72 built: "keeper.nim"
+      does: "keeps each (post MSG) once with the jam's rank, names S as who is here until the party says S is dead, answers (from R) into the asker's name, holds each room on its own connection"})
+    (program chat {lines: 67 built: "chat.nim"
+      does: "joins rooms, posts until it hears its post kept, says here and asks (from R) again on each new connection"})
+    (program bridge-half {lines: 40
+      does: "hears the rooms it carries and says each (kept ROOM R MSG BY) on the far side as (post MSG)"})
+    (program terminal {does: "jam_tui, its jam client and redialling swapped for an attendee"})
+    (program agent {does: "jam_mcp, the same, and its scan of places for jams gone: a party is at a known place"})
+  ]
+  crosses: "(post MSG) over the bridge wire. MSG is signed when authorship must hold on the far side, since BY is what a connection went by at one party"
+  free: [
+    "connections, reconnects and resubscribing: server.nim's 219 lines and jam_client's dialling"
+    "presence: the jam's lines, heres, quiet and drop become (dead S)"
+    "fan-out to whoever hears a room, and letting a slow reader go"
+    "the keeper is the room's sequencer: says into an owned topic reach it alone"
+  ]
+  missing: [
+    "hearers can't tell who owns a room, so a (kept …) said in a lapse would be believed"
+    "an owner's lapse opens its topic to everyone"
+    "an owner can't tell when its own has taken, short of the (invalid X) barrier"
+    "a long catch-up said at once can pass MaxUnsent and get the newcomer let go"
+  ]
+  today: {
+    "lib/jam.nim keeper half": 146
+    "lib/server.nim": 219
+    "bl jam serve": 60
+    "jam_kept.nim, log locks and the running list": 171
+    "jam_client.nim": 164
+  }
+  not-built: "signatures, tea-time stamps, passes, the (jam) identity, log locks"
+})
+
+(app files {
+  topics: {
+    files: "(want D) and (keep D), unowned, heard by every holder"
+    (digest blake2b H): "the content of D, said by whoever holds it, heard by whoever wants it"
+  }
+  owners: {}
+  programs: [
+    (program holder {lines: 60
+      does: "holds a keep (lib/fs.nim), hears files, and says the content into D for each want it can answer. It hears D first and stays quiet if someone else answered"})
+    (program fetch {lines: 50
+      does: "hears D, says (want D) into files, checks the answer against D, and for chunks and trees wants each part, a window at a time"})
+    (program bridge-half {lines: 50
+      does: "carries wants across, hears D on the far side, says the content into D on the near side, and may keep what passes, so it is a holder too"})
+  ]
+  crosses: "(want D) one way, content the other, checked by its digest on arrival, so the bridge needs no trust"
+  free: [
+    "a want reaches every holder without anyone knowing who holds what"
+    "content never touches a log: the topic D is the passing that jam --pass does by shapes"
+    "holders who also hear D see that someone answered"
+  ]
+  missing: [
+    "flow control: a fetch with too many wants out is let go at MaxUnsent, so it windows them"
+    "no anycast: holders answering at once send the same chunk twice"
+  ]
+  today: {"jam_keep.nim": 193 "lib/fs.nim": 300}
+})
+
+(app world {
+  topics: {
+    (world W): "(do EVENT) said in, (step N T EVENT) and (tick N T) said out"
+  }
+  owners: {reflector: [(world W)]}
+  programs: [
+    (program reflector {lines: 60
+      does: "the jam keeper with a clock: numbers each (do EVENT) it hears as the next step, says (tick N T) when nothing happens, keeps the last (state N D) a replica offered, and answers (from N) with that snapshot's digest and the steps since"})
+    (program replica {lines: 40
+      does: "folds steps into state with the app's own pure step function, says (state N D) now and then, and fetches a snapshot's content as files does"})
+    (program bridge-half {lines: 50
+      does: "owns (world W) on the far party, so replicas there say (do …) to it alone, carries them to the reflector, and says the steps there to everyone"})
+  ]
+  crosses: "(do EVENT) toward the reflector's machine, steps and ticks back, snapshot content as files"
+  free: [
+    "the owner is the sequencer with no code: what replicas say reaches it alone"
+    "fan-out of steps, and replicas coming and going"
+  ]
+  missing: [
+    "replicas can't tell the reflector's word from a stranger's in a lapse"
+    "every event waits for its round trip through the owner, as in Croquet"
+    "determinism is the app's step function's"
+  ]
+  today: {"lib/teatime.nim, a signed reflector already": 129}
+})
+
+(app agents {
+  topics: {
+    (tasks P): "(task ID SPEC), (claim ID WHO), (done ID D), (review ID WHO VERDICT)"
+    (agent NAME): "an agent's own inbox, the same across its connections"
+    (room NAME): "talk, as the jam"
+  }
+  owners: {ledger: [(tasks P)] each-agent: [(agent NAME)] keeper: [(room NAME)]}
+  programs: [
+    (program ledger {lines: 80
+      does: "the jam keeper with one rule: the first claim on a task holds, a later one is told (taken ID WHO) in its own name, and a claim lapses when the party says its S is dead"})
+    (program agent-adapter {lines: 120
+      does: "an MCP server attending the party, owning (agent NAME), with tools to say and hear"})
+    (program bridge-half {lines: 60
+      does: "owns (tasks P) on the far party and each remote agent's (agent NAME), one connection per name as it learns them, and says (gone WHO) for a local S that dies"})
+  ]
+  crosses: "claims, tasks and reviews toward the ledger, its keeps back, inbox values to their owner's machine"
+  free: [
+    "claims lapse when their holder goes, with no heartbeats"
+    "an inbox per agent, and one agent per name on a machine, since a second own is refused"
+    "one place decides first, the owner, because says reach it alone"
+  ]
+  missing: [
+    "S ends at the bridge, so a remote claim lapses only when the bridge half says gone"
+    "who may claim or review is not the party's: a gated party at another value"
+  ]
+  today: {"jam_mcp.nim": 569}
+})
+
+(app devices {
+  topics: {
+    (device NAME): "readings said by its driver to everyone, commands said by anyone to the driver alone"
+    (history NAME): "past readings, asked (from R) or (latest)"
+  }
+  owners: {driver: [(device NAME)] recorder: [(history NAME)]}
+  programs: [
+    (program driver {lines: 40 does: "the hardware edge and an attendee, one per device"})
+    (program recorder {lines: 70 does: "the jam keeper over readings, answering (latest) for a new dashboard"})
+    (program rule {lines: 15 does: "hears one device, says a command into another"})
+    (program decimator {lines: 20 does: "republishes a fast sensor slower, into (device NAME 1hz)"})
+    (program bridge-half {lines: 50
+      does: "one per Pi, owning on the hub party the device topics it carries, so commands reach it alone and then the driver alone"})
+  ]
+  crosses: "readings toward the hub, commands back, over one wire per Pi"
+  free: [
+    "a stalled dashboard is let go and never slows a sensor"
+    "a device offline is (dead S)"
+    "commands reach the driver alone. A device is a 9P file as a topic: hear to read, say to write"
+  ]
+  missing: [
+    "a new hearer hears nothing until the next reading, since an owner isn't told who begins to hear"
+    "which devices exist: status says who is alive, not what they own"
+    "anyone on the machine can command the heater: a gated party at another value"
+  ]
+})
+
+(finding {kind: law
+  says: "keeping once makes saying again safe"
+  seen: "bob's post said three times during the keeper's lapse was kept once, at rank 11, when it came back"
+  so: "re-saying until kept survives a lapse, and a bridge loop ends at the first keeper that holds the value"})
+
+(finding {kind: law
+  says: "an owner is its topic's sequencer for free"
+  seen: "the keeper's ranks, a reflector's steps and a ledger's first claim are each the order the owner heard"})
+
+(finding {kind: law
+  says: "content needs no owner"
+  seen: "the digest is the authority, so any holder may answer into the topic D and the wanter checks"})
+
+(finding {kind: law
+  says: "presence is the party's, and a keeper only names it"
+  seen: "dave left while the keeper was stopped. Begun again, the keeper heard status, did not hear dave alive, and kept (gone dave S)"})
+
+(finding {kind: barrier
+  says: "the party answers anything outside its dialect in order, so (settled) said after connecting comes back as (invalid (settled)) once the own and the status catch-up have been taken"
+  used: "keeper.nim settles presence and says a room is opened only then"})
+
+(finding {kind: own-later
+  says: "owning only first is no obstacle: the keeper holds each room on a connection of its own, opened when asked"
+  cost: "one socket per owned set"})
+
+(finding {kind: local-name
+  says: "S is a name at one party. Presence, claims and private answers keyed on S end at a bridge, which carries them as values such as (gone WHO)"})
+
+(gap {need: "a hearer knows who owns a topic"
+  case: "while the keeper was stopped, anyone could have said (kept general 9 …) into (room general) and ann would have taken it"
+  smallest: "the party says (owns S {T …}) into status when it grants an own, and tells a new hearer of status the owns along with who is alive"})
+
+(gap {need: "an owned topic stays closed while its owner is away"
+  case: "the keeper stopped for a second: bob's post reached ann raw three times, unkept, and any program could have owned (room general)"
+  smallest: "when an owner goes, the party holds its topics: says into them are refused as (invalid X) until someone owns them again"})
+
+(gap {need: "an owner knows its own has taken"
+  case: "the keeper must not say (opened kitchen) before the party routes (room kitchen) to it"
+  smallest: "the party says (owned {T …}) into the owner's name when it grants it. The barrier works until then"})
+
+(gap {need: "pace bulk to a hearer"
+  case: "a newcomer's catch-up and a fetch's chunks are said at once, and past MaxUnsent the hearer is let go"
+  smallest: "no party change: answer (from R) with at most K records and (more R), and window wants"})
+
+(gap {need: "here.nim at a party on a port chosen at runtime"
+  case: "a prototype's party on Port(0) can't be attended through party, so these programs use attend directly"
+  smallest: "BL_PARTY takes [ADDR]:PORT"})

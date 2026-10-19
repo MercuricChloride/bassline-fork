@@ -4,15 +4,21 @@
   value that arrives on it is said into every conversation it is in.
 
   When the other end stops sending, the wire stops reading and stays
-  where it is, since the other end may still be listening. It leaves
+  where it is, since the other end may still be listening, and its
+  `done` completes for whoever holds it to decide otherwise. It leaves
   its conversations once a write fails. Once it is in no conversation
   it closes the socket, after what was written has gone out.
 ]##
-import std/[asyncnet, sugar]
+import std/[asyncnet, net, sugar]
 import ../core
 import ./conv
 
 export asyncnet
+
+proc domainOf(address: string): Domain =
+  ## IPv6 for an IPv6 address, IPv4 for anything else
+  if address.isIpAddress and address.parseIpAddress.family == IPv6: AF_INET6
+  else: AF_INET
 
 const Chunk = 16 * 1024
 
@@ -20,6 +26,7 @@ type
   Wire* = ref object of Speaker
     socket: AsyncSocket
     writing: Future[void]  ## the last write, done once all have gone
+    done*: Future[void]    ## complete once the wire stops reading
 
   Listener* = ref object
     socket: AsyncSocket
@@ -51,6 +58,7 @@ proc read(w: Wire) {.async.} =
       decoder.compact
   except CatchableError:
     discard
+  w.done.complete
 
 method left*(w: Wire, r: Room) =
   procCall Speaker(w).left(r)
@@ -67,13 +75,13 @@ method send*(w: Wire, msg: Msg) =
       w.leaveAll
 
 proc start(socket: AsyncSocket, r: Room): Wire =
-  result = Wire(socket: socket)
+  result = Wire(socket: socket, done: newFuture[void]("wire"))
   result.join r
   asyncCheck result.read
 
 proc dial*(host: string, port: Port, r: Room): Future[Wire] {.async.} =
   ## connects to `host` and `port`, and joins a wire for it to `r`
-  let socket = newAsyncSocket(buffered = false)
+  let socket = newAsyncSocket(host.domainOf, buffered = false)
   try:
     await socket.connect(host, port)
   except CatchableError:
@@ -110,7 +118,7 @@ proc listen*(port: Port, r: Room, address = ""): Listener =
   ## Listens on `port`, and joins a wire to `r` for each connection.
   ## Sockets are unbuffered, since a buffered recv waits to fill the
   ## whole chunk. Accepted sockets inherit it.
-  let socket = newAsyncSocket(buffered = false)
+  let socket = newAsyncSocket(address.domainOf, buffered = false)
   try:
     socket.setSockOpt(OptReuseAddr, true)
     socket.bindAddr(port, address)

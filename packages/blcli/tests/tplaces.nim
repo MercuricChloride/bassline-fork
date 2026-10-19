@@ -43,8 +43,8 @@ suite "send and serve":
     check sh(homed & "bl name there ssh://far").code == 2   # TCP places only
     check sh(homed & "bl name --forget here").code == 0
     check sh(homed & "bl name").output == ""
-    let gone = sh(homed & "bl send here", blb("(x)"))
-    check gone.code == 2 and "no place is named here" in gone.errors
+    let gone = sh(homed & "bl send here", blb("(x)"))   # now the party at the place of here
+    check gone.code != 0 and "can't reach [fd" in gone.errors
     discard s.stop
 
   test "the config answers what a tool isn't told, and a tool's own word comes first":
@@ -118,7 +118,7 @@ suite "send and serve":
     check r.code == 1
     check "can't reach 127.0.0.1:" & $p.port in r.errors
     check sh("bl reach :" & $p.port).code == 1
-    check sh("bl send nowhere", blb("1")).code == 2
+    check sh("bl send nowhere", blb("1")).code == 1   # the party at the place of nowhere, which nothing holds
     check sh("bl send 70000", blb("1")).code == 2
     check sh("bl send ::1:80", blb("1")).code == 2
     check sh("bl send ssh://", blb("1")).code == 2

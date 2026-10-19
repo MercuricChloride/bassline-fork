@@ -1,0 +1,102 @@
+(about "parties as kernels, from examples/parties/explore/kernels, 2026-10-19")
+
+(law kernel-reads-no-value
+  "A kernel decides by connection, by topic compared by its CE, and by place in its order. It passes V on whole and never reads it. In kernel.nim the admits method is given a verb and a topic, never V, so a kernel built on it can't read what is said.")
+
+(finding {
+  kind: party-only
+  open: {arrived admits into by record left}
+  fixed: {naming ordering letting-go}
+  why: "only the party sees every connection, every hearer of a topic, every owner and the one count. Each kernel here overrides one to three of the six and nothing else."
+})
+
+(finding {
+  kind: participant
+  decides: "what a topic or a value means, whom to answer, whether to believe what P claims"
+  enforcing: "a rule about meaning that must hold for everyone in a topic is a participant owning the topic. The owner does for one topic what the kernel does for all, in user space."
+})
+
+(finding {
+  kind: hijack
+  where: "src/bl/parties/parties.nim, own"
+  case: "eve learns ann's name, connects again saying (own {ANN}) first, and from then on what bob says into ann's name reaches eve alone. ann hears none of it. out/probe-stock.txt"
+  smallest: "the party owns each name for whoever goes by it, as it arrives: the one method in sealed.nim. Then (own {ANN}) is refused like any owned topic."
+})
+
+(finding {
+  kind: eavesdrop
+  case: "status tells every name, and (sub NAME) hears what is said into it. eve hears bob's (psst) to ann. out/probe-stock.txt"
+  smallest: "the same method as the hijack. With names owned, a say into a name reaches its connection alone."
+})
+
+(proposal {
+  need: "a program learns what its party gives"
+  smallest: "P in (name N S P) is already any value, and the attendee and here.nim pass it through as Said.party. A kernel goes by (KERNEL ARGS ORDER): (sealed 0x…), (gated {status (kitchen) (desk)} 0x…), (fenced TOPICS P-INSIDE). No new value, no change to the dialect."
+  leak: "a local reading while programs only compare P and read what they know of it. It becomes a contract once a program refuses a P it can't read, or once P carries a version. The guarantee never comes from the claim. It comes from who this machine lets serve at that place."
+})
+
+(finding {
+  kind: choosing
+  how: "a program chooses a kernel by the value it dials. Several kernels on one machine are several places, each the place of a value. Which value gives what is the program's own knowledge, asked of its own searches, not a directory."
+})
+
+(finding {
+  kind: order-outlives-process
+  kernel: recorder
+  case: "served again on its log, the recorder goes by the same P and greets ann at 36, after the 35 it had said. P names an order, not a process. out/probe-recorder-again.txt"
+})
+
+(finding {
+  kind: layer
+  built: "fence.nim"
+  gives: "a guarantee in front of any party. Both the fence's guarantee and the inner kernel's hold. A refusal takes an N in the inner order, since the fence says (fenced X) inside, outside the dialect, and the inner party says it back as invalid."
+  costs: [
+    "two sockets and a copy for each program"
+    "names and order are the inner party's, so a new connection inside is a new name outside, and either end closing closes both"
+    "a layer limits what its own connections do, never what others do to them. An unfenced program inside can still hear or own a fenced program's name"
+    "a layer sees only its own connections, so a recorder as a layer records only them"
+  ]
+})
+
+(finding {
+  kind: composing
+  case: "kernels don't stack in one process. Sealed and veiled together is a new type of a few lines. Layers stack by place, each seeing less."
+})
+
+(gap {
+  need: "admit some programs and not others"
+  why: "a name is given on arrival, so there is no list of names to admit before it. Over TCP on ::1 the party sees nothing of who connected."
+  smallest: "let the machine decide: a party at a place only some programs' sandbox profile reaches. The profile is the admission list. Anything finer needs a first value, which changes the dialect."
+})
+
+(finding {
+  kind: sandbox
+  case: "values guest under sandbox-exec, reaching only the fence's port, is served by a cook attending the party inside. bl party to the party inside from the same sandbox fails with Operation not permitted. out/sandbox.txt"
+  halves: ["the OS decides which places a program reaches" "the party at that place decides what it does there"]
+  fence-rule: "a fenced program says into admitted topics and into the names it has heard from. It can answer, and can't seek anyone out."
+})
+
+(gap {
+  need: "attend a party served at Port(0) without rebuilding"
+  why: "here.nim takes its port from -d:partyPort alone, so values is rebuilt for every kernel run here"
+  smallest: "BL_PARTY taking [ADDR]:PORT as bl party's --at does"
+})
+
+(conversations {
+  back: [
+    "the rule: the six methods are a conversation's rule, cut by when each applies"
+    "admits, now by topic"
+    "names: S as nameFor, nil when the party says something itself"
+    "kick: leave"
+    "joined and left: (alive S) and (dead S) in status"
+    "one message to everyone before the next: one N for each say"
+    "keep: the recorder keeps a value before anyone is told it, as a conversation kept before passing on"
+    "the hold split: nothing a participant holds lets it act as the party, since the split is now the socket"
+  ]
+  gone: [
+    "transactions, and refuse undoing what was kept"
+    "all and first in one process. Their place is layers: a fence in front of a recorder is both"
+    "participants as procs in the process: every participant is a connection"
+    "the speaker hearing its own say"
+  ]
+})

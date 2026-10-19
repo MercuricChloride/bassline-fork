@@ -25,10 +25,10 @@ proc talk(t: Talker) {.async.} =
     echo t.name, " heard ", msg.value
 
 method send(b: Bridge, msg: Msg) =
-  b.say(msg.value, but = msg.conv)
+  b.say(msg.value, but = msg.room)
 
-method left(b: Bridge, c: Conversation) =
-  procCall Speaker(b).left(c)
+method left(b: Bridge, r: Room) =
+  procCall Speaker(b).left(r)
   echo "bridge left"
 
 method send(r: Ranked, msg: Msg): bool =

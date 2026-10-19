@@ -9,6 +9,8 @@ import std/streams except Stream
 from std/net import nil
 import bl/core
 import bl/queries
+from bl/parties/parties import PartyPort
+from bl/parties/place import placeOf
 export options, core, stream, Port
 
 const
@@ -603,7 +605,8 @@ proc parsePlace*(s: string, allowZero = false): Place =
   ## `ssh://host/PLACE`: `bl reach PLACE` run on the far side, PLACE a TCP
   ## place as the far side reads it; `ssh://host` alone reaches the far
   ## side's DefaultPlace. A name (`bl name` gives one) is the place it
-  ## names, the first of several that takes a connection. Port 0
+  ## names, the first of several that takes a connection, and a name
+  ## nothing names is the party at the place of that name. Port 0
   ## (whatever is free) only with `allowZero`, and never on the far side.
   ## A spelling that is none of these, a unix socket path among them,
   ## raises ValueError with the reason.
@@ -613,8 +616,8 @@ proc parsePlace*(s: string, allowZero = false): Place =
     bad "a place can't be empty"
   if isName(s):
     let places = placesNamed(s)
-    if places.len == 0:
-      bad "no place is named " & s & " (bl name " & s & " HOST:PORT names one)"
+    if places.len == 0:  # the party at the place of the name
+      return Place(kind: tcpPlace, host: net.`$`(placeOf(sym(s))), port: PartyPort)
     return reached(s, places)
   if not s.startsWith("ssh://"):
     try: return parseTcp(s, allowZero)

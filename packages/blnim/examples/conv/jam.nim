@@ -23,14 +23,14 @@ let
   a = Jam()
   b = Jam()
 
-proc name(c: Conversation): string =
-  if c == a: "a" else: "b"
+proc name(r: Room): string =
+  if r == a: "a" else: "b"
 
 proc talk(t: Talker) {.async.} =
   t.each msg:
     if msg.value notin t.holds:
       t.holds.incl msg.value
-      echo "  ", t.name, " heard ", msg.value, " in ", msg.conv.name
+      echo "  ", t.name, " heard ", msg.value, " in ", msg.room.name
 
 proc talker(name: string, c: Conversation): Talker =
   result = Talker(name: name, holds: newBSet())
@@ -44,7 +44,7 @@ proc says(t: Talker, c: Conversation, v: Value) {.async.} =
   await sleepAsync(10)
 
 method send(b: LoudBridge, msg: Msg) =
-  echo "  bridge heard ", msg.value, " in ", msg.conv.name
+  echo "  bridge heard ", msg.value, " in ", msg.room.name
   procCall Bridge(b).send(msg)
 
 proc main() {.async.} =

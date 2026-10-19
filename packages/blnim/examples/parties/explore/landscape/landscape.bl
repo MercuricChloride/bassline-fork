@@ -1,0 +1,133 @@
+(system libp2p-gossipsub {
+  addresses: "a topic, any string, over a mesh of peers each named by a peer ID, the hash of its public key"
+  guarantees: "a library and protocol every peer runs: signing, dedup by message ID, peer scoring, and validators the app registers. Delivery is best effort"
+  handles: "finding peers, keys, writing validators, tuning the mesh. Joining a topic means joining a mesh of strangers"
+  parties: "no mesh and no peers. A program dials one daemon on its own machine, and the guarantees are that daemon's, not a protocol every peer must run"
+})
+
+(system secure-scuttlebutt {
+  addresses: "a feed, an ed25519 key whose messages form one signed hash chain, replicated by gossip along the follow graph"
+  guarantees: "in the data: signatures and the chain, checked by each reader's library. Delivery is whenever someone replicates"
+  handles: "one key on one device (a key writing from two devices forks its feed for good), nothing deleted, what to follow"
+  parties: "keeps nothing and knows nobody past a connection. SSB is a store of history, a party is a live meeting"
+})
+
+(system ipfs-pubsub {
+  addresses: "a topic string, through the Kubo daemon's HTTP RPC, on gossipsub underneath"
+  guarantees: "the local daemon, experimental and off by default"
+  handles: "everything gossipsub needs, less what the daemon's API cannot carry"
+  parties: "the nearest P2P shape to a party: a local daemon programs publish and subscribe through. In 2023 Kubo's maintainers moved to drop the RPC API because apps need their own validators, which a daemon API without callbacks cannot run, and said pubsub works well only as a library. Owning a topic is the answer parties have: it puts a program in the path of everything said there"
+})
+
+(system matrix {
+  addresses: "a room (!id:server or an alias) and users (@name:server), through the client's own homeserver"
+  guarantees: "homeservers. A room is an event DAG replicated across the servers in it, with state resolution and power levels, and its history is kept"
+  handles: "sync tokens, end-to-end keys, retries by transaction ID"
+  parties: "no accounts, no history, no room spanning servers. A Matrix room is a replicated document, a party topic is a meeting on one machine"
+})
+
+(system nostr {
+  addresses: "relays by URL, and events by filter (kinds, authors, tags, time). Every event is signed by a key"
+  guarantees: "the client, which checks signatures and picks relays. Relays promise nothing, and they differ enough that NIP-11 exists for each to say what it supports"
+  handles: "which relays, publishing to several, dedup, auth"
+  parties: "the wire is close: REQ is sub, EVENT is say, CLOSE is unsub, NOTICE is (invalid X), and ephemeral kinds behave like everything in a party. A party is local, stores nothing, names connections rather than keys, matches values exactly rather than by filter, and its guarantees are its own rather than checked by readers"
+})
+
+(system holochain {
+  addresses: "entries and actions by hash, agents by key, in a DHT whose network is named by the hash of the app's DNA. call_remote and signals reach an agent"
+  guarantees: "the app's own validation rules, run by the peers holding each piece of the DHT, with warrants against agents who break them"
+  handles: "deterministic validation, membranes, what each agent signs"
+  parties: "both name the meeting by a hash of what you join: a DNA hash there, the place of a value here. Holochain ships the rules to every peer, parties keep them in one local kernel you swap"
+})
+
+(system automerge-repo {
+  addresses: "a document by its automerge: URL, a random id. Peers announce an id on joining"
+  guarantees: "the CRDT library (convergence), behind storage and network adapters. Sync servers are peers that keep documents, a share policy decides what each peer gets, ephemeral messages are passed on and never kept"
+  handles: "almost nothing about connections: find, change, listen"
+  parties: "Automerge Repo already lets programs never handle connections, for documents. Parties do it for talk, where nothing converges and nothing is kept. Ephemeral messages are the nearest thing to a say"
+})
+
+(system nats {
+  addresses: "a subject, dotted tokens with wildcards, request and reply by a reply inbox subject, queue groups"
+  guarantees: "the server: at most once and per publisher order in core, storage and at least once in JetStream, per subject permissions in its config, slow consumers cut off"
+  handles: "little. The client reconnects, restores its subscriptions before flushing what it buffered (8 MB in Go), and fails a publish past that. A request nobody subscribes to is answered 503, no responders, since 2.2"
+  parties: "the attendee is a NATS client almost line for line, and MaxUnsent is NATS's slow consumer rule. A party is one daemon per value on one machine, not a cluster. It matches any value exactly with no wildcards, has owners instead of queue groups and permissions, and no request and reply. NATS's no-echo option is a party's rule"
+})
+
+(system zeromq {
+  addresses: "an endpoint (tcp, ipc, inproc) and a socket pattern. SUB filters by byte prefix. Zyre on top names peers by random 16 byte UUIDs, with groups, SHOUT, WHISPER, ENTER and EXIT"
+  guarantees: "the library: framing, queues to a high water mark, reconnect and resubscribe. No broker, and PUB drops past the mark. What is published before a subscription lands is lost, the slow joiner"
+  handles: "who binds and who connects, discovery, reliability patterns"
+  parties: "a party is the broker ZeroMQ chose not to have, and an XPUB/XSUB proxy is close to one. Zyre is nearer still: random 16 byte names, groups for topics, WHISPER for saying into a name, ENTER and EXIT for alive and dead. Zyre is peers beaconing on a LAN, a party is one daemon per machine"
+})
+
+(system d-bus {
+  addresses: "a bus at a well known socket, a bus name (a unique :1.N, or a well known name one connection owns), then an object path, interface and member"
+  guarantees: "the bus daemon (dbus-daemon or dbus-broker): name ownership and its queue, policy, activation, eavesdropping kept to privileged monitors"
+  handles: "typed method calls and replies, match rules, losing a name"
+  parties: "the closest of all. One daemon per scope, a name given to each connection on arrival and never reused, a well known name held by one connection that calls go to and signals come from, NameOwnerChanged much like status. A party merges call and signal into one topic, has no replies or types, no policy file and no activation, sits at the place of a value rather than a fixed path, and is changed by running another party rather than configuring this one. D-Bus queues a second asker for a name, an attendee retries with backoff"
+})
+
+(system erlang-registry {
+  addresses: "a pid, a registered name, a global name across nodes, a pg group. epmd on port 4369 says where each node on a host listens"
+  guarantees: "the runtime: order between two processes, monitors and links that say DOWN, a name that dies with its process"
+  handles: "supervision and restarts, global name clashes after a netsplit, the window while a name is unregistered"
+  parties: "register is own: one holder, refused when taken, gone when the holder goes. Sending to an unregistered name raises badarg in the sender, where a party hands a say into a lapsed owned topic to everyone who hears it. A monitor watches one process, a party's status tells everyone of everyone. epmd is a daemon at a well known place on each host"
+})
+
+(system plan9 {
+  addresses: "a path in the process's own namespace. Every resource is a file some server serves over 9P. bind and mount change a process's view and children inherit it. /srv posts a channel under a name, and the plumber routes messages by rules to port files"
+  guarantees: "each file server for its own files, the kernel's mount driver for the connection. When a server goes its mount breaks"
+  handles: "open, read, write and their errors. Which namespace it runs in is chosen by whoever started it"
+  parties: "closest in spirit. A party is a local server whose semantics are its own, and which party a program attends is chosen by its environment (BL_PARTY), as a namespace is. The plumber gives a copy to every client with a port open, and when none is, a rule may start one and hold the message, or the sender gets a write error. 9P is request and response, a party is not"
+})
+
+(system croquet {
+  addresses: "a session, its id made from the session name and a hash of the registered model code, served by a reflector"
+  guarantees: "the reflector stamps and orders every outside event and sends ticks. Every client runs the same deterministic model and so reaches the same state. A late joiner loads a snapshot"
+  handles: "writing a deterministic model, keeping view and model apart"
+  parties: "N is a reflector's order, one count for the whole party. Owning a topic makes any program the reflector for that topic. A session id from code and name is near the place of a value. A party replicates nothing and keeps no snapshot, and an owner is never told who begins to hear, so it cannot do for a late joiner what a reflector does"
+})
+
+(prior hash-addresses "cjdns derives fc00::/8 addresses from a hash of a key, so an IPv6 address from a hash is not new. What is new is hashing any value, to a place on your own machine")
+
+(difference dial-a-value "A program dials a value and the place is on its own machine. Everything else addresses something with a counterpart: a key, an account, a broker, an endpoint, a fixed bus socket, a node. Croquet, Holochain and cjdns name things by a hash, but none puts the place of any value on the local machine")
+(difference kernel-per-value "Guarantees come from which party you attend, swapped as a whole program. Not from a config file (NATS, D-Bus), a protocol every peer runs (gossipsub, Holochain), or data each reader checks (SSB, Nostr)")
+(difference nothing-kept "No keys, accounts, logs, documents or snapshots, and no name past a connection. Core NATS, ZeroMQ and D-Bus signals share this. SSB, Matrix, Nostr, Holochain, Automerge and Croquet are built around what they keep")
+(difference one-topic-two-ways "One topic carries both directions of a service: says from others go to its owner, the owner's go to every hearer, and any program becomes the reflector for a topic by owning it. D-Bus needs two message kinds and match rules for this, Croquet a server")
+(difference no-word-back "Nothing comes back for a say but (invalid X). D-Bus replies, 9P answers every request, Erlang raises badarg, NATS says 503, the plumber returns a write error, Nostr says OK")
+
+(take xpub-hearers {
+  from: [zeromq croquet]
+  what: "an XPUB publisher hears subscriptions arrive, which is how ZeroMQ caches a last value for each new subscriber"
+  in-parties: "the party tells an owner (sub S) and (unsub S) by nil, into the topic, to the owner alone, as it already tells new hearers of status who is here. An owner can then hand a newcomer what it missed. Today it is told nothing (traps.nim, case 4)"
+})
+(take unheard {
+  from: [plan9-plumber nats d-bus]
+  what: "the plumber holds a message for a client a rule starts, or the sender gets a write error. NATS answers a request nobody hears with 503"
+  in-parties: "a say that reaches nobody is said back into the speaker's name as (unheard X), the way (invalid X) is. values.nim's guest waits a second to learn nobody served pie. A swapped party could go further, start a program for a topic and hold the say until it owns it"
+})
+(take owner-changed {
+  from: [d-bus erlang]
+  what: "NameOwnerChanged and monitors say when a name gains or loses its holder"
+  in-parties: "status says (owns S {T …}) when a connection's owns are granted. Someone who relies on (desk) then knows when it is held, and by whom"
+})
+
+(trap names-are-hearable {
+  fell-in: nats
+  how: "anyone allowed _INBOX.> heard every reply until per client inbox prefixes and permissions"
+  parties: "status says every name and any connection may sub any name, so it hears all that is said to that connection. traps.nim case 1: eve hears (pin 1234) bob says to ann"
+  smallest: "the party seats each connection as the owner of its own name, two lines in seat. A program can do it today by owning its name first, case 2"
+})
+(trap owner-lapse {
+  fell-in: [erlang d-bus]
+  how: "a name is empty while its holder restarts. Erlang raises badarg in the sender, D-Bus queues the next owner and can start one"
+  parties: "when an owner goes, its topic falls back to everyone who hears it, so what was said to the owner alone goes to the owner's audience. traps.nim case 3: (card 2222) reaches bob"
+  smallest: "keep a gone owner's topics owned by nil, as status is, so a say into one is told (invalid X) until someone owns it again, and let own take a nil owned topic other than status. The cost is remembering every topic ever owned"
+})
+(trap silent-loss {
+  fell-in: [zeromq nats]
+  how: "ZeroMQ's slow joiner loses what was published before a subscription landed. A NATS slow consumer is cut off, reconnects, resubscribes and falls behind again"
+  parties: "basics.nim sleeps after each sub so the next say finds its hearer. An attendee let go for MaxUnsent connects again at once if its connection lasted a second, with a new name, so whoever knew the old one now says into nothing, and status says dead and alive each round"
+  smallest: "take xpub-hearers, so an owner can bring a newcomer up to date. The churn has no small fix: an attendee cannot tell being let go for falling behind from any other end, so it is worth knowing rather than fixing now"
+})

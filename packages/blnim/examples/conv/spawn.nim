@@ -26,18 +26,20 @@ method send(s: Spawner, msg: Msg) =
   if not (v.isKind(bRec, marked) and v.len == 3 and v[0] == spawn): return
   if v[1] notin s.kinds: return
   let made = s.kinds[v[1]](v[2])
-  for c in s.convs:
-    if c != msg.conv: made.join c
+  for r in s.rooms:
+    if r != msg.room: made.join r
 
 let
   ctl = Conversation()
   room = Conversation()
   spawner = Spawner(kinds: newBTree[Value, (Value) -> Participant]())
-  me = Participant()  # one that only speaks
+  me = Participant()  # one that only speaks, so it hears nothing
 
 spawner.kinds[logger] = (tag: Value) => Participant(Logger(tag: tag))
 spawner.join ctl
 spawner.join room
+me.join ctl
+me.join room
 
 discard me.say(ctl, bl"!(spawn foo bar)")   # a kind it doesn't know
 discard me.say(ctl, bl"!(spawn logger 1)")
