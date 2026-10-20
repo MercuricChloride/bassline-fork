@@ -1,0 +1,13 @@
+/bin/
+/nimcache/
+/jam-cache/
+/check-cache/
+/home/
+/xdg/
+/cli/bl
+/cli/cache/
+/cli/home/
+/cli/*.blb
+/cli/*.at
+/cli/*.log
+/*.log

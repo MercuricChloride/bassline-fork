@@ -10,3 +10,14 @@ nimble.develop
 nimble.paths
 nimbledeps
 bin/
+# what building and running the examples leaves behind: builds, caches and
+# run outputs. What a run found is written beside the code that ran it
+out/
+*cache*/
+home/
+# keys, as at the root, since !*.* above lets them back in here. A key is
+# never kept in the repository
+keys/
+.bl/
+*.key
+*key.blb

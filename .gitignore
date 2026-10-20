@@ -35,3 +35,10 @@ bin/
 bench-data/
 # generated type declarations
 packages/*/types/
+
+# keys, and the private homes tests make with keys in them. A key is never
+# kept in the repository: a test makes its own when it runs
+keys/
+.bl/
+*.key
+*key.blb
