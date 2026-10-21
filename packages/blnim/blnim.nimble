@@ -32,3 +32,12 @@ proc removeBinaries(dir: string) =
 task clean, "remove the binaries nim c leaves beside tests/ and examples/":
   removeBinaries "tests"
   removeBinaries "examples"
+
+task bench, "runs the benchmarks":
+  for f in listFiles(projectDir() / "bench"):
+    if f.splitFile.ext == ".nim":
+      echo "running benchmark"
+      exec("nim c -d:release -r " & f)
+    else:
+      echo "skipping file: ", f
+

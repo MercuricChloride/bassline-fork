@@ -89,8 +89,6 @@ binary `mod`, BNum
 binary `cmp`, int
 binary `<`, bool
 binary `<=`, bool
-binary `>`, bool
-binary `>=`, bool
 binary `==`, bool
 
 func inc*(n: var BNum, by = 1) =

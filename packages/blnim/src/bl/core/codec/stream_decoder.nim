@@ -5,50 +5,13 @@ import ./partial
 refuseWith CodecError
 
 type
-  RawValue* {.byref.} = object
-    mark, valid: bool
-    case kind: Kind
-      of bNil: discard
-      of bNum..bBytes:
-        bytes: seq[byte]
-      else:
-        children: seq[RawValue]
+  Readable* = concept
+    proc null(T: typedesc[Self], mark: bool): Self
+    proc atom(T: typedesc[Self], bytes: sink string, kind: Kind, mark: bool): Self
+    proc frame(T: typedesc[Self], members: sink seq[Self], kind: Kind, mark: bool): Self
 
-func len*(self: RawValue): int =
-  self.children.len
-
-func cmp*(a, b: RawValue): int =
-  template `??`(body) =
-    result = body
-    if result != 0: return
-  ?? cmp(a.kind, b.kind)
-  ?? cmp(a.mark, b.mark)
-  case a.kind
-  of bNil: discard
-  of bNum..bBytes:
-    ?? cmpShortlex(a.bytes, b.bytes)
-  of bList, bRec, bSet:
-    for i in 0..<min(a.len, b.len):
-      ?? cmp(a.children[i], b.children[i])
-    ?? cmp(b.len, a.len)
-  of bDict:
-    var i = 1
-    while i < min(a.len, b.len):
-      ?? cmp(a.children[i-1], b.children[i-1])
-      ?? cmp(a.children[i], b.children[i])
-      i.inc 2
-    ?? cmp(b.len, a.len)
-
-func `==`*(a, b: RawValue): bool =
-  cmp(a, b) == 0
-func `<`*(a, b: RawValue): bool =
-  cmp(a, b) < 0
-func `<=`*(a, b: RawValue): bool =
-  cmp(a, b) <= 0
-
-func validate*(self: var RawValue)
-
-proc readAtom(self: Stream, atom: var RawValue): bool =
+proc readAtom[T: Readable](self: Stream, val: var T): bool =
+  mixin null, atom
   if self.atEnd: return
   let startPos = self.getPosition
   try:
@@ -70,27 +33,31 @@ proc readAtom(self: Stream, atom: var RawValue): bool =
       for i in 0..3:
         length = (length shl 8) or int(large[i])
       guard length >= 255, "non minimal large length"
-    atom = RawValue(kind: kind, mark: mark)
-    if length > 0:
-      var bytes = newSeq[byte](length)
+    if kind == bNil:
+      val = T.null(mark)
+    elif length > 0:
+      var bytes = newString(length)
       let bytesRead = self.readData(addr(bytes[0]), length)
       guard bytesRead == bytes.capacity, "stream truncated"
-      atom.bytes = move bytes
+      val = T.atom(move bytes, kind, mark)
+    else:
+      val = T.atom("", kind, mark)
     true
   except:
     self.setPosition(startPos)
     raise
 
-proc readRaw*(self: Stream, val: var RawValue): bool =
+proc readStream*[T: Readable](self: Stream, val: var T): bool =
+  mixin null, frame
   if self.atEnd: return
   let pos = self.getPosition
   var headerByte: byte
   self.peek(headerByte)
   case partialKind(headerByte)
   of pvNil:
-    let (kind, mark, _) = headerData(headerByte)
+    let (_, mark, _) = headerData(headerByte)
     self.setPosition(pos + 1)
-    val = RawValue(kind: kind, mark: mark)
+    val = T.null(mark)
     return true
   of pvCloseFrame:
     self.setPosition(pos + 1)
@@ -98,14 +65,70 @@ proc readRaw*(self: Stream, val: var RawValue): bool =
   of pvOpenFrame:
     let (kind, mark, _) = headerData(headerByte)
     self.setPosition(pos + 1)
-    val = RawValue(kind: kind, mark: mark)
-    val.children = newSeqOfCap[RawValue](100)
-    var child: RawValue
-    while self.readRaw(child):
-      val.children.add move(child)
+    var children = newSeqOfCap[T](10)
+    var child: T
+    while self.readStream(child):
+      children.add move(child)
+    val = T.frame(move children, kind, mark)
     return true
   of pvAtom:
     return self.readAtom(val)
+
+type
+  RawValue* {.byref.} = object
+    mark, valid: bool
+    case kind: Kind
+      of bNil: discard
+      of bNum..bBytes:
+        bytes: string
+      else:
+        children: seq[RawValue]
+
+func len*(self: RawValue): int =
+  self.children.len
+
+func kind*(self: RawValue): auto =
+  self.kind
+
+func cmp*(a, b: RawValue): int =
+  template `??`(body) =
+    result = body
+    if result != 0: return
+  ?? cmp(a.kind, b.kind)
+  ?? cmp(a.mark, b.mark)
+  case a.kind
+  of bNil: discard
+  of bNum..bBytes:
+    ?? cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
+  of bList, bRec, bSet:
+    for i in 0..<min(a.len, b.len):
+      ?? cmp(a.children[i], b.children[i])
+    ?? cmp(b.len, a.len)
+  of bDict:
+    var i = 1
+    while i < min(a.len, b.len):
+      ?? cmp(a.children[i-1], b.children[i-1])
+      ?? cmp(a.children[i], b.children[i])
+      i.inc 2
+    ?? cmp(b.len, a.len)
+
+func `==`*(a, b: RawValue): bool =
+  cmp(a, b) == 0
+func `<`*(a, b: RawValue): bool =
+  cmp(a, b) < 0
+func `<=`*(a, b: RawValue): bool =
+  cmp(a, b) <= 0
+
+func validate*(self: var RawValue)
+
+proc null*(T: typedesc[RawValue], mark: bool): RawValue =
+  RawValue(kind: bNil, mark: mark)
+proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
+  let k: bNum..bBytes = kind
+  RawValue(kind: k, mark: mark, bytes: s)
+proc frame*(T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool): RawValue =
+  let k: bList..bSet = kind
+  RawValue(kind: k, mark: mark, children: s)
 
 func validate*(self: var RawValue) =
   if self.valid: return
@@ -114,10 +137,10 @@ func validate*(self: var RawValue) =
     self.valid = true
     return
   of bNum: 
-    self.valid = isValidInt(self.bytes)
+    self.valid = isValidInt(self.bytes.toBytes)
     return
   of bText, bSym: 
-    self.valid = isValidUtf8(self.bytes)
+    self.valid = isValidUtf8(self.bytes.toBytes)
     return
   else: discard
   
@@ -164,11 +187,24 @@ func encodedSize*(self: RawValue): int =
 func mark*(self: RawValue): bool =
   self.mark
 
+func payload*(self: sink RawValue): string =
+  move self.bytes
+
 iterator items*(self: RawValue): lent RawValue =
   for each in self.children:
     yield each
 
+iterator mitems*(self: sink RawValue): var RawValue =
+  for each in self.children.mitems:
+    yield each
+
 iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
+  var i = 1
+  while i < self.len:
+    yield (self.children[i-1], self.children[i])
+    i.inc 2
+
+iterator mpairs*(self: sink RawValue): (var RawValue, var RawValue) =
   var i = 1
   while i < self.len:
     yield (self.children[i-1], self.children[i])

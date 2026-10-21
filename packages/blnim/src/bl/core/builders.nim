@@ -154,12 +154,6 @@ func `<`*(a, b: Value): bool =
 func `<=`*(a, b: Value): bool =
   cmp(a, b) <= 0
 
-func `>`*(a, b: Value): bool =
-  cmp(a, b) > 0
-
-func `>=`*(a, b: Value): bool =
-  cmp(a, b) >= 0
-
 # ================ Access ================
 
 func len*(a: Value): int =
@@ -269,7 +263,7 @@ func incl*(a: var Value, v: Value) =
 iterator children*(self: Value): Value =
   case self.kind
   of bList, bRec:
-    for v in self.items: 
+    for v in self.items:
       yield v
   of bDict:
     for k, v in self.dict:
@@ -362,19 +356,19 @@ func copy*(self: Value): Value =
 func `'bn`*(n: string, mark = false): Value =
   num(n, mark)
 
-func toValue*(v: Value): Value = 
+func toValue*(v: Value): Value =
   v
 
 func fromValue*(T: typedesc[Value], v: Value): Value =
   v
 
-func toValue*(i: SomeInteger): Value = 
+func toValue*(i: SomeInteger): Value =
   num(i)
 
 func toValue*(self: BNum): Value =
   Value(kind: bNum, num: self)
 
-func toValue*(s: string): Value = 
+func toValue*(s: string): Value =
   text(s)
 
 func toValue*(self: BDict): Value =
@@ -386,7 +380,7 @@ func toValue*(self: BSet): Value =
 func toValue*(self: Buffer[Value]): Value =
   initList(self)
 
-func toValue*(b: openArray[byte]): Value = 
+func toValue*(b: openArray[byte]): Value =
   bytes(b)
 
 func toValue*[T](xs: openArray[T]): Value =
@@ -410,7 +404,7 @@ proc write*(e: Encoder, v: Value) =
       body
 
   case v.kind
-  of bNil: 
+  of bNil:
     scalar []
   of bNum:
     scalar toBytes $v.num

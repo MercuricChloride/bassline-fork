@@ -20,6 +20,8 @@ type
   BasslineError* = object of ValueError
   CodecError* = object of BasslineError
   Frame* = ref object of RootObj
+  Entry*[K,V] = tuple[key:K, val:V]
+  Pair*[T] = Entry[T,T]
 
 # ================
 # Error utils

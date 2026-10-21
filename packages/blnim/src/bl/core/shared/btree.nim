@@ -7,9 +7,6 @@ const
   maxKeys = M - 1
 
 type
-  Entry*[K, V] = tuple[key: K, val: V]
-  Pair*[T] = Entry[T, T]
-
   NodeKind = enum
     nkLeaf, nkInternal
 
