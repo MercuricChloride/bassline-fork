@@ -1,5 +1,4 @@
-import std/streams
-import ../[shared, codec]
+import ../shared
 
 refuseWith BasslineError
 
@@ -15,9 +14,6 @@ type
 
 func len*(self: RawValue): int =
   self.children.len
-
-func kind*(self: RawValue): auto =
-  self.kind
 
 func cmp*(a, b: RawValue): int =
   template `??`(body) =
@@ -92,27 +88,6 @@ func validate*(self: var RawValue) =
       inc i
   self.valid = true
 
-func encodedSize*(self: RawValue, total: var int) =
-  case self.kind
-  of bNil:
-    total += 1
-  of bNum..bBytes:
-    let len = self.bytes.len
-    case len:
-    of 0..6:
-      total += 1 + len
-    of 7..254:
-      total += 2 + len
-    else:
-      total += 5 + len
-  else:
-    total += 2
-    for each in self.children:
-      each.encodedSize(total)
-
-func encodedSize*(self: RawValue): int =
-  self.encodedSize(result)
-
 func mark*(self: RawValue): bool =
   self.mark
 
@@ -153,7 +128,5 @@ iterator children*(self: RawValue): lent RawValue =
   for each in self.children:
     yield each
 
-proc ce*(self: RawValue): string =
-  let s = newStringStream(newStringUninit(self.encodedSize))
-  s.writeValue(self)
-  move s.data
+func kind*(self: RawValue): auto =
+  self.kind

@@ -103,7 +103,7 @@ proc writeAtom(stream: Stream, kind: Kind, mark: bool, payload: string) =
   stream.writeHeader(kind, mark, payload.len)
   stream.write payload
 
-proc writeValue*[T: Walkable](stream: Stream, val: T) =
+proc writeStream*[T: Walkable](stream: Stream, val: T) =
   doAssert val.valid, "writing invalid value"
   case val.kind
   of bNil:
@@ -115,5 +115,36 @@ proc writeValue*[T: Walkable](stream: Stream, val: T) =
   else:
     stream.writeHeader(val.kind, val.mark, 0)
     for child in val.children:
-      stream.writeValue(child)
+      stream.writeStream(child)
     stream.write(EndByte)
+
+proc atomSize[T: Walkable](self: T): int =
+  case self.kind
+  of bNum: self.digits.len
+  of bText, bSym, bBytes: self.payload.len
+  else: 0
+
+proc encodedSize*[T: Walkable](self: T, total: var int) =
+  case self.kind
+  of bNil: total += 1
+  of bNum..bBytes:
+    let len = self.atomSize
+    case len:
+    of 0..6:
+      total += 1 + len
+    of 7..254:
+      total += 2 + len
+    else:
+      total += 6 + len
+  else:
+    total += 2
+    for each in self.children:
+      each.encodedSize(total)
+
+proc encodedSize*[T: Walkable](self: T): int =
+  self.encodedSize(result)
+
+proc ce*[T: Walkable](self: T): string =
+  let s = newStringStream(newStringUninit(self.encodedSize))
+  s.writeStream(self)
+  move s.data
