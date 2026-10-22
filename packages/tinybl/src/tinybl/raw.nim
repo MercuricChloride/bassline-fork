@@ -39,15 +39,6 @@ func `<=`*(a, b: RawValue): bool =
 
 func validate*(self: var RawValue)
 
-proc null*(T: typedesc[RawValue], mark: bool): RawValue =
-  RawValue(kind: bNil, mark: mark)
-proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
-  let k: bNum..bBytes = kind
-  RawValue(kind: k, mark: mark, bytes: s)
-proc frame*(T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool): RawValue =
-  let k: bList..bSet = kind
-  RawValue(kind: k, mark: mark, children: s)
-
 func validate*(self: var RawValue) {.raises: [] } =
   if self.valid: return
   case self.kind
@@ -101,6 +92,21 @@ iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
   while i < self.len:
     yield (self.children[i-1], self.children[i])
     i.inc 2
+
+# ================
+# Readable
+# ================
+
+proc null*(T: typedesc[RawValue], mark: bool): RawValue =
+  RawValue(kind: bNil, mark: mark)
+
+proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
+  let k: bNum..bBytes = kind
+  RawValue(kind: k, mark: mark, bytes: s)
+
+proc frame*(T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool): RawValue =
+  let k: bList..bSet = kind
+  RawValue(kind: k, mark: mark, children: s)
 
 # ================
 # Walkable

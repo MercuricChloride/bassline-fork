@@ -8,11 +8,10 @@ when not defined(js):
 const
   MaxDepth* {.intdefine.} = 64
   MaxValueBytes* {.intdefine.} = 100 * 1024 * 1024
-    ## default cap on what a decoder buffer for one value: a scalar
-    ## payload this large, or an unclosed frame that reaches this many
-    ## bytes, is refused rather than held. CE tops out at ~4.3GB; a
-    ## receiver draws the line lower at its boundary. Per-decoder
-    ## override via `newDecoder(maxValueBytes = …)`.
+    ## the most bytes a reader takes for one value: an atom that would
+    ## pass it, or a frame that reaches it before it closes, is refused
+    ## rather than held. CE tops out at ~4.3GB, so a receiver draws the
+    ## line lower at its boundary.
   MaxPayload* = uint32.high
   EndByte*: byte = 0xA0
   MarkBit*: byte = 0x08
@@ -225,7 +224,6 @@ func isValidUtf8*(bytes: openArray[byte]): bool =
     inc i
   state == UTF8_ACCEPT
 
-
 # ================
 # Stream Concepts
 # ================
@@ -248,67 +246,99 @@ type
 # Stream Reading
 # ================
 
-proc readAtom[T: Readable](self: Stream, val: var T): bool =
-  mixin null, atom
-  if self.atEnd: return
-  let startPos = self.getPosition
-  try:
-    var
-      headerByte: byte
-      med: uint8
-      large: array[4, uint8]
-      length: int
-    self.read(headerByte)
-    let (kind, mark, inlineLen) = headerData(headerByte)
-    length = inlineLen
-    if inlineLen == 7:
-      self.read(med)
-      guard med >= 7, "non minimal medium length"
-      length = med.int
-    if length == 255:
-      self.read(large)
-      length = 0
-      for i in 0..3:
-        length = (length shl 8) or int(large[i])
-      guard length >= 255, "non minimal large length"
-    if length > 0:
-      var bytes = newStringOfCap(length)
-      let bytesRead = self.readData(addr(bytes[0]), length)
-      guard bytesRead == bytes.len, "stream truncated"
-      val = T.atom(move bytes, kind, mark)
-    else:
-      val = T.atom("", kind, mark)
-    true
-  except:
-    self.setPosition(startPos)
-    raise
+type
+  OpenFrame[T] = object
+    kind: Kind
+    mark: bool
+    members: seq[T]
 
-proc readStream*[T: Readable](self: Stream, val: var T): bool =
+  Reader*[T] = object
+    ## Holds state for stream readers. This includes a stack
+    ## of open frames, the atom header & payloads, as well
+    ## as the last whole value read
+    open: seq[OpenFrame[T]]
+    head: array[6, byte]
+    headLen: int
+    payload: string
+    size: int
+    value*: T
+
+func initReader*[T](cap = MaxDepth): Reader[T] =
+  Reader[T](open: newSeqOfCap[OpenFrame[T]](cap))
+
+func starved*[T](r: Reader[T]): bool =
+  ## whether the bytes ran out inside a value rather than between two
+  r.open.len > 0 or r.headLen > 0
+
+proc readAtom[T: Readable](s: Stream, r: var Reader[T], val: var T, n: var int): bool =
+  ## the atom headed by r.head[0], or false when the bytes run out first
+  mixin atom
+  template fill(upTo: int) =
+    if r.headLen < upTo:
+      r.headLen += s.readData(addr r.head[r.headLen], upTo - r.headLen)
+      if r.headLen < upTo: return false
+  let (kind, mark, inlineLen) = headerData(r.head[0])
+  var length = inlineLen
+  if inlineLen == 7:
+    fill 2
+    length = r.head[1].int
+    guard length >= 7, "non minimal medium length"
+    if length == 255:
+      fill 6
+      length = 0
+      for i in 2..5:
+        length = (length shl 8) or r.head[i].int
+      guard length >= 255, "non minimal large length"
+  n = r.headLen + length
+  guard r.size + n <= MaxValueBytes, "value larger than MaxValueBytes"
+  let have = r.payload.len
+  if have < length:
+    r.payload.setLen length
+    let got = s.readData(addr r.payload[have], length - have)
+    r.payload.setLen have + got
+    if have + got < length: return false
+  val = T.atom(move r.payload, kind, mark)
+  true
+
+proc readStream*[T: Readable](s: Stream, r: var Reader[T]): bool =
+  ## reads on from where r stopped, answering true once a value was read
+  ## whole, storing it in r.value. Otherwise this returns false if it
+  ## is starved and can wait to resume without reading anything twice.
+  ## 
+  ## If invalid CE is read r is poisoned and won't produce anything
+  ## useful in the future
   mixin null, frame
-  if self.atEnd: return
-  let pos = self.getPosition
-  var headerByte: byte
-  self.peek(headerByte)
-  case partialKind(headerByte)
-  of pvNil:
-    let (_, mark, _) = headerData(headerByte)
-    self.setPosition(pos + 1)
-    val = T.null(mark)
-    return true
-  of pvCloseFrame:
-    self.setPosition(pos + 1)
-    return
-  of pvOpenFrame:
-    let (kind, mark, _) = headerData(headerByte)
-    self.setPosition(pos + 1)
-    var children = newSeqOfCap[T](10)
-    var child: T
-    while self.readStream(child):
-      children.add move(child)
-    val = T.frame(move children, kind, mark)
-    return true
-  of pvAtom:
-    return self.readAtom(val)
+  while true:
+    if r.headLen == 0:
+      if s.readData(addr r.head[0], 1) != 1: return false
+      r.headLen = 1
+    var
+      v: T
+      n = 1
+    case partialKind(r.head[0])
+    of pvOpenFrame:
+      guard r.open.len < MaxDepth, "frames nested deeper than MaxDepth"
+      let (kind, mark, _) = headerData(r.head[0])
+      r.open.add OpenFrame[T](kind: kind, mark: mark, members: newSeqOfCap[T](10))
+      r.headLen = 0
+      r.size += 1
+      continue
+    of pvCloseFrame:
+      guard r.open.len > 0, "end at top level"
+      var f = r.open.pop
+      v = T.frame(move f.members, f.kind, f.mark)
+    of pvNil:
+      v = T.null(headerData(r.head[0]).mark)
+    of pvAtom:
+      if not s.readAtom(r, v, n): return false
+    r.headLen = 0
+    r.size += n
+    guard r.size <= MaxValueBytes, "value larger than MaxValueBytes"
+    if r.open.len == 0:
+      r.size = 0
+      r.value = move v
+      return true
+    r.open[^1].members.add move v
 
 # ================
 # Stream Writing
