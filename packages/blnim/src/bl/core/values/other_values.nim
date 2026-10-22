@@ -1,7 +1,7 @@
 import std/[hashes, options]
-import ./[shared, codec]
-import ./codec/stream_decoder
-export sorted_table, codec, options
+import ../[shared, codec]
+import ./raw_values
+export sorted_table, options
 
 refuseWith BasslineError
 
@@ -116,6 +116,7 @@ proc toOtherValue*(view: sink RawValue): OtherValue =
 
 proc null*(T: typedesc[OtherValue], mark: bool): OtherValue =
   OtherValue(kind: bNil, mark: mark)
+
 proc atom*(T: typedesc[OtherValue], s: sink string, kind: Kind, mark: bool): OtherValue =
   let k: bNum..bBytes = kind
   case k
@@ -126,6 +127,7 @@ proc atom*(T: typedesc[OtherValue], s: sink string, kind: Kind, mark: bool): Oth
     OtherValue(kind: k, text: s, mark: mark)
   of bBytes:
     OtherValue(kind: k, bytes: s, mark: mark)
+
 proc frame*(T: typedesc[OtherValue], s: sink seq[OtherValue], kind: Kind, mark: bool): OtherValue =
   let k: bList..bSet = kind
   case k
@@ -146,3 +148,50 @@ proc frame*(T: typedesc[OtherValue], s: sink seq[OtherValue], kind: Kind, mark: 
     for i in 1 ..< s.len:
       guard s[i-1] < s[i], "set elements must be strictly ascending"
     OtherValue(kind: bSet, mark: mark, els: toSortedSet(s, sorted = true))
+
+# ================
+# Walkable
+# ================
+
+proc valid*(self: OtherValue): bool =
+  true
+
+proc kind*(self: OtherValue): Kind =
+  self.kind
+
+proc mark*(self: OtherValue): bool =
+  self.mark
+
+proc digits*(self: OtherValue): string =
+  $self.num
+
+proc payload*(self: OtherValue): lent string =
+  let k: bText..bBytes = self.kind
+  case k
+  of bText, bSym: 
+    return self.text
+  of bBytes:
+    return self.bytes
+
+iterator children*(self: OtherValue): lent OtherValue =
+  let k: bList..bSet = self.kind
+  case k
+  of bList, bRec: 
+    for v in self.items: yield v
+  of bDict:
+    for k, v in self.dict: yield k; yield v
+  of bSet: 
+    for v in self.els: yield v
+
+when isMainModule:
+  import std/streams
+  var 
+    str = readFile("/tmp/big-jam.blb")
+    strOut = newStringUninit(95269230)
+  var i = newStringStream(str)
+  let o = newStringStream(strOut)
+
+  var v: RawValue
+  while i.readStream(v):
+    v.validate
+    o.writeValue(v)

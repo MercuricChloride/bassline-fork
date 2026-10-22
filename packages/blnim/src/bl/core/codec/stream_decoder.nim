@@ -10,6 +10,14 @@ type
     proc atom(T: typedesc[Self], bytes: sink string, kind: Kind, mark: bool): Self
     proc frame(T: typedesc[Self], members: sink seq[Self], kind: Kind, mark: bool): Self
 
+  Walkable* = concept
+    proc valid(self: Self): bool
+    proc kind(self: Self): Kind
+    proc mark(self: Self): bool
+    proc digits(self: Self): string
+    proc payload(self: Self): string
+    iterator children(self: Self): Self
+
 proc readAtom[T: Readable](self: Stream, val: var T): bool =
   mixin null, atom
   if self.atEnd: return
@@ -74,142 +82,6 @@ proc readStream*[T: Readable](self: Stream, val: var T): bool =
   of pvAtom:
     return self.readAtom(val)
 
-type
-  RawValue* {.byref.} = object
-    mark, valid: bool
-    case kind: Kind
-      of bNil: discard
-      of bNum..bBytes:
-        bytes: string
-      else:
-        children: seq[RawValue]
-
-func len*(self: RawValue): int =
-  self.children.len
-
-func kind*(self: RawValue): auto =
-  self.kind
-
-func cmp*(a, b: RawValue): int =
-  template `??`(body) =
-    result = body
-    if result != 0: return
-  ?? cmp(a.kind, b.kind)
-  ?? cmp(a.mark, b.mark)
-  case a.kind
-  of bNil: discard
-  of bNum..bBytes:
-    ?? cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
-  of bList, bRec, bSet:
-    for i in 0..<min(a.len, b.len):
-      ?? cmp(a.children[i], b.children[i])
-    ?? cmp(b.len, a.len)
-  of bDict:
-    var i = 1
-    while i < min(a.len, b.len):
-      ?? cmp(a.children[i-1], b.children[i-1])
-      ?? cmp(a.children[i], b.children[i])
-      i.inc 2
-    ?? cmp(b.len, a.len)
-
-func `==`*(a, b: RawValue): bool =
-  cmp(a, b) == 0
-func `<`*(a, b: RawValue): bool =
-  cmp(a, b) < 0
-func `<=`*(a, b: RawValue): bool =
-  cmp(a, b) <= 0
-
-func validate*(self: var RawValue)
-
-proc null*(T: typedesc[RawValue], mark: bool): RawValue =
-  RawValue(kind: bNil, mark: mark)
-proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
-  let k: bNum..bBytes = kind
-  RawValue(kind: k, mark: mark, bytes: s)
-proc frame*(T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool): RawValue =
-  let k: bList..bSet = kind
-  RawValue(kind: k, mark: mark, children: s)
-
-func validate*(self: var RawValue) =
-  if self.valid: return
-  case self.kind
-  of bNil, bBytes: 
-    self.valid = true
-    return
-  of bNum: 
-    self.valid = isValidInt(self.bytes.toBytes)
-    return
-  of bText, bSym: 
-    self.valid = isValidUtf8(self.bytes.toBytes)
-    return
-  else: discard
-  
-  for v in self.children.mitems:
-    v.validate
-    if not v.valid: return
-
-  if self.kind == bDict:
-    var i=2
-    while i < self.len:
-      if self.children[i-2] < self.children[i]:
-        i.inc 2
-      else: return
-  elif self.kind == bSet:
-    var i=1
-    while i < self.len:
-      if self.children[i-1] < self.children[i]:
-        inc i
-      else: return
-      inc i
-  self.valid = true
-
-func encodedSize*(self: RawValue, total: var int) =
-  case self.kind
-  of bNil:
-    total += 1
-  of bNum..bBytes:
-    let len = self.bytes.len
-    case len:
-    of 0..6:
-      total += 1 + len
-    of 7..254:
-      total += 2 + len
-    else:
-      total += 5 + len
-  else:
-    total += 2
-    for each in self.children:
-      each.encodedSize(total)
-
-func encodedSize*(self: RawValue): int =
-  self.encodedSize(result)
-
-func mark*(self: RawValue): bool =
-  self.mark
-
-func payload*(self: sink RawValue): string =
-  move self.bytes
-
-iterator items*(self: RawValue): lent RawValue =
-  for each in self.children:
-    yield each
-
-iterator mitems*(self: sink RawValue): var RawValue =
-  for each in self.children.mitems:
-    yield each
-
-iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
-  var i = 1
-  while i < self.len:
-    yield (self.children[i-1], self.children[i])
-    i.inc 2
-
-iterator mpairs*(self: sink RawValue): (var RawValue, var RawValue) =
-  var i = 1
-  while i < self.len:
-    yield (self.children[i-1], self.children[i])
-    i.inc 2
-
 proc writeHeader(stream: Stream, kind: Kind, mark: bool, len: int) =
   let
     k: byte = kind.tag
@@ -224,28 +96,24 @@ proc writeHeader(stream: Stream, kind: Kind, mark: bool, len: int) =
     for shift in [24, 16, 8, 0]:
       stream.write byte((len shr shift) and 0xFF)
 
-proc writeScalar(self: RawValue, stream: Stream) =
-  guard self.bytes.len <= MaxPayload.int, "payload too large"
-  stream.writeHeader(self.kind, self.mark, self.bytes.len)
-  if self.bytes.len > 0:
-    stream.writeData(addr(self.bytes[0]), self.bytes.len)
+proc writeAtom(stream: Stream, kind: Kind, mark: bool, payload: string) =
+  guard payload.len <= MaxPayload.int:
+    echo "payload size: ", payload.len
+    "payload too large"
+  stream.writeHeader(kind, mark, payload.len)
+  stream.write payload
 
-proc writeValue*(self: RawValue, stream: Stream) =
-  doAssert not stream.atEnd
-  doAssert self.valid, "writing invalid value"
-  case self.kind
+proc writeValue*[T: Walkable](stream: Stream, val: T) =
+  doAssert val.valid, "writing invalid value"
+  case val.kind
   of bNil:
-    stream.writeHeader(bNil, self.mark, 0)
-  of bNum..bBytes:
-    self.writeScalar(stream)
+    stream.writeHeader(bNil, val.mark, 0)
+  of bNum:
+    stream.writeAtom(val.kind, val.mark, val.digits)
+  of bText..bBytes:
+    stream.writeAtom(val.kind, val.mark, val.payload)
   else:
-    stream.writeHeader(self.kind, self.mark, 0)
-    for child in self:
-      child.writeValue(stream)
+    stream.writeHeader(val.kind, val.mark, 0)
+    for child in val.children:
+      stream.writeValue(child)
     stream.write(EndByte)
-
-proc ce*(self: RawValue): string =
-  var str = newStringUninit(self.encodedSize)
-  let s = newStringStream(str)
-  self.writeValue(s)
-  ensureMove str
