@@ -1,11 +1,3 @@
-## The bassline textual syntax (data-model.org, "Textual Syntax") as a
-## grammar that builds whatever `Make` builds: values whose sets and dicts
-## hold their members in written order, for the pass in `values` to sort
-## and check, or plain objects for the editor. Numbers are kept as spelled
-## with the `_` separators removed, bytes as bytes, text and symbols
-## decoded. Only the syntax is checked here. Repeats and encodings are the
-## pass's business.
-
 import std/[algorithm, sequtils, strutils, sugar, streams]
 import petit_parser
 import ./ce
