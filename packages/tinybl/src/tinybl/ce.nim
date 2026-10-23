@@ -415,6 +415,9 @@ func basslineCmp*[T: Walkable](a, b: T): int =
       return
   ??cmp(a.kind, b.kind)
   ??cmp(a.mark, b.mark)
+  when compiles(sameContents(a, b)):
+    if sameContents(a, b):
+      return 0
   case a.kind
   of bNil:
     discard
@@ -442,6 +445,11 @@ template makeCmp*(T) =
   ## the type to avoid using shortlex `digits`
   ## for the comparison. `BNum` is a good type
   ## for this.
+  ##
+  ## A type that can tell cheaply when two values
+  ## hold the same contents, whatever their marks,
+  ## can implement `sameContents(a, b: T): bool`, and the
+  ## comparison skips the walk when it returns true.
   func cmp*(a, b: T): int =
     basslineCmp(a, b)
   func `==`*(a, b: T): bool =
