@@ -14,30 +14,50 @@ func len*(self: RawValue): int =
   of bNil .. bBytes: 0
   else: self.children.len
 
-func cmp*(a, b: RawValue): int =
-  template `??`(body) =
-    result = body
-    if result != 0:
-      return
+# ================
+# Readable
+# ================
 
-  ??cmp(a.kind, b.kind)
-  ??cmp(a.mark, b.mark)
-  case a.kind
-  of bNil:
-    discard
-  of bNum .. bBytes:
-    ??cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
-  of bList, bRec, bSet, bDict:
-    for i in 0 ..< min(a.len, b.len):
-      ??cmp(a.children[i], b.children[i])
-    ??cmp(b.len, a.len)
+proc null*(T: typedesc[RawValue], mark: bool): RawValue =
+  RawValue(kind: bNil, mark: mark)
 
-func `==`*(a, b: RawValue): bool =
-  cmp(a, b) == 0
-func `<`*(a, b: RawValue): bool =
-  cmp(a, b) < 0
-func `<=`*(a, b: RawValue): bool =
-  cmp(a, b) <= 0
+proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
+  let k: bNum .. bBytes = kind
+  RawValue(kind: k, mark: mark, bytes: s)
+
+proc frame*(
+    T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool
+): RawValue =
+  let k: bList .. bSet = kind
+  RawValue(kind: k, mark: mark, children: s)
+
+# ================
+# Walkable
+# ================
+
+proc valid*(self: RawValue): bool =
+  self.valid
+
+func kind*(self: RawValue): auto =
+  self.kind
+
+func mark*(self: RawValue): bool =
+  self.mark
+
+proc digits*(self: RawValue): lent string =
+  return self.bytes
+
+proc payload*(self: RawValue): lent string =
+  return self.bytes
+
+proc getChild*(self: RawValue, i: int): lent RawValue =
+  return self.children[i]
+
+iterator children*(self: RawValue): lent RawValue =
+  for each in self.children:
+    yield each
+
+makeCmp(RawValue)
 
 func validate*(self: var RawValue)
 
@@ -89,9 +109,6 @@ func validate*(self: var RawValue) {.raises: [].} =
         return
   self.valid = true
 
-func mark*(self: RawValue): bool =
-  self.mark
-
 func setMark*(self: var RawValue, mark: bool) =
   self.mark = mark
 
@@ -104,40 +121,3 @@ iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
   while i < self.len:
     yield (self.children[i - 1], self.children[i])
     i.inc 2
-
-# ================
-# Readable
-# ================
-
-proc null*(T: typedesc[RawValue], mark: bool): RawValue =
-  RawValue(kind: bNil, mark: mark)
-
-proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
-  let k: bNum .. bBytes = kind
-  RawValue(kind: k, mark: mark, bytes: s)
-
-proc frame*(
-    T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool
-): RawValue =
-  let k: bList .. bSet = kind
-  RawValue(kind: k, mark: mark, children: s)
-
-# ================
-# Walkable
-# ================
-
-proc valid*(self: RawValue): bool =
-  self.valid
-
-proc digits*(self: RawValue): string =
-  self.bytes
-
-proc payload*(self: RawValue): lent string =
-  return self.bytes
-
-iterator children*(self: RawValue): lent RawValue =
-  for each in self.children:
-    yield each
-
-func kind*(self: RawValue): auto =
-  self.kind

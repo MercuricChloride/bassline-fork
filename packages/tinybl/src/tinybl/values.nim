@@ -374,7 +374,7 @@ func cmpInts*(x, y: int): int =
 
 func cmpNums*(x, y: BNum): int =
   if x.isBig or y.isBig:
-    cmpShortlex(x.toString.toBytes, y.toString.toBytes)
+    cmpShortlex(x.toString, y.toString)
   else:
     cmpInts(x.toInt, y.toInt)
 
@@ -399,52 +399,84 @@ type ValueObj* = object
     els*: SortedSet[ValueObj]
   mark*: bool
 
+# ================
+# Editable
+# ================
+
+proc setMark*(self: var ValueObj, mark: bool) =
+  self.mark = mark
+
+# ================
+# Walkable
+# ================
+
+proc valid*(self: ValueObj): bool =
+  true
+
+proc kind*(self: ValueObj): Kind =
+  self.kind
+
+proc mark*(self: ValueObj): bool =
+  self.mark
+
+proc digits*(self: ValueObj): string =
+  $self.num
+
+proc payload*(self: ValueObj): lent string =
+  let k: bText .. bBytes = self.kind
+  case k
+  of bText, bSym:
+    return self.text
+  of bBytes:
+    return self.bytes
+
 func len*(self: ValueObj): int =
   case self.kind
-  of bList, bRec: self.items.len
-  of bDict: self.dict.len
-  of bSet: self.els.len
-  else: 0
-
-func cmp*(a, b: ValueObj): int =
-  template `??`(body) =
-    result = body
-    if result != 0:
-      return
-
-  ??cmp(a.kind, b.kind)
-  ??cmp(a.mark, b.mark)
-  case a.kind
-  of bNil:
-    discard
-  of bNum:
-    ??cmpNums(a.num, b.num)
-  of bText .. bSym:
-    ??cmpShortlex(a.text.toBytes, b.text.toBytes)
-  of bBytes:
-    ??cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
   of bList, bRec:
-    for i in 0 ..< min(a.len, b.len):
-      ??cmp(a.items[i], b.items[i])
-    ??cmp(b.len, a.len)
+    self.items.len
   of bDict:
-    for i in 0 ..< min(a.len, b.len):
-      ??cmp(a.dict.keys[i], b.dict.keys[i])
-      ??cmp(a.dict.vals[i], b.dict.vals[i])
-    ??cmp(b.len, a.len)
+    self.dict.len * 2
   of bSet:
-    for i in 0 ..< min(a.len, b.len):
-      ??cmp(a.els.data[i], b.els.data[i])
-    ??cmp(b.len, a.len)
+    self.els.len
+  else:
+    0
 
-func `==`*(a, b: ValueObj): bool =
-  cmp(a, b) == 0
+func getChild*(self: ValueObj, i: int): lent ValueObj =
+  case self.kind
+  of bList, bRec:
+    return self.items[i]
+  of bDict:
+    if i mod 2 == 0:
+      return self.dict.keys[i div 2]
+    else:
+      return self.dict.vals[i div 2]
+  of bSet:
+    return self.els.data[i]
+  else:
+    refuse("cannot get child from a non frame type")
 
-func `<`*(a, b: ValueObj): bool =
-  cmp(a, b) < 0
+iterator children*(self: ValueObj): lent ValueObj =
+  let k: bList .. bSet = self.kind
+  case k
+  of bList, bRec:
+    for v in self.items:
+      yield v
+  of bDict:
+    for k, v in self.dict:
+      yield k
+      yield v
+  of bSet:
+    for v in self.els:
+      yield v
 
-func `<=`*(a, b: ValueObj): bool =
-  cmp(a, b) <= 0
+func cmpNums*(a, b: ValueObj): int =
+  cmpNums(a.num, b.num)
+
+makeCmp(ValueObj)
+
+# ================
+# Readable
+# ================
 
 proc null*(T: typedesc[ValueObj], mark: bool): ValueObj =
   ValueObj(kind: bNil, mark: mark)
@@ -485,44 +517,3 @@ proc frame*(
     for i in 1 ..< s.len:
       guard s[i - 1] < s[i], "set elements must be strictly ascending"
     ValueObj(kind: bSet, mark: mark, els: toSortedSet(s, sorted = true))
-
-proc setMark*(self: var ValueObj, mark: bool) =
-  self.mark = mark
-
-# ================
-# Walkable
-# ================
-
-proc valid*(self: ValueObj): bool =
-  true
-
-proc kind*(self: ValueObj): Kind =
-  self.kind
-
-proc mark*(self: ValueObj): bool =
-  self.mark
-
-proc digits*(self: ValueObj): string =
-  $self.num
-
-proc payload*(self: ValueObj): lent string =
-  let k: bText .. bBytes = self.kind
-  case k
-  of bText, bSym:
-    return self.text
-  of bBytes:
-    return self.bytes
-
-iterator children*(self: ValueObj): lent ValueObj =
-  let k: bList .. bSet = self.kind
-  case k
-  of bList, bRec:
-    for v in self.items:
-      yield v
-  of bDict:
-    for k, v in self.dict:
-      yield k
-      yield v
-  of bSet:
-    for v in self.els:
-      yield v

@@ -25,6 +25,24 @@ proc unescaped(c: char): string =
   else:
     $c
 
+proc escaped(s: string, q: char): string =
+  ## the reader's escapes, \q \\ \n \t \r, so an atom is one line
+  result = newStringOfCap(s.len)
+  for c in s:
+    case c
+    of '\\':
+      result.add "\\\\"
+    of '\n':
+      result.add "\\n"
+    of '\t':
+      result.add "\\t"
+    of '\r':
+      result.add "\\r"
+    else:
+      if c == q:
+        result.add '\\'
+      result.add c
+
 proc quoted(q: char): TextParser[string] =
   let
     escape = (ch('\\') & chars($q & "\\ntr", "escape")).map(m => unescaped(m[1]))
@@ -143,6 +161,41 @@ proc basslineDocument*[V: Readable and Editable](): TextParser[seq[V]] =
   ## Any number of values, including none.
   basslineForm[V]().star.trim(space()).complete.resolve
 
+proc openChar(k: Kind): char =
+  case k
+  of bList:
+    '['
+  of bRec:
+    '('
+  of bDict, bSet:
+    '{'
+  else:
+    default(char)
+
+proc closeChar(k: Kind): char =
+  case k
+  of bList:
+    ']'
+  of bRec:
+    ')'
+  of bDict, bSet:
+    '}'
+  else:
+    default(char)
+
+func isBareSpelling*(s: string): bool =
+  ## whether a symbol may be spelled without quotes
+  if s.len == 0 or s == "nil":
+    return false
+  if s[0] in Digits:
+    return false
+  if s.len > 1 and s[0] == '-' and s[1] in Digits:
+    return false
+  for c in s:
+    if c in Delims or ord(c) < 0x20:
+      return false
+  true
+
 proc writeWalkable[T: Walkable](v: T, stream: StringStream) =
   mixin children
 
@@ -155,50 +208,49 @@ proc writeWalkable[T: Walkable](v: T, stream: StringStream) =
     stream.write("nil")
     writeMark(v)
   of bNum:
-    stream.write(v.payload)
+    stream.write(v.digits)
     writeMark(v)
   of bText:
     stream.write('"')
-    stream.write(v.payload)
+    stream.write(v.payload.escaped('"'))
     stream.write('"')
     writeMark(v)
   of bSym:
-    stream.write('\'')
-    stream.write(v.payload)
-    stream.write('\'')
+    let s = v.payload
+    if s.isBareSpelling:
+      stream.write s
+    else:
+      stream.write('\'')
+      stream.write(v.payload.escaped('\''))
+      stream.write('\'')
     writeMark(v)
   of bBytes:
     stream.write("0x")
     stream.write(v.payload.toHex)
     writeMark(v)
-  of bList:
+  of bList, bRec, bSet:
     writeMark(v)
-    stream.write('[')
-    for each in v.children:
-      writeWalkable(each, stream)
-    stream.write(']')
-  of bRec:
-    writeMark(v)
-    stream.write('(')
-    for each in v.children:
-      writeWalkable(each, stream)
-    stream.write(')')
+    stream.write(v.kind.openChar)
+    let hi = v.len - 1
+    for i in 0 .. hi:
+      writeWalkable(v.getChild(i), stream)
+      if i != hi:
+        stream.write(' ')
+    stream.write(v.kind.closeChar)
   of bDict:
     writeMark(v)
-    stream.write('{')
-    var i = 0
-    for each in v.children:
-      writeWalkable(each, stream)
-      if i mod 2 == 0:
-        stream.write(": ")
-      inc i
-    stream.write('}')
-  of bSet:
-    writeMark(v)
-    stream.write('{')
-    for each in v.children:
-      writeWalkable(each, stream)
-    stream.write('}')
+    stream.write(v.kind.openChar)
+    let hi = v.len - 1
+    for i in 0 .. hi:
+      writeWalkable(v.getChild(i), stream)
+      if i != hi:
+        if i mod 2 == 0:
+          stream.write(": ")
+        else:
+          stream.write(" ")
+    if v.len == 0:
+      stream.write(':')
+    stream.write(v.kind.closeChar)
 
 proc toBlText*[T: Walkable](self: T): string =
   var s = newStringStream()
@@ -222,7 +274,7 @@ when isMainModule:
   makePrintable ValueObj
 
   let text = """
-    {d c b a}
+    {}
   """
 
   let p = RawValue.parse(text)

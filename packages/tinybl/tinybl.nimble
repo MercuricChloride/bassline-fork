@@ -13,7 +13,7 @@ requires "benchy >= 0.1.0"
 requires "https://github.com/nim-lang/bigints"
 requires "https://github.com/Bassline-Org/petit-parser-nim"
 
-import std/[os, strutils]
+import std/os
 
 proc removeBinaries(dir: string) =
   for f in listFiles(dir):
@@ -26,4 +26,3 @@ proc removeBinaries(dir: string) =
 task clean, "remove the binaries nim c leaves beside tests/ and examples/":
   removeBinaries "tests"
   removeBinaries "examples"
-

@@ -135,10 +135,10 @@ func cmpBytes*(a, b: openArray[byte]): int =
         if r != 0: return r
   a.len - b.len
 
-func cmpShortlex*(x, y: openArray[byte]): int =
+func cmpShortlex*(x, y: string): int =
   result = cmp(x.len, y.len)
   if result != 0: return
-  result = cmpBytes(x, y)
+  result = cmpBytes(x.toBytes, y.toBytes)
 
 # ================
 # Int & utf8 validation
@@ -238,11 +238,26 @@ type
     proc setMark(self: var Self, mark: bool)
 
   Walkable* = concept
+    ## Walkable is a concept for an object
+    ## that supports traversal as though it
+    ## were an encoded bassline value with
+    ## correct ce structure.
+    ## 
+    ## payload & digits should return binary 
+    ## strings being the payload of an atom
+    ## 
+    ## children are the constituents of frames
+    ## and for dicts it is expected to alternate
+    ## K V K V
+    ## Same goes with getChild. foo.getChild(1) should
+    ## return the first key in the dict
     proc valid(self: Self): bool
     proc kind(self: Self): Kind
     proc mark(self: Self): bool
     proc digits(self: Self): string
     proc payload(self: Self): string
+    proc len(self: Self): int
+    proc getChild(self: Self, idx: int): Self
     iterator children(self: Self): Self
 
 # ================
@@ -384,6 +399,54 @@ proc writeStream*[T: Walkable](stream: Stream, val: T) =
 # ================
 # Walkable Derivations
 # ================
+
+func basslineCmp*[T: Walkable](a, b: T): int =
+  ## Implements a generic comparison that matches
+  ## CE comparison / memcmp for any `Walkable` type.
+  ## See `makeCmp` which will define the
+  ## comparison procs (`==`, `<`, `<=`) for a type
+  ## in terms of this.
+  template `??`(body) =
+    result = body
+    if result != 0:
+      return
+  ??cmp(a.kind, b.kind)
+  ??cmp(a.mark, b.mark)
+  case a.kind
+  of bNil:
+    discard
+  of bNum:
+    when compiles(cmpNums(a, b)):
+      ??cmpNums(a, b)
+    else:
+      ??cmpShortlex(a.digits, b.digits)
+  of bText .. bBytes:
+    ??cmpShortlex(a.payload, b.payload)
+  of bList, bRec, bSet, bDict:
+    for i in 0 ..< min(a.len, b.len):
+      ??cmp(a.getChild(i), b.getChild(i))
+    ??cmp(b.len, a.len)
+
+template makeCmp*(T) =
+  ## Defines comparison procs for a type in
+  ## terms of `basslineCmp` which implements
+  ## a comparison that's equivalent to memcmp
+  ## over CE bytes.
+  ## 
+  ## If the type isn't storing numbers as
+  ## a string / bytes, you should implement
+  ## `cmpNums(a, b: T)`: int which will allow
+  ## the type to avoid using shortlex `digits`
+  ## for the comparison. `BNum` is a good type
+  ## for this.
+  func cmp*(a, b: T): int =
+    basslineCmp(a, b)
+  func `==`*(a, b: T): bool =
+    cmp(a, b) == 0
+  func `<`*(a, b: T): bool =
+    cmp(a, b) < 0
+  func `<=`*(a, b: T): bool =
+    cmp(a, b) <= 0
 
 proc atomSize[T: Walkable](self: T): int =
   case self.kind
