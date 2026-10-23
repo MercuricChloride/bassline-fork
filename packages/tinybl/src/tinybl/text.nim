@@ -51,12 +51,14 @@ proc flat[V](entries: sink seq[(V, V)]): seq[V] =
     result.add move e[0]
     result.add move e[1]
 
-proc basslineValue*[V: Readable and Editable](
-    extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
+proc basslineValue*[V: Editable; B: Builder[V]](
+    builder: B, extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
 ): TextParser[V] =
-  ## One value, bare. `extensions` are tried before a symbol, and the
-  ## `reserved` words are never read as one.
-  mixin cmp
+  ## One value, bare, made by `builder`. `extensions` are tried before a
+  ## symbol, and the `reserved` words are never read as one.
+  mixin cmp, buildNull, buildAtom, buildFrame
+  # the parser keeps its own builder, shared by every part of it
+  var builder = builder
   let
     ws = space()
     value = undefined[string, V]("value")
@@ -68,20 +70,20 @@ proc basslineValue*[V: Readable and Editable](
     bytesTok = sequence((str("0x"), hexBody, ends))
       .flatten("bytes")
       .where(b => (b.len - 2 - b.count('_')) mod 2 == 0, "an even count of hex digits")
-      .map(b => V.atom(parseHexStr(b[2 .. ^1].replace("_", "")), bBytes, false))
+      .map(b => builder.buildAtom(parseHexStr(b[2 .. ^1].replace("_", "")), bBytes, false))
     numberStart = digit().skip / (ch('-') & digit()).skip
     digits = ch('0').skip / (between('1', '9') & (ch('_').optional & digit()).star).skip
     numberTok = sequence((ch('-').optional, digits, ends))
       .flatten("number")
       .where(n => n != "-0", "a number")
-      .map(n => V.atom(n.replace("_", ""), bNum, false))
-    nilTok = (str("nil") & ends).map(_ => V.null(false))
-    text = quoted('"').map((s: sink string) => V.atom(s, bText, false))
-    quotedSymbol = quoted('\'').map((s: sink string) => V.atom(s, bSym, false))
+      .map(n => builder.buildAtom(n.replace("_", ""), bNum, false))
+    nilTok = (str("nil") & ends).map(_ => builder.buildNull(false))
+    text = quoted('"').map((s: sink string) => builder.buildAtom(s, bText, false))
+    quotedSymbol = quoted('\'').map((s: sink string) => builder.buildAtom(s, bSym, false))
     bare = noneOf(Delims, "symbol character").plus.flatten("symbol")
     keyword = choice(reserved.map(w => (str(w) & ends).skip("'" & w & "'")))
     symbol = sequence((notAhead(numberStart), notAhead(keyword), bare)).pick(2).map(
-        (s: sink string) => V.atom(s, bSym, false)
+        (s: sink string) => builder.buildAtom(s, bSym, false)
       )
     rawAtom = choice(
       @[bytesTok, numberTok, nilTok, text, quotedSymbol] & extensions & @[symbol]
@@ -94,10 +96,10 @@ proc basslineValue*[V: Readable and Editable](
     )
 
     list = delimited(ch('['), ch(']').trim(ws), form.star).map(
-        (items: sink seq[V]) => V.frame(items, bList, false)
+        (items: sink seq[V]) => builder.buildFrame(items, bList, false)
       )
     record = delimited(ch('('), ch(')').trim(ws), form.plus).map(
-        (items: sink seq[V]) => V.frame(items, bRec, false)
+        (items: sink seq[V]) => builder.buildFrame(items, bRec, false)
       )
     colon = ch(':').trim(ws)
     entries = ((form & colon).pick(0) & form).star
@@ -116,7 +118,7 @@ proc basslineValue*[V: Readable and Editable](
           var es = r.take
           es.insert((move k, v.get), 0)
           es.sort((a, b) => cmp(a[0], b[0]))
-          succeed(V.frame(flat(es), bDict, false), r.pos)
+          succeed(builder.buildFrame(flat(es), bDict, false), r.pos)
         else:
           var r = members.parseOn(ctx.at(f.pos))
           if not r.isSuccess:
@@ -124,10 +126,10 @@ proc basslineValue*[V: Readable and Editable](
           var items = r.take
           items.insert(move k, 0)
           items.sort(cmp)
-          succeed(V.frame(items, bSet, false), r.pos)
+          succeed(builder.buildFrame(items, bSet, false), r.pos)
     )
-    emptyDict = colon.map(_ => V.frame(@[], bDict, false))
-    emptySet = epsilon[string, V](V.frame(@[], bSet, false))
+    emptyDict = colon.map(_ => builder.buildFrame(@[], bDict, false))
+    emptySet = epsilon[string, V](builder.buildFrame(@[], bSet, false))
     braces = delimited(ch('{'), ch('}').trim(ws), emptyDict / braced / emptySet)
     frame = list / record / braces
     markedFrame = (ch('!') & frame).pick(1).map(
@@ -139,19 +141,27 @@ proc basslineValue*[V: Readable and Editable](
   value.define(markedFrame / frame / atom)
   value
 
-proc basslineForm*[V: Readable and Editable](
-    extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
+proc basslineForm*[V: Editable; B: Builder[V]](
+    builder: B, extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
 ): TextParser[V] =
   ## One value and the space around it.
-  basslineValue(extensions, reserved).trim(space())
+  basslineValue(builder, extensions, reserved).trim(space())
 
-proc basslineParser*[V: Readable and Editable](): TextParser[V] =
+proc basslineParser*[V: Editable; B: Builder[V]](builder: B): TextParser[V] =
   ## Exactly one value.
-  basslineForm[V]().complete.resolve
+  basslineForm(builder).complete.resolve
 
-proc basslineDocument*[V: Readable and Editable](): TextParser[seq[V]] =
+proc basslineParser*[V: Editable](): TextParser[V] =
+  ## Exactly one value, of a type that builds itself.
+  basslineParser(ByType[V]())
+
+proc basslineDocument*[V: Editable; B: Builder[V]](builder: B): TextParser[seq[V]] =
   ## Any number of values, including none.
-  basslineForm[V]().star.trim(space()).complete.resolve
+  basslineForm(builder).star.trim(space()).complete.resolve
+
+proc basslineDocument*[V: Editable](): TextParser[seq[V]] =
+  ## Any number of values, including none, of a type that builds itself.
+  basslineDocument(ByType[V]())
 
 proc openChar(k: Kind): char =
   case k
@@ -249,11 +259,14 @@ proc toBlText*[T: Walkable](self: T): string =
   writeWalkable(self, s)
   move s.data
 
-proc parse*(T: typedesc[Walkable], s: string): T =
-  var
-    p = basslineParser[T]()
-    r = p.parse(s)
+proc parse*[V: Walkable; B: Builder[V]](builder: B, s: string): V =
+  ## the one value s spells, made by builder
+  var r = basslineParser(builder).parse(s)
   r.take
+
+proc parse*(T: typedesc[Walkable], s: string): T =
+  ## the one value s spells, of a type that builds itself
+  parse(ByType[T](), s)
 
 template makePrintable*(Ty) =
   proc `$`*(self: Ty): string =

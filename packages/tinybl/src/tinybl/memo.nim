@@ -193,11 +193,11 @@ func contains*(self: Memo, x: Memo): bool =
 # Readable
 # ================
 
-proc null*(T: typedesc[Memo], mark: bool): Memo =
+proc buildNull*(T: typedesc[Memo], mark: bool): Memo =
   let h = hash(bNil)
   Memo(node: kept(h, n, n.kind == bNil, Node(kind: bNil, hash: h)), mark: mark)
 
-proc atom*(T: typedesc[Memo], s: sink string, kind: Kind, mark: bool): Memo =
+proc buildAtom*(T: typedesc[Memo], s: sink string, kind: Kind, mark: bool): Memo =
   let k: bNum .. bBytes = kind
   case k
   of bNum:
@@ -237,7 +237,7 @@ proc made(k: bList .. bSet, h: Hash, s: sink seq[Memo]): Node =
   of bSet:
     Node(kind: bSet, hash: h, els: toSortedSet(s, sorted = true))
 
-proc frame*(T: typedesc[Memo], s: sink seq[Memo], kind: Kind, mark: bool): Memo =
+proc buildFrame*(T: typedesc[Memo], s: sink seq[Memo], kind: Kind, mark: bool): Memo =
   let k: bList .. bSet = kind
   case k
   of bList:
@@ -270,11 +270,11 @@ proc setMark*(self: var Memo, mark: bool) =
 
 proc memoize*[T: Walkable](self: sink T): Memo =
   case self.kind
-  of bNil: Memo.null(self.mark)
-  of bNum: Memo.atom(self.digits, bNum, self.mark)
-  of bText..bBytes: Memo.atom(self.payload, self.kind, self.mark)
+  of bNil: Memo.buildNull(self.mark)
+  of bNum: Memo.buildAtom(self.digits, bNum, self.mark)
+  of bText..bBytes: Memo.buildAtom(self.payload, self.kind, self.mark)
   else: 
     var items = newSeqOfCap[Memo](self.len)
     for each in self.children:
       items.add memoize(each)
-    Memo.frame(move items, self.kind, self.mark)
+    Memo.buildFrame(move items, self.kind, self.mark)

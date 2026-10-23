@@ -33,7 +33,7 @@ template refuseWith*(err) {.dirty.} =
     raise newException(err, msg)
 
   template guard(cond: untyped, msg: string) =
-    if not(cond):
+    if not (cond):
       refuse(msg)
 
 refuseWith CodecError
@@ -228,18 +228,21 @@ func isValidUtf8*(str: string): bool =
   str.toBytes.isValidUtf8
 
 # ================
-# Stream Concepts
+# Value / Stream Concepts
 # ================
 
 type
-  Readable* = concept
-    ## Readable is a concept for a type that supports
-    ## construction from a stream. Technically it's
-    ## more general than that, but that's what we use
-    ## it for.
-    proc null(T: typedesc[Self], mark: bool): Self
-    proc atom(T: typedesc[Self], bytes: sink string, kind: Kind, mark: bool): Self
-    proc frame(T: typedesc[Self], members: sink seq[Self], kind: Kind, mark: bool): Self
+  Builder*[T] = concept
+    ## Builder is a concept for whatever makes values of T
+    ## from the parts a reader produces. Atoms from their
+    ## payloads & frames from their members in order. A
+    ## builder may hold state of its own, but for stateless
+    ## builders, you can use ByType[T] which allows for
+    ## construction from the typedesc[T] itself.
+    ## TODO: Maybe make self be a var?
+    proc buildNull(self: Self, mark: bool): T
+    proc buildAtom(self: Self, bytes: sink string, kind: Kind, mark: bool): T
+    proc buildFrame(self: Self, members: sink seq[T], kind: Kind, mark: bool): T
 
   Editable* = concept
     proc setMark(self: var Self, mark: bool)
@@ -267,6 +270,22 @@ type
     proc getChild(self: Self, idx: int): Self
     iterator children(self: Self): Self
 
+  ByType*[T] = object
+    ## A builder for types that implement Builder[T] without
+    ## state and dispatch on the typedesc[T] itself
+
+proc buildNull*[T](self: ByType[T], mark: bool): T =
+  mixin buildNull
+  T.buildNull(mark)
+
+proc buildAtom*[T](self: ByType[T], bytes: sink string, kind: Kind, mark: bool): T =
+  mixin buildAtom
+  T.buildAtom(bytes, kind, mark)
+
+proc buildFrame*[T](self: ByType[T], members: sink seq[T], kind: Kind, mark: bool): T =
+  mixin buildFrame
+  T.buildFrame(members, kind, mark)
+
 # ================
 # Stream Reading
 # ================
@@ -277,7 +296,7 @@ type
     mark: bool
     members: seq[T]
 
-  Reader*[T] = object
+  Reader*[T,B] = object
     ## Holds state for stream readers. This includes a stack
     ## of open frames, the atom header & payloads, as well
     ## as the last whole value read
@@ -286,22 +305,30 @@ type
     headLen: int
     payload: string
     size: int
+    builder*: B
     value*: T
 
-func initReader*[T](cap = MaxDepth): Reader[T] =
-  Reader[T](open: newSeqOfCap[OpenFrame[T]](cap))
+  TypeReader*[T] = Reader[T, ByType[T]]
+    ## a reader for a type that builds itself
 
-func starved*[T](r: Reader[T]): bool =
+func initReader*[T; B: Builder[T]](builder: B, cap = MaxDepth): Reader[T, B] =
+  Reader[T, B](open: newSeqOfCap[OpenFrame[T]](cap), builder: builder)
+
+func starved*[T; B](r: Reader[T, B]): bool =
   ## whether the bytes ran out inside a value rather than between two
   r.open.len > 0 or r.headLen > 0
 
-proc readAtom[T: Readable](s: Stream, r: var Reader[T], val: var T, n: var int): bool =
+proc readAtom[T; B: Builder[T]](
+    s: Stream, r: var Reader[T,B], val: var T, n: var int
+): bool =
   ## the atom headed by r.head[0], or false when the bytes run out first
-  mixin atom
+  mixin buildAtom
   template fill(upTo: int) =
     if r.headLen < upTo:
       r.headLen += s.readData(addr r.head[r.headLen], upTo - r.headLen)
-      if r.headLen < upTo: return false
+      if r.headLen < upTo:
+        return false
+
   let (kind, mark, inlineLen) = headerData(r.head[0])
   var length = inlineLen
   if inlineLen == 7:
@@ -311,7 +338,7 @@ proc readAtom[T: Readable](s: Stream, r: var Reader[T], val: var T, n: var int):
     if length == 255:
       fill 6
       length = 0
-      for i in 2..5:
+      for i in 2 .. 5:
         length = (length shl 8) or r.head[i].int
       guard length >= 255, "non minimal large length"
   n = r.headLen + length
@@ -321,21 +348,23 @@ proc readAtom[T: Readable](s: Stream, r: var Reader[T], val: var T, n: var int):
     r.payload.setLen length
     let got = s.readData(addr r.payload[have], length - have)
     r.payload.setLen have + got
-    if have + got < length: return false
-  val = T.atom(move r.payload, kind, mark)
+    if have + got < length:
+      return false
+  val = r.builder.buildAtom(move r.payload, kind, mark)
   true
 
-proc readStream*[T: Readable](s: Stream, r: var Reader[T]): bool =
+proc readStream*[T;B: Builder[T]](s: Stream, r: var Reader[T,B]): bool =
   ## reads on from where r stopped, answering true once a value was read
   ## whole, storing it in r.value. Otherwise this returns false if it
   ## is starved and can wait to resume without reading anything twice.
   ## 
   ## If invalid CE is read r is poisoned and won't produce anything
   ## useful in the future
-  mixin null, frame
+  mixin buildNull, buildFrame
   while true:
     if r.headLen == 0:
-      if s.readData(addr r.head[0], 1) != 1: return false
+      if s.readData(addr r.head[0], 1) != 1:
+        return false
       r.headLen = 1
     var
       v: T
@@ -351,11 +380,12 @@ proc readStream*[T: Readable](s: Stream, r: var Reader[T]): bool =
     of pvCloseFrame:
       guard r.open.len > 0, "end at top level"
       var f = r.open.pop
-      v = T.frame(move f.members, f.kind, f.mark)
+      v = r.builder.buildFrame(move f.members, f.kind, f.mark)
     of pvNil:
-      v = T.null(headerData(r.head[0]).mark)
+      v = r.builder.buildNull(headerData(r.head[0]).mark)
     of pvAtom:
-      if not s.readAtom(r, v, n): return false
+      if not s.readAtom(r, v, n):
+        return false
     r.headLen = 0
     r.size += n
     guard r.size <= MaxValueBytes, "value larger than MaxValueBytes"
@@ -364,6 +394,11 @@ proc readStream*[T: Readable](s: Stream, r: var Reader[T]): bool =
       r.value = move v
       return true
     r.open[^1].members.add move v
+
+iterator readEach*[T;B: Builder[T]](
+    s: Stream, r: var Reader[T,B]): T {.closure.} =
+  while readStream(s, r):
+    yield r.value
 
 # ================
 # Stream Writing

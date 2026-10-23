@@ -18,14 +18,14 @@ func len*(self: RawValue): int =
 # Readable
 # ================
 
-proc null*(T: typedesc[RawValue], mark: bool): RawValue =
+proc buildNull*(T: typedesc[RawValue], mark: bool): RawValue =
   RawValue(kind: bNil, mark: mark)
 
-proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
+proc buildAtom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
   let k: bNum .. bBytes = kind
   RawValue(kind: k, mark: mark, bytes: s)
 
-proc frame*(
+proc buildFrame*(
     T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool
 ): RawValue =
   let k: bList .. bSet = kind

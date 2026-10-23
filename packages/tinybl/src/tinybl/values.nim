@@ -483,10 +483,10 @@ makePrintable(ValueObj)
 # Readable
 # ================
 
-proc null*(T: typedesc[ValueObj], mark: bool): ValueObj =
+proc buildNull*(T: typedesc[ValueObj], mark: bool): ValueObj =
   ValueObj(kind: bNil, mark: mark)
 
-proc atom*(T: typedesc[ValueObj], s: sink string, kind: Kind, mark: bool): ValueObj =
+proc buildAtom*(T: typedesc[ValueObj], s: sink string, kind: Kind, mark: bool): ValueObj =
   let k: bNum .. bBytes = kind
   case k
   of bNum:
@@ -497,7 +497,7 @@ proc atom*(T: typedesc[ValueObj], s: sink string, kind: Kind, mark: bool): Value
   of bBytes:
     ValueObj(kind: k, bytes: s, mark: mark)
 
-proc frame*(
+proc buildFrame*(
     T: typedesc[ValueObj], s: sink seq[ValueObj], kind: Kind, mark: bool
 ): ValueObj =
   let k: bList .. bSet = kind

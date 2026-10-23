@@ -8,7 +8,7 @@ import tinybl
 const Corpus = currentSourcePath().parentDir.parentDir.parentDir.parentDir / "corpus"
 
 var
-  r: Reader[ValueObj]
+  r: TypeReader[ValueObj]
   cases: seq[ValueObj]
 let s = newStringStream(readFile(Corpus / "corpus.blb"))
 while s.readStream(r): 
@@ -27,7 +27,7 @@ type Landed[T] = object
 proc land[T](bytes: string): Landed[T] =
   ## what reading bytes given in total lands, and how it ends
   let s = newStringStream(bytes)
-  var r: Reader[T]
+  var r: TypeReader[T]
   try:
     while s.readStream(r):
       when T is RawValue:
