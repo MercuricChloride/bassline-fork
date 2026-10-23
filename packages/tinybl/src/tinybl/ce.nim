@@ -144,18 +144,18 @@ func cmpShortlex*(x, y: string): int =
 # Int & utf8 validation
 # ================
 
-func isValidInt*(bytes: openArray[byte]): bool =
-  if bytes.len == 0: 
+func isValidInt*(str: string): bool =
+  if str.len == 0:
     return false
-  let start = if bytes[0] == '-'.byte: 1 else: 0
-  if bytes.len <= start:
+  let start = if str[0] == '-': 1 else: 0
+  if str.len <= start:
      # bare "-" refused
     return false
-  if bytes[start] == '0'.byte:
+  if str[start] == '0':
     if start != 0: return false
-    if bytes.len != 1: return false
-  for i in start ..< bytes.len:
-    if bytes[i].char notin {'0'..'9'}:
+    if str.len != 1: return false
+  for i in start ..< str.len:
+    if str[i] notin {'0'..'9'}:
       return false
   true
 
@@ -223,6 +223,9 @@ func isValidUtf8*(bytes: openArray[byte]): bool =
       return false
     inc i
   state == UTF8_ACCEPT
+
+func isValidUtf8*(str: string): bool =
+  str.toBytes.isValidUtf8
 
 # ================
 # Stream Concepts

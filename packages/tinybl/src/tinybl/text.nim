@@ -274,7 +274,7 @@ when isMainModule:
   makePrintable ValueObj
 
   let text = """
-    {}
+    (hello! bassline 0xdeadbeef)
   """
 
   let p = RawValue.parse(text)

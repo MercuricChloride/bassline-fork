@@ -70,7 +70,7 @@ func validate*(self: var RawValue) {.raises: [].} =
     return
   of bNum:
     # numbers must have minimal decimal encoding
-    self.valid = isValidInt(self.bytes.toBytes)
+    self.valid = isValidInt(self.bytes)
     return
   of bText, bSym:
     # text must be well formed utf8

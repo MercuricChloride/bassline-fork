@@ -1,7 +1,11 @@
 import std/algorithm
-import ./ce
+import ./[ce, text]
 
 refuseWith BasslineError
+
+# ================
+# Sorted Table
+# ================
 
 type
   Entry*[K, V] = tuple[key: K, val: V]
@@ -201,9 +205,9 @@ func low*[T](self: SortedSet[T]): lent T =
 func high*[T](self: SortedSet[T]): lent T =
   self.data[self.data.len - 1]
 
-# ================================================================
+# ================
 # BNum
-# ================================================================
+# ================
 
 import std/[options, strutils]
 import bigints
@@ -223,7 +227,7 @@ func initNum*(n: SomeInteger): BNum =
 
 func initNum*(s: string): BNum =
   ## s is a canonical spelling; past int64 it is held as it is spelled
-  guard isValidInt(s.toBytes), "not a canonical number: " & s
+  guard isValidInt(s), "not a canonical number: " & s
   try:
     BNum(isBig: false, small: parseBiggestInt(s))
   except ValueError:
@@ -473,6 +477,7 @@ func cmpNums*(a, b: ValueObj): int =
   cmpNums(a.num, b.num)
 
 makeCmp(ValueObj)
+makePrintable(ValueObj)
 
 # ================
 # Readable
