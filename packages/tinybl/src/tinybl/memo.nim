@@ -1,5 +1,6 @@
 import std/[hashes, tables]
 import ./[ce, text, values]
+export tables
 
 refuseWith BasslineError
 
@@ -15,6 +16,7 @@ type
     of bList, bRec: items: seq[Memo]
     of bDict: dict: SortedTable[Memo, Memo]
     of bSet: els: SortedSet[Memo]
+
   Node = ref NodeObj
   Memo* = object
     node: Node
@@ -33,15 +35,22 @@ proc `=destroy`(x: NodeObj) {.raises: [].} =
         bucket[].del i
         break
     emptied = bucket[].len == 0
-  if emptied: cache.del x.hash
+  if emptied:
+    cache.del x.hash
   {.cast(raises: []).}:
     case x.kind
-    of bNil: discard
-    of bNum: `=destroy`((addr x)[].num)
-    of bText .. bBytes: `=destroy`(x.payload)
-    of bList, bRec: `=destroy`(x.items)
-    of bDict: `=destroy`((addr x)[].dict)
-    of bSet: `=destroy`((addr x)[].els)
+    of bNil:
+      discard
+    of bNum:
+      `=destroy`((addr x)[].num)
+    of bText .. bBytes:
+      `=destroy`(x.payload)
+    of bList, bRec:
+      `=destroy`(x.items)
+    of bDict:
+      `=destroy`((addr x)[].dict)
+    of bSet:
+      `=destroy`((addr x)[].els)
 
 proc cached*(): int =
   ## how many nodes this thread's cache holds
@@ -71,43 +80,56 @@ template kept(h: Hash, n, fits, made: untyped): Node =
 func width(n: NodeObj): int =
   ## how many members n has in CE, a dict's keys and values each counted
   case n.kind
-  of bList, bRec: n.items.len
-  of bDict: 2 * n.dict.len
-  of bSet: n.els.len
-  else: 0
+  of bList, bRec:
+    n.items.len
+  of bDict:
+    2 * n.dict.len
+  of bSet:
+    n.els.len
+  else:
+    0
 
 func at(n: NodeObj, i: int): lent Memo =
   ## n's member at i in CE order, a dict's keys and values alternating
   case n.kind
-  of bList, bRec: 
+  of bList, bRec:
     return n.items[i]
-  of bDict: (if i mod 2 == 0: 
-    return n.dict.keys[i div 2] 
-  else: 
-    return n.dict.vals[i div 2])
-  of bSet: 
+  of bDict:
+    (
+      if i mod 2 == 0:
+        return n.dict.keys[i div 2]
+      else:
+        return n.dict.vals[i div 2]
+    )
+  of bSet:
     return n.els.data[i]
-  else: refuse("only a frame has members")
+  else:
+    refuse("only a frame has members")
 
 iterator members(n: NodeObj): lent Memo =
   case n.kind
   of bList, bRec:
-    for m in n.items: yield m
+    for m in n.items:
+      yield m
   of bDict:
     for i in 0 ..< n.dict.len:
       yield n.dict.keys[i]
       yield n.dict.vals[i]
   of bSet:
-    for m in n.els: yield m
-  else: discard
+    for m in n.els:
+      yield m
+  else:
+    discard
 
 func holds(n: NodeObj, s: seq[Memo]): bool =
   ## whether n's members are s, member for member. Members are kept
   ## before their frame, so equal members share nodes
-  if n.width != s.len: return false
+  if n.width != s.len:
+    return false
   var i = 0
   for m in n.members:
-    if m.node != s[i].node or m.mark != s[i].mark: return false
+    if m.node != s[i].node or m.mark != s[i].mark:
+      return false
     inc i
   true
 
@@ -115,15 +137,24 @@ func holds(n: NodeObj, s: seq[Memo]): bool =
 # Walkable
 # ================
 
-func valid*(self: Memo): bool = true
-func kind*(self: Memo): Kind = self.node.kind
-func mark*(self: Memo): bool = self.mark
-func payload*(self: Memo): lent string = self.node.payload
-func digits*(self: Memo): string = $self.node.num
-func num*(self: Memo): lent BNum = self.node.num
-func cmpNums*(a, b: Memo): int = cmpNums(a.node.num, b.node.num)
-func len*(self: Memo): int = self.node[].width
-func getChild*(self: Memo, i: int): lent Memo = self.node[].at(i)
+func valid*(self: Memo): bool =
+  true
+func kind*(self: Memo): Kind =
+  self.node.kind
+func mark*(self: Memo): bool =
+  self.mark
+func payload*(self: Memo): lent string =
+  self.node.payload
+func digits*(self: Memo): string =
+  $self.node.num
+func num*(self: Memo): lent BNum =
+  self.node.num
+func cmpNums*(a, b: Memo): int =
+  cmpNums(a.node.num, b.node.num)
+func len*(self: Memo): int =
+  self.node[].width
+func getChild*(self: Memo, i: int): lent Memo =
+  self.node[].at(i)
 
 iterator children*(self: Memo): lent Memo =
   for m in self.node[].members:
@@ -133,7 +164,8 @@ func sameContents*(a, b: Memo): bool =
   ## whether a and b are one node, so hold the same contents
   a.node == b.node
 
-func hash*(self: Memo): Hash = !$(self.node.hash !& hash(self.mark))
+func hash*(self: Memo): Hash =
+  !$(self.node.hash !& hash(self.mark))
 
 makeCmp(Memo)
 makePrintable(Memo)
@@ -141,11 +173,6 @@ makePrintable(Memo)
 # ================
 # Access
 # ================
-
-func `[]`*(self: Memo, i: int): lent Memo =
-  ## a list's or record's member at i
-  guard self.kind in {bList, bRec}, "only a list or a record is indexed"
-  self.node.items[i]
 
 func `[]`*(self: Memo, key: Memo): lent Memo =
   ## a dict's value for key, found by bisecting its keys
@@ -155,9 +182,12 @@ func `[]`*(self: Memo, key: Memo): lent Memo =
 func contains*(self: Memo, x: Memo): bool =
   ## whether a dict has x as a key, or a set as a member, found by bisecting
   case self.kind
-  of bDict: x in self.node.dict
-  of bSet: x in self.node.els
-  else: refuse("only a dict or a set is searched")
+  of bDict:
+    x in self.node.dict
+  of bSet:
+    x in self.node.els
+  else:
+    refuse("only a dict or a set is searched")
 
 # ================
 # Readable
@@ -170,17 +200,24 @@ proc null*(T: typedesc[Memo], mark: bool): Memo =
 proc atom*(T: typedesc[Memo], s: sink string, kind: Kind, mark: bool): Memo =
   let k: bNum .. bBytes = kind
   case k
-  of bNum: guard isValidInt(s), "invalid integer"
-  of bText, bSym: guard isValidUtf8(s), "invalid utf8 bytes"
-  of bBytes: discard
+  of bNum:
+    guard isValidInt(s), "invalid integer"
+  of bText, bSym:
+    guard isValidUtf8(s), "invalid utf8 bytes"
+  of bBytes:
+    discard
   let h = !$(hash(k) !& hash(s))
   case k
   of bNum:
     let v = initNum(s)
-    Memo(node: kept(h, n, n.kind == bNum and n.num == v, Node(kind: bNum, hash: h, num: v)), mark: mark)
+    Memo(
+      node: kept(h, n, n.kind == bNum and n.num == v, Node(kind: bNum, hash: h, num: v)),
+      mark: mark,
+    )
   of bText .. bBytes:
     Memo(
-      node: kept(h, n, n.kind == k and n.payload == s, Node(kind: k, hash: h, payload: s)),
+      node:
+        kept(h, n, n.kind == k and n.payload == s, Node(kind: k, hash: h, payload: s)),
       mark: mark,
     )
 
@@ -203,8 +240,10 @@ proc made(k: bList .. bSet, h: Hash, s: sink seq[Memo]): Node =
 proc frame*(T: typedesc[Memo], s: sink seq[Memo], kind: Kind, mark: bool): Memo =
   let k: bList .. bSet = kind
   case k
-  of bList: discard
-  of bRec: guard s.len > 0, "record must have a head"
+  of bList:
+    discard
+  of bRec:
+    guard s.len > 0, "record must have a head"
   of bDict:
     guard s.len mod 2 == 0, "dict cannot have stranded keys"
     for i in countup(2, s.len - 1, 2):
@@ -224,3 +263,18 @@ proc frame*(T: typedesc[Memo], s: sink seq[Memo], kind: Kind, mark: bool): Memo 
 
 proc setMark*(self: var Memo, mark: bool) =
   self.mark = mark
+
+# ================
+# Misc
+# ================
+
+proc memoize*[T: Walkable](self: sink T): Memo =
+  case self.kind
+  of bNil: Memo.null(self.mark)
+  of bNum: Memo.atom(self.digits, bNum, self.mark)
+  of bText..bBytes: Memo.atom(self.payload, self.kind, self.mark)
+  else: 
+    var items = newSeqOfCap[Memo](self.len)
+    for each in self.children:
+      items.add memoize(each)
+    Memo.frame(move items, self.kind, self.mark)

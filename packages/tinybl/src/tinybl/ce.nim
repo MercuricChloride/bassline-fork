@@ -233,10 +233,14 @@ func isValidUtf8*(str: string): bool =
 
 type
   Readable* = concept
+    ## Readable is a concept for a type that supports
+    ## construction from a stream. Technically it's
+    ## more general than that, but that's what we use
+    ## it for.
     proc null(T: typedesc[Self], mark: bool): Self
     proc atom(T: typedesc[Self], bytes: sink string, kind: Kind, mark: bool): Self
     proc frame(T: typedesc[Self], members: sink seq[Self], kind: Kind, mark: bool): Self
-    
+
   Editable* = concept
     proc setMark(self: var Self, mark: bool)
 
@@ -489,3 +493,13 @@ proc ce*[T: Walkable](self: T): string =
   let s = newStringStream(newStringUninit(self.encodedSize))
   s.writeStream(self)
   move s.data
+
+iterator walk*[T: Walkable](self: T): T {.closure.} =
+  mixin children
+  yield self
+  for child in self.children:
+    for each in walk(child):
+      yield each
+
+func `[]`*[T: Walkable](self: T, i: int): auto =
+  self.getChild(i)
