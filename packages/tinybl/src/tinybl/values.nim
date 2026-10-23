@@ -387,6 +387,7 @@ func cmpNums*(x, y: BNum): int =
 # ================
 
 type ValueObj* = object
+  mark*: bool
   case kind*: Kind
   of bNil: discard
   of bNum:
@@ -401,7 +402,6 @@ type ValueObj* = object
     dict*: SortedTable[ValueObj, ValueObj]
   of bSet:
     els*: SortedSet[ValueObj]
-  mark*: bool
 
 # ================
 # Editable
