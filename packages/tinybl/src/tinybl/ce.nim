@@ -233,6 +233,9 @@ type
     proc null(T: typedesc[Self], mark: bool): Self
     proc atom(T: typedesc[Self], bytes: sink string, kind: Kind, mark: bool): Self
     proc frame(T: typedesc[Self], members: sink seq[Self], kind: Kind, mark: bool): Self
+    
+  Editable* = concept
+    proc setMark(self: var Self, mark: bool)
 
   Walkable* = concept
     proc valid(self: Self): bool

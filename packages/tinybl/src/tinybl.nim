@@ -1,2 +1,2 @@
-import ./tinybl/[ce, raw, values]
-export ce, raw, values
+import ./tinybl/[ce, raw, values, text]
+export ce, raw, values, text

@@ -1,34 +1,36 @@
 import ./ce
 
-type
-  RawValue* {.byref.} = object
-    mark, valid: bool
-    case kind: Kind
-      of bNil: discard
-      of bNum..bBytes:
-        bytes: string
-      else:
-        children: seq[RawValue]
+type RawValue* {.byref.} = object
+  mark, valid: bool
+  case kind: Kind
+  of bNil: discard
+  of bNum .. bBytes:
+    bytes: string
+  else:
+    children: seq[RawValue]
 
 func len*(self: RawValue): int =
   case self.kind
-  of bNil..bBytes: 0
+  of bNil .. bBytes: 0
   else: self.children.len
 
 func cmp*(a, b: RawValue): int =
   template `??`(body) =
     result = body
-    if result != 0: return
-  ?? cmp(a.kind, b.kind)
-  ?? cmp(a.mark, b.mark)
+    if result != 0:
+      return
+
+  ??cmp(a.kind, b.kind)
+  ??cmp(a.mark, b.mark)
   case a.kind
-  of bNil: discard
-  of bNum..bBytes:
-    ?? cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
+  of bNil:
+    discard
+  of bNum .. bBytes:
+    ??cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
   of bList, bRec, bSet, bDict:
-    for i in 0..<min(a.len, b.len):
-      ?? cmp(a.children[i], b.children[i])
-    ?? cmp(b.len, a.len)
+    for i in 0 ..< min(a.len, b.len):
+      ??cmp(a.children[i], b.children[i])
+    ??cmp(b.len, a.len)
 
 func `==`*(a, b: RawValue): bool =
   cmp(a, b) == 0
@@ -39,49 +41,59 @@ func `<=`*(a, b: RawValue): bool =
 
 func validate*(self: var RawValue)
 
-func validate*(self: var RawValue) {.raises: [] } =
-  if self.valid: return
+func validate*(self: var RawValue) {.raises: [].} =
+  if self.valid:
+    return
   case self.kind
-  of bNil, bBytes: 
+  of bNil, bBytes:
     self.valid = true
     return
   of bNum:
     # numbers must have minimal decimal encoding
     self.valid = isValidInt(self.bytes.toBytes)
     return
-  of bText, bSym: 
+  of bText, bSym:
     # text must be well formed utf8
     self.valid = isValidUtf8(self.bytes.toBytes)
     return
-  else: discard
+  else:
+    discard
 
   for v in self.children.mitems:
     v.validate
-    if not v.valid: return
+    if not v.valid:
+      return
 
   if self.kind == bRec:
     # records can't be empty
-    if self.len == 0: return
+    if self.len == 0:
+      return
   elif self.kind == bDict:
     # no stranded keys for dicts
-    if not(self.len mod 2 == 0): return
-    var i=2
+    if not (self.len mod 2 == 0):
+      return
+    var i = 2
     while i < self.len:
       # dict keys must be strictly ascending
-      if self.children[i-2] < self.children[i]:
+      if self.children[i - 2] < self.children[i]:
         i.inc 2
-      else: return
+      else:
+        return
   elif self.kind == bSet:
-    var i=1
+    var i = 1
     while i < self.len:
       # set elements must be strictly ascending
-      if self.children[i-1] < self.children[i]:
+      if self.children[i - 1] < self.children[i]:
         inc i
-      else: return
+      else:
+        return
   self.valid = true
 
 func mark*(self: RawValue): bool =
   self.mark
+
+func setMark*(self: var RawValue, mark: bool) =
+  self.mark = mark
 
 iterator items*(self: RawValue): lent RawValue =
   for each in self.children:
@@ -90,7 +102,7 @@ iterator items*(self: RawValue): lent RawValue =
 iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
   var i = 1
   while i < self.len:
-    yield (self.children[i-1], self.children[i])
+    yield (self.children[i - 1], self.children[i])
     i.inc 2
 
 # ================
@@ -101,11 +113,13 @@ proc null*(T: typedesc[RawValue], mark: bool): RawValue =
   RawValue(kind: bNil, mark: mark)
 
 proc atom*(T: typedesc[RawValue], s: sink string, kind: Kind, mark: bool): RawValue =
-  let k: bNum..bBytes = kind
+  let k: bNum .. bBytes = kind
   RawValue(kind: k, mark: mark, bytes: s)
 
-proc frame*(T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool): RawValue =
-  let k: bList..bSet = kind
+proc frame*(
+    T: typedesc[RawValue], s: sink seq[RawValue], kind: Kind, mark: bool
+): RawValue =
+  let k: bList .. bSet = kind
   RawValue(kind: k, mark: mark, children: s)
 
 # ================

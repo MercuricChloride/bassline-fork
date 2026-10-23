@@ -4,37 +4,44 @@ import ./ce
 refuseWith BasslineError
 
 type
-  Entry*[K,V] = tuple[key:K, val:V]
-  Pair*[T] = Entry[T,T]
+  Entry*[K, V] = tuple[key: K, val: V]
+  Pair*[T] = Entry[T, T]
   SortedTable*[K, V] = object
     keys: seq[K]
     vals: seq[V]
 
-func keys*[K,V](self: SortedTable[K,V]): lent seq[K] =
+func keys*[K, V](self: SortedTable[K, V]): lent seq[K] =
   self.keys
 
-func vals*[K,V](self: SortedTable[K,V]): lent seq[V] =
+func vals*[K, V](self: SortedTable[K, V]): lent seq[V] =
   self.vals
 
-func toSortedTable*[K,V](keys: sink seq[K], vals: sink seq[V], sorted = false): SortedTable[K, V] =
+func toSortedTable*[K, V](
+    keys: sink seq[K], vals: sink seq[V], sorted = false
+): SortedTable[K, V] =
   mixin cmp
   guard keys.len == vals.len, "a value for every key"
   if sorted:
-    return SortedTable[K,V](keys: keys, vals: vals)
+    return SortedTable[K, V](keys: keys, vals: vals)
   var
     ks = keys
     vs = vals
     order = newSeq[int](ks.len)
   for i in 0 ..< order.len:
     order[i] = i
-  order.sort(proc (a, b: int): int = cmp(ks[a], ks[b]))
+  order.sort(
+    proc(a, b: int): int =
+      cmp(ks[a], ks[b])
+  )
   result.keys = newSeqOfCap[K](ks.len)
   result.vals = newSeqOfCap[V](vs.len)
   for i in order:
     result.keys.add move(ks[i])
     result.vals.add move(vs[i])
 
-func toSortedTable*[K,V](self: openArray[Entry[K,V]], sorted = false): SortedTable[K, V] =
+func toSortedTable*[K, V](
+    self: openArray[Entry[K, V]], sorted = false
+): SortedTable[K, V] =
   var
     keys = newSeqOfCap[K](self.len)
     vals = newSeqOfCap[V](self.len)
@@ -43,18 +50,18 @@ func toSortedTable*[K,V](self: openArray[Entry[K,V]], sorted = false): SortedTab
     vals.add e.val
   toSortedTable(move keys, move vals, sorted)
 
-func lowerIdx[K,V](self: SortedTable[K,V], key: K): int =
+func lowerIdx[K, V](self: SortedTable[K, V], key: K): int =
   ## the first index whose key is not below key
   mixin cmp
   self.keys.lowerBound(key, cmp)
 
-func indexOf*[K,V](self: SortedTable[K, V], key: K): int =
+func indexOf*[K, V](self: SortedTable[K, V], key: K): int =
   ## key's index, or -1 when it has none
   mixin cmp
   let i = self.lowerIdx(key)
   if i < self.keys.len and cmp(self.keys[i], key) == 0: i else: -1
 
-func put*[K,V](self: var SortedTable[K, V], key: sink K, val: sink V) =
+func put*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   mixin cmp
   let i = self.lowerIdx(key)
   if i < self.keys.len and cmp(self.keys[i], key) == 0:
@@ -63,32 +70,32 @@ func put*[K,V](self: var SortedTable[K, V], key: sink K, val: sink V) =
     self.keys.insert(key, i)
     self.vals.insert(val, i)
 
-func delete*[K,V](self: var SortedTable[K,V], key: K) =
+func delete*[K, V](self: var SortedTable[K, V], key: K) =
   let i = self.indexOf(key)
   if i != -1:
     self.keys.delete(i)
     self.vals.delete(i)
 
-func get*[K,V](self: SortedTable[K,V], key: K): lent V =
+func get*[K, V](self: SortedTable[K, V], key: K): lent V =
   let i = self.indexOf(key)
   if i == -1:
     raise newException(KeyError, "key not found")
   self.vals[i]
 
-func len*[K,V](self: SortedTable[K,V]): Natural =
+func len*[K, V](self: SortedTable[K, V]): Natural =
   self.keys.len
 
-func low*[K,V](self: SortedTable[K,V]): lent K =
+func low*[K, V](self: SortedTable[K, V]): lent K =
   self.keys[0]
 
-func high*[K,V](self: SortedTable[K,V]): lent K =
+func high*[K, V](self: SortedTable[K, V]): lent K =
   self.keys[self.keys.len - 1]
 
 # ================
 # Table Sugar
 # ================
 
-func getOrPut*[K,V](self: var SortedTable[K,V], key: K, val: sink V): lent V =
+func getOrPut*[K, V](self: var SortedTable[K, V], key: K, val: sink V): lent V =
   mixin cmp
   let i = self.lowerIdx(key)
   if i == self.keys.len or cmp(self.keys[i], key) != 0:
@@ -96,34 +103,36 @@ func getOrPut*[K,V](self: var SortedTable[K,V], key: K, val: sink V): lent V =
     self.vals.insert(val, i)
   self.vals[i]
 
-func getOr*[K,V](self: SortedTable[K,V], key: K, val: V): V =
+func getOr*[K, V](self: SortedTable[K, V], key: K, val: V): V =
   let i = self.indexOf(key)
-  if i == -1: val else: self.vals[i]
+  if i == -1:
+    val
+  else:
+    self.vals[i]
 
-func contains*[K,V](self: SortedTable[K,V], key: K): bool =
+func contains*[K, V](self: SortedTable[K, V], key: K): bool =
   self.indexOf(key) != -1
 
-iterator items*[K,V](self: SortedTable[K,V]): lent V =
+iterator items*[K, V](self: SortedTable[K, V]): lent V =
   for v in self.vals:
     yield v
 
-iterator pairs*[K,V](self: SortedTable[K,V]): Entry[lent K, lent V] =
+iterator pairs*[K, V](self: SortedTable[K, V]): Entry[lent K, lent V] =
   for i in 0 ..< self.keys.len:
     yield (self.keys[i], self.vals[i])
 
-func `[]`*[K,V](self: SortedTable[K,V], key: K): lent V =
+func `[]`*[K, V](self: SortedTable[K, V], key: K): lent V =
   self.get(key)
 
-func `[]=`*[K,V](self: var SortedTable[K,V], key: sink K, val: sink V) =
+func `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   self.put(key, val)
 
 # ================
 # Sorted Set
 # ================
 
-type
-  SortedSet*[T] {.byref.} = object
-    data: seq[T]
+type SortedSet*[T] {.byref.} = object
+  data: seq[T]
 
 func toSortedSet*[T](self: openArray[T], sorted = false): SortedSet[T] =
   mixin cmp
@@ -157,7 +166,8 @@ func contains*[T](self: SortedSet[T], val: T): bool =
 func incl*[T](self: var SortedSet[T], val: sink T) =
   mixin cmp
   let i = self.lowerIdx(val)
-  if i < self.data.len and cmp(self.data[i], val) == 0: return
+  if i < self.data.len and cmp(self.data[i], val) == 0:
+    return
   self.data.insert(val, i)
 
 func excl*[T](self: var SortedSet[T], val: T) =
@@ -167,15 +177,20 @@ func excl*[T](self: var SortedSet[T], val: T) =
 
 func getOr*[T](self: SortedSet[T], a, b: T): T =
   let i = self.indexOf(a)
-  if i == -1: b else: self.data[i]
+  if i == -1:
+    b
+  else:
+    self.data[i]
 
 iterator items*[T](self: SortedSet[T]): lent T =
   for e in self.data:
     yield e
 
 func `[]=`*[T](self: var SortedSet[T], val: sink T, included: bool) =
-  if included: self.incl val
-  else: self.excl val
+  if included:
+    self.incl val
+  else:
+    self.excl val
 
 func len*[T](self: SortedSet[T]): Natural =
   self.data.len
@@ -186,25 +201,24 @@ func low*[T](self: SortedSet[T]): lent T =
 func high*[T](self: SortedSet[T]): lent T =
   self.data[self.data.len - 1]
 
-# ================
+# ================================================================
 # BNum
-# ================
+# ================================================================
 
 import std/[options, strutils]
 import bigints
 
-type
-  BNum* = object
-    case isBig*: bool
-    of false:
-      small*: int
-    of true:
-      big*: BigInt
+type BNum* = object
+  case isBig*: bool
+  of false:
+    small*: int
+  of true:
+    big*: BigInt
 
-func initNum*(n: BigInt): BNum = 
+func initNum*(n: BigInt): BNum =
   BNum(isBig: true, big: n)
 
-func initNum*(n: SomeInteger): BNum = 
+func initNum*(n: SomeInteger): BNum =
   BNum(isBig: false, small: n.int)
 
 func initNum*(s: string): BNum =
@@ -221,16 +235,20 @@ converter toNum*(n: SomeInteger): BNum =
 converter toNum*(n: BigInt): BNum =
   initNum(n)
 
-func `'num`*(s: string): BNum = 
+func `'num`*(s: string): BNum =
   initNum(s)
 
-func isBig*(n: BNum): bool = n.isBig
+func isBig*(n: BNum): bool =
+  n.isBig
 
 func grow*(n: BNum): BNum =
-  if n.isBig: n
-  else: initNum(initBigInt(n.small))
+  if n.isBig:
+    n
+  else:
+    initNum(initBigInt(n.small))
 
-func isInt*(n: BNum): bool = not n.isBig
+func isInt*(n: BNum): bool =
+  not n.isBig
 
 func toInt*(n: BNum): int =
   if n.isBig:
@@ -241,7 +259,10 @@ func toInt*(n: BNum): int =
     n.small
 
 func toString*(n: BNum): string =
-  if n.isBig: $n.big else: $n.small
+  if n.isBig:
+    $n.big
+  else:
+    $n.small
 
 func `$`*(n: BNum): string =
   n.toString
@@ -262,7 +283,7 @@ template binary(op, T) =
       try:
         lift(a, b, op)
       except OverflowDefect:
-        let 
+        let
           x = a.grow
           y = b.grow
         lift(x, y, op)
@@ -308,20 +329,24 @@ iterator `..<`*(a, b: BNum): BNum =
 
 func magnitude*(x: int): uint64 =
   ## |x| without the abs(int.low) overflow
-  if x < 0: uint64(-(x + 1)) + 1
-  else: uint64(x)
+  if x < 0:
+    uint64(-(x + 1)) + 1
+  else:
+    uint64(x)
 
 func abs*(n: BNum): BNum =
-  if n.isBig: 
+  if n.isBig:
     initNum(n.big.abs)
   else:
     let x = n.small
-    if x < 0: initNum(x.magnitude)
-    else: n
+    if x < 0:
+      initNum(x.magnitude)
+    else:
+      n
 
 func spellingLen*(n: BNum): int =
   ## how many characters $n would take up
-  if n < 0'num: 
+  if n < 0'num:
     inc result
   if n.isBig:
     # NOTE: bigints does a fast estimation for the size of the string here
@@ -339,7 +364,8 @@ func cmpInts*(x, y: int): int =
   ## ascii shortlex over the decimal strings
   ## without making them strings
   result = cmp(spellingLen(x), spellingLen(y))
-  if result != 0: return
+  if result != 0:
+    return
   let nx = x < 0
   let ny = y < 0
   if nx != ny:
@@ -356,61 +382,60 @@ func cmpNums*(x, y: BNum): int =
 # Value Object
 # ================
 
-type
-  ValueObj* = object
-    case kind*: Kind
-    of bNil: discard
-    of bNum:
-      num*: BNum
-    of bText, bSym:
-      text*: string
-    of bBytes:
-      bytes*: string
-    of bList, bRec:
-      items*: seq[ValueObj]
-    of bDict:
-      dict*: SortedTable[ValueObj, ValueObj]
-    of bSet:
-      els*: SortedSet[ValueObj]
-    mark*: bool
+type ValueObj* = object
+  case kind*: Kind
+  of bNil: discard
+  of bNum:
+    num*: BNum
+  of bText, bSym:
+    text*: string
+  of bBytes:
+    bytes*: string
+  of bList, bRec:
+    items*: seq[ValueObj]
+  of bDict:
+    dict*: SortedTable[ValueObj, ValueObj]
+  of bSet:
+    els*: SortedSet[ValueObj]
+  mark*: bool
 
 func len*(self: ValueObj): int =
   case self.kind
-  of bList, bRec:
-    self.items.len
-  of bDict:
-    self.dict.len
-  of bSet:
-    self.els.len
+  of bList, bRec: self.items.len
+  of bDict: self.dict.len
+  of bSet: self.els.len
   else: 0
 
 func cmp*(a, b: ValueObj): int =
   template `??`(body) =
     result = body
-    if result != 0: return
-  ?? cmp(a.kind, b.kind)
-  ?? cmp(a.mark, b.mark)
+    if result != 0:
+      return
+
+  ??cmp(a.kind, b.kind)
+  ??cmp(a.mark, b.mark)
   case a.kind
-  of bNil: discard
+  of bNil:
+    discard
   of bNum:
-    ?? cmpNums(a.num, b.num)
-  of bText..bSym:
-    ?? cmpShortlex(a.text.toBytes, b.text.toBytes)
+    ??cmpNums(a.num, b.num)
+  of bText .. bSym:
+    ??cmpShortlex(a.text.toBytes, b.text.toBytes)
   of bBytes:
-    ?? cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
+    ??cmpShortlex(a.bytes.toBytes, b.bytes.toBytes)
   of bList, bRec:
-    for i in 0..<min(a.len, b.len):
-      ?? cmp(a.items[i], b.items[i])
-    ?? cmp(b.len, a.len)
+    for i in 0 ..< min(a.len, b.len):
+      ??cmp(a.items[i], b.items[i])
+    ??cmp(b.len, a.len)
   of bDict:
-    for i in 0..<min(a.len, b.len):
-      ?? cmp(a.dict.keys[i], b.dict.keys[i])
-      ?? cmp(a.dict.vals[i], b.dict.vals[i])
-    ?? cmp(b.len, a.len)
+    for i in 0 ..< min(a.len, b.len):
+      ??cmp(a.dict.keys[i], b.dict.keys[i])
+      ??cmp(a.dict.vals[i], b.dict.vals[i])
+    ??cmp(b.len, a.len)
   of bSet:
-    for i in 0..<min(a.len, b.len):
-      ?? cmp(a.els.data[i], b.els.data[i])
-    ?? cmp(b.len, a.len)
+    for i in 0 ..< min(a.len, b.len):
+      ??cmp(a.els.data[i], b.els.data[i])
+    ??cmp(b.len, a.len)
 
 func `==`*(a, b: ValueObj): bool =
   cmp(a, b) == 0
@@ -425,7 +450,7 @@ proc null*(T: typedesc[ValueObj], mark: bool): ValueObj =
   ValueObj(kind: bNil, mark: mark)
 
 proc atom*(T: typedesc[ValueObj], s: sink string, kind: Kind, mark: bool): ValueObj =
-  let k: bNum..bBytes = kind
+  let k: bNum .. bBytes = kind
   case k
   of bNum:
     ValueObj(kind: k, num: initNum(s), mark: mark)
@@ -435,11 +460,13 @@ proc atom*(T: typedesc[ValueObj], s: sink string, kind: Kind, mark: bool): Value
   of bBytes:
     ValueObj(kind: k, bytes: s, mark: mark)
 
-proc frame*(T: typedesc[ValueObj], s: sink seq[ValueObj], kind: Kind, mark: bool): ValueObj =
-  let k: bList..bSet = kind
+proc frame*(
+    T: typedesc[ValueObj], s: sink seq[ValueObj], kind: Kind, mark: bool
+): ValueObj =
+  let k: bList .. bSet = kind
   case k
   of bList, bRec:
-    if k==bRec:
+    if k == bRec:
       guard s.len > 0, "record must have a head"
     ValueObj(kind: k, mark: mark, items: s)
   of bDict:
@@ -450,13 +477,17 @@ proc frame*(T: typedesc[ValueObj], s: sink seq[ValueObj], kind: Kind, mark: bool
     for i in countup(0, s.len - 1, 2):
       guard keys.len == 0 or keys[^1] < s[i], "dict keys must be strictly ascending"
       keys.add move s[i]
-      vals.add move s[i+1]
-    ValueObj(kind: bDict, mark: mark,
-      dict: toSortedTable(move keys, move vals, sorted = true))
+      vals.add move s[i + 1]
+    ValueObj(
+      kind: bDict, mark: mark, dict: toSortedTable(move keys, move vals, sorted = true)
+    )
   of bSet:
     for i in 1 ..< s.len:
-      guard s[i-1] < s[i], "set elements must be strictly ascending"
+      guard s[i - 1] < s[i], "set elements must be strictly ascending"
     ValueObj(kind: bSet, mark: mark, els: toSortedSet(s, sorted = true))
+
+proc setMark*(self: var ValueObj, mark: bool) =
+  self.mark = mark
 
 # ================
 # Walkable
@@ -475,19 +506,23 @@ proc digits*(self: ValueObj): string =
   $self.num
 
 proc payload*(self: ValueObj): lent string =
-  let k: bText..bBytes = self.kind
+  let k: bText .. bBytes = self.kind
   case k
-  of bText, bSym: 
+  of bText, bSym:
     return self.text
   of bBytes:
     return self.bytes
 
 iterator children*(self: ValueObj): lent ValueObj =
-  let k: bList..bSet = self.kind
+  let k: bList .. bSet = self.kind
   case k
-  of bList, bRec: 
-    for v in self.items: yield v
+  of bList, bRec:
+    for v in self.items:
+      yield v
   of bDict:
-    for k, v in self.dict: yield k; yield v
-  of bSet: 
-    for v in self.els: yield v
+    for k, v in self.dict:
+      yield k
+      yield v
+  of bSet:
+    for v in self.els:
+      yield v
