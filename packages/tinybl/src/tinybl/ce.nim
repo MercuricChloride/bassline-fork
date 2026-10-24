@@ -305,14 +305,21 @@ type
     headLen: int
     payload: string
     size: int
+    frameCap: int
     builder*: B
     value*: T
 
   TypeReader*[T] = Reader[T, ByType[T]]
     ## a reader for a type that builds itself
 
-func initReader*[T; B: Builder[T]](builder: B, cap = MaxDepth): Reader[T, B] =
-  Reader[T, B](open: newSeqOfCap[OpenFrame[T]](cap), builder: builder)
+const DefaultFrameCap* {.intdefine.} = 3
+
+func initReader*[T; B: Builder[T]](
+    builder: B, cap = MaxDepth, frameCap = DefaultFrameCap
+): Reader[T, B] =
+  Reader[T, B](
+    open: newSeqOfCap[OpenFrame[T]](cap), builder: builder, frameCap: frameCap
+  )
 
 func starved*[T; B](r: Reader[T, B]): bool =
   ## whether the bytes ran out inside a value rather than between two
@@ -372,8 +379,10 @@ proc readStream*[T;B: Builder[T]](s: Stream, r: var Reader[T,B]): bool =
     case partialKind(r.head[0])
     of pvOpenFrame:
       guard r.open.len < MaxDepth, "frames nested deeper than MaxDepth"
-      let (kind, mark, _) = headerData(r.head[0])
-      r.open.add OpenFrame[T](kind: kind, mark: mark, members: newSeqOfCap[T](10))
+      let
+        (kind, mark, _) = headerData(r.head[0])
+        room = if r.frameCap > 0: r.frameCap else: DefaultFrameCap
+      r.open.add OpenFrame[T](kind: kind, mark: mark, members: newSeqOfCap[T](room))
       r.headLen = 0
       r.size += 1
       continue

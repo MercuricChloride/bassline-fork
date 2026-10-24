@@ -128,6 +128,12 @@ iterator pairs*[K, V](self: SortedTable[K, V]): Entry[lent K, lent V] =
 func `[]`*[K, V](self: SortedTable[K, V], key: K): lent V =
   self.get(key)
 
+func `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
+  let i = self.indexOf(key)
+  if i == -1:
+    raise newException(KeyError, "key not found")
+  self.vals[i]
+
 func `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   self.put(key, val)
 
