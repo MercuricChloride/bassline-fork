@@ -1,3 +1,14 @@
+##[
+This file implements everything required for a minimal bassline
+implementation with a few additional bits of sugar for ergonomics.
+
+We use the convention of strings for binary data, even though
+a seq[byte] would be more semantically appropriate. However
+the nim stdlib uses string for often for binary data so I just decided
+to keep it as they had it to prevent casting / needless copying.
+
+This may change in the future, but for now this is how it's done.
+]##
 from std/bitops import countTrailingZeroBits
 import std/[options, streams]
 export options
