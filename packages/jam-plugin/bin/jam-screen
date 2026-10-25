@@ -1,0 +1,108 @@
+#!/bin/sh
+# jam-screen [-S SESSION] [-p PROMPT] [-f FILE] [-a] [SPEC…]: agents on the
+# jam, each in its own window of one GNU screen session.
+#
+# A SPEC is claude:NAME, codex:NAME, or a bare NAME for claude. FILE holds
+# one agent a line, KIND NAME [PROMPT…], with # for comments. PROMPT is an
+# agent's first prompt, and -p gives one to every agent that has none.
+#
+# SESSION is $JAM_SCREEN, else jam. It is begun if it isn't running, and
+# otherwise the new windows join it. Each window starts in this directory
+# and is titled with its agent's name. A window whose agent exits stays,
+# so what it said can be read: k closes it, r starts it again. -a attaches
+# once the windows are up.
+#
+#   jam-screen [-S SESSION] attach   attach, beside anyone already there
+#   jam-screen [-S SESSION] down     end the session and every agent in it
+set -eu
+here=$(cd -P "$(dirname "$0")" && pwd)
+session=${JAM_SCREEN:-jam}
+prompt=
+file=
+attach=
+
+usage() {
+  sed -n '2,/^set -eu/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
+
+command -v screen >/dev/null || { echo "jam-screen: screen is not on PATH" >&2; exit 1; }
+
+running() {
+  screen -ls "$session" 2>/dev/null | grep -q "^[[:space:]]*[0-9]*\.$session[[:space:]]"
+}
+
+while getopts S:p:f:ah opt; do
+  case $opt in
+    S) session=$OPTARG ;;
+    p) prompt=$OPTARG ;;
+    f) file=$OPTARG ;;
+    a) attach=1 ;;
+    h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+case "${1:-}" in
+  attach) exec screen -U -x "$session" ;;
+  down)
+    running || { echo "jam-screen: no session $session" >&2; exit 1; }
+    exec screen -S "$session" -X quit ;;
+esac
+[ $# -gt 0 ] || [ -n "$file" ] || { usage >&2; exit 2; }
+
+# The windows inherit this environment. A launch from inside a Claude Code
+# session would otherwise carry its markers, and claude refuses to start
+# nested in another.
+unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT JAM_NAME JAMCRAFT_SOCKET JAMCRAFT_SOCKET_DIR
+
+# window KIND NAME [PROMPT]
+window() {
+  case $1 in
+    claude) launcher=$here/claude-jam ;;
+    codex) launcher=$here/codex-jam ;;
+    *) echo "jam-screen: no agent kind $1, only claude and codex" >&2; return 1 ;;
+  esac
+  [ -n "$2" ] || { echo "jam-screen: a $1 needs a name" >&2; return 1; }
+  title=$2
+  kind=$1
+  shift
+  if [ $# -lt 2 ] && [ -n "$prompt" ]; then set -- "$@" "$prompt"; fi
+  if running; then
+    screen -S "$session" -X chdir "$PWD"
+    screen -S "$session" -X screen -t "$title" "$launcher" "$@"
+  else
+    # The first agent waits a moment, so that a window it leaves at once
+    # still stays for its last words.
+    screen -U -h 10000 -T screen-256color -dmS "$session" -t "$title" \
+      sh -c 'sleep 1; exec "$0" "$@"' "$launcher" "$@"
+    screen -S "$session" -X zombie kr
+    # The agents draw in 24-bit colour when COLORTERM says the terminal has
+    # it, and screen drops those colours unless it is told to pass them on.
+    screen -S "$session" -X truecolor on
+    # A bar at the bottom names the session and its windows, the one shown
+    # picked out. The windows keep the agents' names whatever they print.
+    screen -S "$session" -X caption always "%{= 0;6} %S %{-} %-w%{= 7;4} %n %t %{-}%+w"
+    screen -S "$session" -X dynamictitle off
+    screen -S "$session" -X defdynamictitle off
+  fi
+  echo "jam-screen: $kind $title in $session"
+  # Codex launches start one shared daemon, so they go one at a time.
+  if [ "$kind" = codex ]; then sleep 2; fi
+}
+
+if [ -n "$file" ]; then
+  while read -r kind name rest; do
+    case $kind in ""|\#*) continue ;; esac
+    if [ -n "$rest" ]; then window "$kind" "$name" "$rest"; else window "$kind" "$name"; fi
+  done < "$file"
+fi
+for spec; do
+  case $spec in
+    *:*) window "${spec%%:*}" "${spec#*:}" ;;
+    *) window claude "$spec" ;;
+  esac
+done
+
+if [ -n "$attach" ]; then exec screen -U -x "$session"; fi
+echo "jam-screen: jam-screen attach, or screen -U -x $session"
