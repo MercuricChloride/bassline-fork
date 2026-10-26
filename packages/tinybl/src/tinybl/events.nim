@@ -1,10 +1,14 @@
-import std/[asyncdispatch, deques]
+import std/[asyncfutures, asyncmacro, deques]
+export asyncfutures, asyncmacro, deques
 
 type
   Emitter*[T] = ref object
     maxQueueSize: int
     listeners: seq[Listener[T]]
     signal: Future[void]
+
+  Source*[T] = ref object
+    emitter: Emitter[T]
 
   Listener*[T] = ref object
     inbox: Deque[T]
@@ -48,20 +52,42 @@ proc done*[T](self: Emitter[T]): Future[void] =
   else:
     result = self.signal
 
-proc emit*[T](self: Emitter[T], val: T): bool {.discardable.} =
-  if self.isDone: return
-  var toRemove = newSeq[Listener[T]]()
-  for each in self.listeners:
-    if each.inbox.len == self.maxQueueSize:
-      toRemove.add each
-    else:
-      each.inbox.addLast val
-      each.wake
-  for each in toRemove:
-    when not defined(release):
-      echo "removing"
-    self.remove each
-  true
+proc emit*[T](self: Emitter[T], val: sink T): bool {.discardable.} =
+  if self.isDone:
+    false
+  elif self.listeners.len == 0:
+    true
+  else:
+    var toRemove = newSeq[Listener[T]]()
+    for i, l in self.listeners:
+      if l.inbox.len == self.maxQueueSize:
+        toRemove.add l
+      elif i < self.listeners.high:
+        l.inbox.addLast(val)
+        l.wake
+      else:
+        l.inbox.addLast(move val)
+        l.wake
+    for each in toRemove:
+      when not defined(release):
+        echo "removing"
+      self.remove each
+    true
+
+proc source*[T](self: Emitter[T]): Source[T] =
+  Source[T](emitter: self)
+
+func isDone*[T](self: Source[T]): bool =
+  self.emitter.isDone
+
+proc listen*[T](self: Source[T]): Listener[T] =
+  self.emitter.listen
+
+proc close*[T](self: Source[T]) =
+  self.emitter.close
+
+proc done*[T](self: Source[T]): Future[void] =
+  self.emitter.done
 
 func closed*[T](self: Listener[T]): bool =
   self.closed
@@ -101,11 +127,3 @@ template onEvent*[T](listener: Listener[T], evt, body) =
       for evt in l:
         body
       if l.closed: break
-
-template onEvent*[T](emitter: Emitter[T], evt, body) =
-  ## Creates an anonymous listener and drives an async
-  ## event handling loop with async check. 
-  ## See `onEvent` for the internals
-  asyncCheck(
-    (proc(listener: Listener[T]) {.async.} =
-      onEvent(listener, evt, body))(emitter.listen))
