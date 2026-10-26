@@ -250,7 +250,6 @@ type
     ## builder may hold state of its own, but for stateless
     ## builders, you can use ByType[T] which allows for
     ## construction from the typedesc[T] itself.
-    ## TODO: Maybe make self be a var?
     proc buildNull(self: Self, mark: bool): T
     proc buildAtom(self: Self, bytes: sink string, kind: Kind, mark: bool): T
     proc buildFrame(self: Self, members: sink seq[T], kind: Kind, mark: bool): T

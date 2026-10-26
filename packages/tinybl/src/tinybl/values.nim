@@ -229,6 +229,9 @@ func initNum*(n: BigInt): BNum =
   BNum(isBig: true, big: n)
 
 func initNum*(n: SomeInteger): BNum =
+  when n is uint64 or n is uint:
+    if n > uint64(high(int)):
+      return BNum(isBig: true, big: initBigInt(uint64(n)))
   BNum(isBig: false, small: n.int)
 
 func initNum*(s: string): BNum =
@@ -277,39 +280,79 @@ func toString*(n: BNum): string =
 func `$`*(n: BNum): string =
   n.toString
 
-template lift(a, b, op): untyped =
-  if a.isBig and b.isBig:
-    return op(a.big, b.big)
-  elif a.isBig:
-    return op(a.big, initBigInt(b.small))
-  elif b.isBig:
-    return op(initBigInt(a.small), b.big)
+func magnitude*(x: int): uint64 =
+  ## |x| without the abs(int.low) overflow
+  if x < 0:
+    uint64(-(x + 1)) + 1
   else:
-    return op(a.small, b.small)
+    uint64(x)
 
-template binary(op, T) =
+template wide(a, b, op): untyped =
+  ## op over both as BigInts, a small one lifted
+  if a.isBig and b.isBig:
+    op(a.big, b.big)
+  elif a.isBig:
+    op(a.big, initBigInt(b.small))
+  elif b.isBig:
+    op(initBigInt(a.small), b.big)
+  else:
+    op(initBigInt(a.small), initBigInt(b.small))
+
+template compare(op, T) =
   func op*(a, b: BNum): T =
-    when T is BNum:
-      try:
-        lift(a, b, op)
-      except OverflowDefect:
-        let
-          x = a.grow
-          y = b.grow
-        lift(x, y, op)
+    if a.isBig or b.isBig:
+      wide(a, b, op)
     else:
-      lift(a, b, op)
+      op(a.small, b.small)
 
-binary `+`, BNum
-binary `-`, BNum
-binary `*`, BNum
-binary `div`, BNum
-binary `mod`, BNum
+compare `cmp`, int
+compare `<`, bool
+compare `<=`, bool
+compare `==`, bool
 
-binary `cmp`, int
-binary `<`, bool
-binary `<=`, bool
-binary `==`, bool
+func addFits(a, b: int): bool =
+  if b >= 0: a <= high(int) - b else: a >= low(int) - b
+
+func subFits(a, b: int): bool =
+  if b >= 0: a >= low(int) + b else: a <= high(int) + b
+
+func mulFits(a, b: int): bool =
+  if a == 0 or b == 0:
+    return true
+  let most = if (a < 0) != (b < 0): magnitude(low(int)) else: magnitude(high(int))
+  magnitude(a) <= most div magnitude(b)
+
+func divFits(a, b: int): bool =
+  b != 0 and (a != low(int) or b != -1)
+
+func truncated(a, b: BigInt): tuple[q, r: BigInt] =
+  ## divmod(a,b) with rounding toward zero to match
+  ## div rounding semantics with nim ints.
+  let zero = initBigInt(0)
+  guard b != zero, "division by zero"
+  result = divmod(a, b)
+  if result.r != zero and (a < zero) != (b < zero):
+    result.q += initBigInt(1)
+    result.r -= b
+
+func quot(a, b: BigInt): BigInt =
+  truncated(a, b).q
+
+func rem(a, b: BigInt): BigInt =
+  truncated(a, b).r
+
+template arith(op, fits, wideOp) =
+  func op*(a, b: BNum): BNum =
+    if not a.isBig and not b.isBig and fits(a.small, b.small):
+      initNum(op(a.small, b.small))
+    else:
+      initNum(wide(a, b, wideOp))
+
+arith `+`, addFits, `+`
+arith `-`, subFits, `-`
+arith `*`, mulFits, `*`
+arith `div`, divFits, quot
+arith `mod`, divFits, rem
 
 func inc*(n: var BNum, by = 1) =
   n = n + by
@@ -336,13 +379,6 @@ iterator `..<`*(a, b: BNum): BNum =
   while res < b:
     yield res
     inc res
-
-func magnitude*(x: int): uint64 =
-  ## |x| without the abs(int.low) overflow
-  if x < 0:
-    uint64(-(x + 1)) + 1
-  else:
-    uint64(x)
 
 func abs*(n: BNum): BNum =
   if n.isBig:

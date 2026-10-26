@@ -27,3 +27,11 @@ The file `text.nim` implements a parser / printer for bassline text, which is a 
 ### Memoized Values
 
 To make value comparison & construction cheap, `memo.nim` implements a `Cache` + `Memo` construct which are used for values that utilize structural sharing rather than directly holding their bytes. This is then utilized for `Draft` which defines a mutable feeling api on top of immutable structurally shared values.
+
+### Events
+
+Bassline programs are built from many parts that care about the same values, and none of them should be coupled to how, or whether, the others respond. The file `events.nim` defines a simple primitive for this. `Emitter[T]` can be used to emit values to every `Listener[T]` on it. Each `Listener` has its own inbox so emitting never waits on consumers, and to prevent unbounded growth slow listeners are closed if their inbox fills up. Similarly `Source` is an `Emitter` minus the capability to emit to others.
+
+### Connections
+
+The event construct in `events.nim` is extended in `net.nim` to allow for using network sockets as producers & consumers of values over a socket byte stream. The only bespoke construction this file offers is a simple batched writer to reduce syscall overhead when writing many small values and beyond that is relatively boring.

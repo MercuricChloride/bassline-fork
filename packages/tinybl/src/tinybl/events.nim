@@ -69,8 +69,6 @@ proc emit*[T](self: Emitter[T], val: sink T): bool {.discardable.} =
         l.inbox.addLast(move val)
         l.wake
     for each in toRemove:
-      when not defined(release):
-        echo "removing"
       self.remove each
     true
 

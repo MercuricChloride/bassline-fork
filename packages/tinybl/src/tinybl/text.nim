@@ -271,17 +271,3 @@ proc parse*(T: typedesc[Walkable], s: string): T =
 template makePrintable*(Ty) =
   proc `$`*(self: Ty): string =
     self.toBlText
-
-when isMainModule:
-  import ./[values, raw]
-
-  makePrintable RawValue
-  makePrintable ValueObj
-
-  let text = """
-    (hello! bassline 0xdeadbeef)
-  """
-
-  let p = RawValue.parse(text)
-
-  echo p

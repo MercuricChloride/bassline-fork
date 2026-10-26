@@ -19,7 +19,8 @@ type
     of bDict: dict: SortedTable[Memo, Memo]
     of bSet: els: SortedSet[Memo]
 
-  Node = ref NodeObj
+  Node {.acyclic.} = ref NodeObj
+
   Memo* = object
     node: Node
     mark: bool
