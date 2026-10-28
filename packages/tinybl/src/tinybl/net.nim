@@ -8,6 +8,10 @@ emitted before it has been written. Closing `incoming` shuts the read
 side. The other way round works the same. When the other end stops
 sending, `incoming` closes, and when a write fails, `outgoing` closes.
 The socket itself closes once both sides are done.
+
+Nothing is read until something listens to `incoming`, so what arrives
+first waits in the socket rather than being emitted to no one. A side
+that never listens closes `incoming`, or `done` waits on it.
 ]##
 import std/[asyncdispatch, asyncnet, nativesockets, oserrors, streams]
 from std/posix import shutdown, SHUT_RD, SHUT_WR, EAGAIN, EWOULDBLOCK, ENOBUFS, EINTR
@@ -93,6 +97,7 @@ proc recvTask[T; B: Builder[T]](
     r = initReader[T, B](builder)
     s = newStringStream()
   try:
+    await incoming.ready
     while not incoming.isDone:
       s.data.setLen RecvSize
       let n = await recvInto(sock.getFd.AsyncFD, addr s.data[0], RecvSize)

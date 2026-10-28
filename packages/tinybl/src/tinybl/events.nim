@@ -6,6 +6,7 @@ type
     maxQueueSize: int
     listeners: seq[Listener[T]]
     signal: Future[void]
+    heard: Future[void]
 
   Source*[T] = ref object
     emitter: Emitter[T]
@@ -16,7 +17,8 @@ type
     closed: bool
 
 proc newEmitter*[T](maxQueueSize = 10): Emitter[T] =
-  Emitter[T](maxQueueSize: maxQueueSize, signal: newFuture[void]("newEmitter"))
+  Emitter[T](maxQueueSize: maxQueueSize, signal: newFuture[void]("newEmitter"),
+    heard: newFuture[void]("emitter ready"))
 
 func isDone*[T](self: Emitter[T]): bool =
   self.signal.isNil
@@ -26,24 +28,32 @@ proc listen*[T](self: Emitter[T]): Listener[T] =
     raise newException(ValueError, "emitter closed")
   result = Listener[T](signal: newFuture[void]("listener"))
   self.listeners.add result
+  if not self.heard.finished:
+    self.heard.complete()
 
-proc wake[T](self: Listener[T])
+proc wake[T](self: Listener[T]) =
+  if not isNil(self.signal):
+    let f = self.signal
+    self.signal = nil
+    f.complete()
 
-proc remove*[T](self: Emitter[T], listener: Listener[T]) =
-  for i, each in self.listeners:
-    if each == listener:
-      self.listeners.delete(i)
-      each.closed = true
-      each.wake
-      break
+proc stop[T](self: Listener[T]) =
+  self.closed = true
+  self.wake
+
+proc give[T](self: Listener[T], val: sink T) =
+  if not self.closed:
+    self.inbox.addLast(val)
+    self.wake
 
 proc close*[T](self: Emitter[T]) =
   if self.isDone: return
   self.signal.complete()
   self.signal = nil
   for each in self.listeners:
-    each.closed = true
-    each.wake
+    each.stop
+  if not self.heard.finished:
+    self.heard.complete()
 
 proc done*[T](self: Emitter[T]): Future[void] =
   if self.isDone:
@@ -52,25 +62,34 @@ proc done*[T](self: Emitter[T]): Future[void] =
   else:
     result = self.signal
 
+proc ready*[T](self: Emitter[T]): Future[void] =
+  ## completes at the first listen, or when the emitter closes, so whoever
+  ## waits on it knows there is someone to emit to or never will be
+  self.heard
+
 proc emit*[T](self: Emitter[T], val: sink T): bool {.discardable.} =
+  ## hands val to every listener
+  ## A full listener is stopped, and stopped listeners are removed
   if self.isDone:
-    false
-  elif self.listeners.len == 0:
-    true
-  else:
-    var toRemove = newSeq[Listener[T]]()
-    for i, l in self.listeners:
-      if l.inbox.len == self.maxQueueSize:
-        toRemove.add l
-      elif i < self.listeners.high:
-        l.inbox.addLast(val)
-        l.wake
-      else:
-        l.inbox.addLast(move val)
-        l.wake
-    for each in toRemove:
-      self.remove each
-    true
+    return false
+  var
+    kept = 0
+    last: Listener[T]
+  for i in 0 ..< self.listeners.len:
+    let l = self.listeners[i]
+    if not l.closed and l.inbox.len == self.maxQueueSize:
+      l.stop
+    if l.closed:
+      continue
+    self.listeners[kept] = l
+    inc kept
+    if not last.isNil:
+      last.give(val)
+    last = l
+  self.listeners.setLen kept
+  if not last.isNil:
+    last.give(move val)
+  true
 
 proc source*[T](self: Emitter[T]): Source[T] =
   Source[T](emitter: self)
@@ -90,11 +109,9 @@ proc done*[T](self: Source[T]): Future[void] =
 func closed*[T](self: Listener[T]): bool =
   self.closed
 
-proc wake[T](self: Listener[T]) =
-  if not isNil(self.signal):
-    let f = self.signal
-    self.signal = nil
-    f.complete()
+proc close*[T](self: Listener[T]) =
+  self.inbox.clear()
+  self.stop
 
 proc ready*[T](self: Listener[T]): Future[void] =
   if self.inbox.len > 0 or self.closed:
@@ -116,8 +133,7 @@ template onEvent*[T](listener: Listener[T], evt, body) =
   ## 
   ## Note that `body` is invoked within a loop so a 
   ## break statement will only break from the current 
-  ## iteration. To stop early you should remove the
-  ## listener
+  ## iteration. To stop early close the listener
   block:
     let l = listener
     while true:
