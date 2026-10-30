@@ -254,9 +254,6 @@ type
     proc buildAtom(self: Self, bytes: sink string, kind: Kind, mark: bool): T
     proc buildFrame(self: Self, members: sink seq[T], kind: Kind, mark: bool): T
 
-  Editable* = concept
-    proc setMark(self: var Self, mark: bool)
-
   Walkable* = concept
     ## Walkable is a concept for an object
     ## that supports traversal as though it
@@ -269,8 +266,8 @@ type
     ## children are the constituents of frames
     ## and for dicts it is expected to alternate
     ## K V K V
-    ## Same goes with getChild. foo.getChild(1) should
-    ## return the first key in the dict
+    ## Same goes with getChild. foo.getChild(0) should
+    ## return the first key in the dict, and getChild(1) its value
     proc valid(self: Self): bool
     proc kind(self: Self): Kind
     proc mark(self: Self): bool
@@ -555,5 +552,31 @@ iterator walk*[T: Walkable](self: T): T {.closure.} =
     for each in walk(child):
       yield each
 
-func `[]`*[T: Walkable](self: T, i: int): auto =
-  self.getChild(i)
+const
+  anyMark* = none(bool)
+  unmarked* = some(false)
+  marked* = some(true)
+
+  slotted* = {bList, bRec}
+  keyed* = {bDict, bSet}
+  textual* = {bText, bSym}
+  numeric* = {bNum}
+
+func isKind*[T](a: T, k: set[Kind], mark = anyMark): bool =
+  a.kind in k and (
+    if mark.isSome: a.mark == mark.get else: true
+  )
+
+func isKind*[T](a: T, k: Kind, mark = anyMark): bool =
+  a.isKind({k}, mark)
+
+func expectKind*[T](a: T, k: set[Kind], mark = anyMark) =
+  guard a.isKind(k, mark),
+    "expected value of kind: " & $k &
+      (if mark.isNone: "" elif mark.get: ", marked" else: ", unmarked")
+
+func expectKind*[T](a: T, k: Kind, mark = anyMark) =
+  expectKind(a, {k}, mark)
+
+template expectSlot*(v: untyped, i: int) =
+  guard i >= 0 and i < v.slotLen, "no slot at " & $i

@@ -51,12 +51,13 @@ proc flat[V](entries: sink seq[(V, V)]): seq[V] =
     result.add move e[0]
     result.add move e[1]
 
-proc basslineValue*[V: Editable; B: Builder[V]](
+proc basslineValue*[V; B: Builder[V]](
     builder: B, extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
 ): TextParser[V] =
   ## One value, bare, made by `builder`. `extensions` are tried before a
-  ## symbol, and the `reserved` words are never read as one.
-  mixin cmp, buildNull, buildAtom, buildFrame
+  ## symbol, and the `reserved` words are never read as one. A `!` sets
+  ## the value's mark with its own `setMark`.
+  mixin cmp, buildNull, buildAtom, buildFrame, setMark
   # the parser keeps its own builder, shared by every part of it
   var builder = builder
   let
@@ -141,25 +142,25 @@ proc basslineValue*[V: Editable; B: Builder[V]](
   value.define(markedFrame / frame / atom)
   value
 
-proc basslineForm*[V: Editable; B: Builder[V]](
+proc basslineForm*[V; B: Builder[V]](
     builder: B, extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
 ): TextParser[V] =
   ## One value and the space around it.
   basslineValue(builder, extensions, reserved).trim(space())
 
-proc basslineParser*[V: Editable; B: Builder[V]](builder: B): TextParser[V] =
+proc basslineParser*[V; B: Builder[V]](builder: B): TextParser[V] =
   ## Exactly one value.
   basslineForm(builder).complete.resolve
 
-proc basslineParser*[V: Editable](): TextParser[V] =
+proc basslineParser*[V](): TextParser[V] =
   ## Exactly one value, of a type that builds itself.
   basslineParser(ByType[V]())
 
-proc basslineDocument*[V: Editable; B: Builder[V]](builder: B): TextParser[seq[V]] =
+proc basslineDocument*[V; B: Builder[V]](builder: B): TextParser[seq[V]] =
   ## Any number of values, including none.
   basslineForm(builder).star.trim(space()).complete.resolve
 
-proc basslineDocument*[V: Editable](): TextParser[seq[V]] =
+proc basslineDocument*[V](): TextParser[seq[V]] =
   ## Any number of values, including none, of a type that builds itself.
   basslineDocument(ByType[V]())
 
@@ -267,6 +268,10 @@ proc parse*[V: Walkable; B: Builder[V]](builder: B, s: string): V =
 proc parse*(T: typedesc[Walkable], s: string): T =
   ## the one value s spells, of a type that builds itself
   parse(ByType[T](), s)
+
+proc parseMany*(T: typedesc[Walkable], s: string): seq[T] =
+  var r = basslineDocument[T]().parse(s)
+  r.take
 
 template makePrintable*(Ty) =
   proc `$`*(self: Ty): string =

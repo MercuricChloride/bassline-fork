@@ -428,29 +428,23 @@ func cmpNums*(x, y: BNum): int =
 # Value Object
 # ================
 
-type ValueObj* = object
-  mark*: bool
-  case kind*: Kind
-  of bNil: discard
-  of bNum:
-    num*: BNum
-  of bText, bSym:
-    text*: string
-  of bBytes:
-    bytes*: string
-  of bList, bRec:
-    items*: seq[ValueObj]
-  of bDict:
-    dict*: SortedTable[ValueObj, ValueObj]
-  of bSet:
-    els*: SortedSet[ValueObj]
-
-# ================
-# Editable
-# ================
-
-proc setMark*(self: var ValueObj, mark: bool) =
-  self.mark = mark
+type 
+  ValueObj* = ref object
+    mark*: bool
+    case kind*: Kind
+    of bNil: discard
+    of bNum:
+      num*: BNum
+    of bText, bSym:
+      text*: string
+    of bBytes:
+      bytes*: string
+    of bList, bRec:
+      items*: seq[ValueObj]
+    of bDict:
+      dict*: SortedTable[ValueObj, ValueObj]
+    of bSet:
+      els*: SortedSet[ValueObj]
 
 # ================
 # Walkable
@@ -502,8 +496,9 @@ func getChild*(self: ValueObj, i: int): lent ValueObj =
     refuse("cannot get child from a non frame type")
 
 iterator children*(self: ValueObj): lent ValueObj =
-  let k: bList .. bSet = self.kind
-  case k
+  ## a frame's members in CE order, a dict's keys and values alternating,
+  ## and nothing for an atom
+  case self.kind
   of bList, bRec:
     for v in self.items:
       yield v
@@ -514,6 +509,8 @@ iterator children*(self: ValueObj): lent ValueObj =
   of bSet:
     for v in self.els:
       yield v
+  else:
+    discard
 
 func cmpNums*(a, b: ValueObj): int =
   cmpNums(a.num, b.num)
@@ -564,3 +561,6 @@ proc buildFrame*(
     for i in 1 ..< s.len:
       guard s[i - 1] < s[i], "set elements must be strictly ascending"
     ValueObj(kind: bSet, mark: mark, els: toSortedSet(s, sorted = true))
+
+proc setMark*(self: var ValueObj, mark: bool) =
+  self.mark = mark

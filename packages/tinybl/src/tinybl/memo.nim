@@ -273,13 +273,11 @@ func `<=`*(a, b: Memo): bool =
 makePrintable(Memo)
 
 # ================
-# Access
+# BVal
 # ================
 
-func `[]`*(self: Memo, key: Memo): lent Memo =
-  ## a dict's value for key, found by bisecting its keys
-  guard self.kind == bDict, "only a dict has values for keys"
-  self.node.dict.get(key)
+# the checks values.nim makes, in the same words, for a Memo and a Draft
+
 
 func contains*(self: Memo, x: Memo): bool =
   ## whether a dict has x as a key, or a set as a member, found by bisecting
@@ -289,7 +287,109 @@ func contains*(self: Memo, x: Memo): bool =
   of bSet:
     x in self.node.els
   else:
-    refuse("only a dict or a set is searched")
+    refuse("only a dict or a set has keys")
+
+func getNum*(self: Memo): lent BNum =
+  self.expectKind(numeric)
+  self.node.num
+
+func getText*(self: Memo): lent string =
+  self.expectKind(textual)
+  self.node.payload
+
+func getBytes*(self: Memo): lent string =
+  self.expectKind(bBytes)
+  self.node.payload
+
+func slotLen*(self: Memo): int =
+  ## how many slots a list or a record has, 0 for anything else
+  if self.kind in {bList, bRec}: self.node.items.len else: 0
+
+func getSlot*(self: Memo, i: int): lent Memo =
+  ## a list's or a record's slot at i
+  self.expectKind(slotted)
+  self.expectSlot(i)
+  self.node.items[i]
+
+func keyLen*(self: Memo): int =
+  ## how many keys a dict or a set has, 0 for anything else
+  case self.kind
+  of bDict: self.node.dict.len
+  of bSet: self.node.els.len
+  else: 0
+
+func getKey*(self, key: Memo): lent Memo =
+  ## a dict's value for key, found by bisecting its keys
+  self.expectKind(bDict)
+  let i = self.node.dict.indexOf(key)
+  guard i != -1, "the dict has no such key"
+  self.node.dict.vals[i]
+
+func keyAt*(self: Memo, i: int): lent Memo =
+  ## a dict's key or a set's member at rank i, in CE order
+  self.expectKind(keyed)
+  if self.kind == bDict:
+    return self.node.dict.keys[i]
+  return self.node.els.data[i]
+
+func valueAt*(self: Memo, i: int): lent Memo =
+  ## a dict's value under the key at rank i
+  self.expectKind(bDict)
+  self.node.dict.vals[i]
+
+func rankOf*(self, key: Memo): int =
+  ## key's rank among a dict's keys or a set's members, found by
+  ## bisecting, -1 when it is absent
+  case self.kind
+  of bDict: self.node.dict.indexOf(key)
+  of bSet: self.node.els.indexOf(key)
+  else: refuse "only a dict or a set has keys"
+
+iterator getItems*(self: Memo): lent Memo =
+  ## a list's or a record's slots in order, or a set's or a dict's keys
+  ## in CE order
+  case self.kind
+  of bList, bRec:
+    for m in self.node.items:
+      yield m
+  of bSet:
+    for m in self.node.els:
+      yield m
+  of bDict:
+    for k in self.node.dict.keys:
+      yield k
+  else:
+    refuse "only a frame has items"
+
+iterator getSlots*(self: Memo): tuple[pos: int, val: Memo] =
+  ## a list's or a record's slots with their positions
+  guard self.kind in {bList, bRec}, "only a list or a record has slots"
+  for i, m in self.node.items:
+    yield (i, m)
+
+iterator getPairs*(self: Memo): tuple[key, val: Memo] =
+  ## a dict's keys and values, in CE order of the keys
+  guard self.kind == bDict, "only a dict has keys and values"
+  for i in 0 ..< self.node.dict.len:
+    yield (self.node.dict.keys[i], self.node.dict.vals[i])
+
+iterator getKeys*(self: Memo): lent Memo =
+  ## a dict's keys or a set's members, in CE order
+  case self.kind
+  of bDict:
+    for k in self.node.dict.keys:
+      yield k
+  of bSet:
+    for m in self.node.els:
+      yield m
+  else:
+    refuse "only a dict or a set has keys"
+
+iterator getValues*(self: Memo): lent Memo =
+  ## a dict's values, in CE order of their keys
+  guard self.kind == bDict, "only a dict has values"
+  for v in self.node.dict.vals:
+    yield v
 
 # ================
 # Builder
@@ -422,40 +522,113 @@ proc buildFrame*(T: typedesc[Memo], s: sink seq[Memo], kind: Kind, mark: bool): 
   globalCache().buildFrame(s, kind, mark)
 
 # ================
-# Editable
+# Keeping edited frames
 # ================
+# A Memo never changes. An edit block builds the one frame its draft
+# makes, in the cache the edited value is kept in, and points the handle
+# there, so every other handle holds what it held. The frame's members are
+# shared, and a member from another cache is brought in. The frame is
+# hashed and kept just as `buildFrame` keeps it, so an edited value is the
+# node the same value read anew would be. Its order isn't checked again,
+# since an edit keeps it.
 
 proc setMark*(self: var Memo, mark: bool) =
   self.mark = mark
 
+func sameMembers(a, b: openArray[Memo]): bool =
+  ## whether a and b hold one node with one mark at every place
+  if a.len != b.len:
+    return false
+  for i in 0 ..< a.len:
+    if a[i].node != b[i].node or a[i].mark != b[i].mark:
+      return false
+  true
+
+func mixMember(h: var Hash, m: Memo) =
+  ## m mixed into a frame's hash as buildFrame mixes each member
+  h = h !& m.node.hash !& hash(m.mark)
+
+proc keptSlots(c: Cache, k: bList .. bRec, s: sink seq[Memo], mark: bool): Memo =
+  ## the list or record of s, c's members in order
+  var h = hash(k)
+  for m in s:
+    h.mixMember m
+  h = !$h
+  Memo(
+    node: c.kept(
+      h, n, n.kind == k and n.items.sameMembers(s), Node(kind: k, hash: h, cache: c, items: s)
+    ),
+    mark: mark,
+  )
+
+proc keptDict(c: Cache, d: sink SortedTable[Memo, Memo], mark: bool): Memo =
+  ## the dict of d, c's keys and values in CE order of the keys
+  var h = hash(bDict)
+  for k, v in d:
+    h.mixMember k
+    h.mixMember v
+  h = !$h
+  Memo(
+    node: c.kept(
+      h,
+      n,
+      n.kind == bDict and n.dict.keys.sameMembers(d.keys) and
+        n.dict.vals.sameMembers(d.vals),
+      Node(kind: bDict, hash: h, cache: c, dict: d),
+    ),
+    mark: mark,
+  )
+
+proc keptSet(c: Cache, e: sink SortedSet[Memo], mark: bool): Memo =
+  ## the set of e, c's members in CE order
+  var h = hash(bSet)
+  for m in e:
+    h.mixMember m
+  h = !$h
+  Memo(
+    node: c.kept(
+      h,
+      n,
+      n.kind == bSet and n.els.data.sameMembers(e.data),
+      Node(kind: bSet, hash: h, cache: c, els: e),
+    ),
+    mark: mark,
+  )
+
 # ================
-# Edits
+# Drafts
 # ================
-# A Memo never changes. An edit builds a new value in the cache the
-# edited value is kept in, then points the handle it was given there, so
-# every other handle holds what it held before. Members from another
-# cache are brought in. `edit` makes many edits and builds once.
+# A Memo's draft: a frame's members held apart from the value drafted,
+# in the containers a node holds them in, edited with their own procs. A
+# list's or a record's are a seq in order, a dict's a SortedTable and a
+# set's a SortedSet, which keep CE order themselves. `toMemo` builds the
+# value it makes once, in the cache the value drafted is kept in, and
+# refuses a record left without a head.
 
 type Draft* = object
-  ## A frame's members open to edits: a list's or record's members in
-  ## order, a dict's entries or a set's members in CE order. `toMemo`
-  ## builds the value they make, leaving the value drafted as it was
+  ## A Memo open to edits. The value drafted is left as it was
   cache: Cache
-  mark: bool
+  mark*: bool
   case kind: Kind
+  of bNil .. bBytes:
+    atom: Memo
   of bList, bRec:
-    items: seq[Memo]
+    items*: seq[Memo]
   of bDict:
-    dict: SortedTable[Memo, Memo]
+    dict*: SortedTable[Memo, Memo]
   of bSet:
-    els: SortedSet[Memo]
-  else:
-    discard
+    els*: SortedSet[Memo]
+
+func kind*(d: Draft): Kind =
+  d.kind
 
 proc draft*(v: Memo): Draft =
-  ## v's members, kept apart from v, to edit and build anew
+  ## v opened for edits, kept apart from v
   let n = v.node
   case n.kind
+  of bNil .. bBytes:
+    let k: bNil .. bBytes = n.kind
+    Draft(cache: n.cache, mark: v.mark, kind: k, atom: v)
   of bList, bRec:
     let k: bList .. bRec = n.kind
     Draft(cache: n.cache, mark: v.mark, kind: k, items: n.items)
@@ -463,33 +636,67 @@ proc draft*(v: Memo): Draft =
     Draft(cache: n.cache, mark: v.mark, kind: bDict, dict: n.dict)
   of bSet:
     Draft(cache: n.cache, mark: v.mark, kind: bSet, els: n.els)
-  else:
-    refuse("only a frame has members to edit")
+
+proc broughtIn(c: Cache, s: var seq[Memo]) =
+  ## s's members from another cache brought into c, sharing one import so
+  ## what they share is brought once
+  var seen = default(Table[pointer, Node])
+  for m in s.mitems:
+    if m.node.cache != c:
+      m.node = c.brought(m.node, seen)
+
+func allIn(s: openArray[Memo], c: Cache): bool =
+  ## whether s's members are all c's
+  for m in s:
+    if m.node.cache != c:
+      return false
+  true
 
 proc toMemo*(d: sink Draft): Memo =
-  ## the value d's members make, kept in the cache d was drafted from
+  ## the value d makes, kept in the cache d was drafted from, a member
+  ## from another cache brought in
+  let c = d.cache
   case d.kind
+  of bNil .. bBytes:
+    result = move d.atom
+    result.mark = d.mark
   of bList, bRec:
-    d.cache.buildFrame(move d.items, d.kind, d.mark)
+    guard d.kind == bList or d.items.len > 0, "a record keeps its head"
+    c.broughtIn(d.items)
+    result = c.keptSlots(d.kind, move d.items, d.mark)
   of bDict:
-    var s = newSeqOfCap[Memo](2 * d.dict.len)
-    for i in 0 ..< d.dict.len:
-      s.add d.dict.keys[i]
-      s.add d.dict.vals[i]
-    d.cache.buildFrame(move s, bDict, d.mark)
+    if d.dict.keys.allIn(c) and d.dict.vals.allIn(c):
+      result = c.keptDict(move d.dict, d.mark)
+    else:
+      var s = newSeqOfCap[Memo](2 * d.dict.len)
+      for k, v in d.dict:
+        s.add k
+        s.add v
+      result = c.buildFrame(move s, bDict, d.mark)
   of bSet:
-    d.cache.buildFrame(d.els.data, bSet, d.mark)
-  else:
-    refuse("only a frame has members to edit")
+    if d.els.data.allIn(c):
+      result = c.keptSet(move d.els, d.mark)
+    else:
+      result = c.buildFrame(d.els.data, bSet, d.mark)
 
-template positional(d: Draft) =
-  guard d.kind in {bList, bRec}, "only a list or a record is edited by position"
+# ================
+# Misc
+# ================
 
-template keyed(d: Draft) =
-  guard d.kind == bDict, "only a dict is edited by key"
+proc memoize*[T: Walkable](c: Cache, self: sink T): Memo =
+  case self.kind
+  of bNil: c.buildNull(self.mark)
+  of bNum: c.buildAtom(self.digits, bNum, self.mark)
+  of bText..bBytes: c.buildAtom(self.payload, self.kind, self.mark)
+  else: 
+    var items = newSeqOfCap[Memo](self.len)
+    for each in self.children:
+      items.add c.memoize(each)
+    c.buildFrame(move items, self.kind, self.mark)
 
-template membered(d: Draft) =
-  guard d.kind == bSet, "only a set has members put in or taken out"
+proc memoize*[T: Walkable](self: sink T): Memo =
+  globalCache().memoize(self)
+
 
 func len*(d: Draft): int =
   case d.kind
@@ -510,54 +717,54 @@ func contains*(d: Draft, x: Memo): bool =
 
 proc `[]`*(d: var Draft, i: int): var Memo =
   ## the member at i, to edit where it stands
-  d.positional
+  d.expectKind(slotted)
   d.items[i]
 
 proc `[]`*(d: var Draft, i: BackwardsIndex): var Memo =
-  d.positional
+  d.expectKind(slotted)
   d.items[d.items.len - i.int]
 
 proc `[]`*(d: var Draft, key: Memo): var Memo =
   ## the value under key, to edit where it stands
-  d.keyed
+  d.expectKind(bDict)
   d.dict[key]
 
 proc `[]=`*(d: var Draft, i: int, x: sink Memo) =
-  d.positional
+  d.expectKind(slotted)
   d.items[i] = x
 
 proc `[]=`*(d: var Draft, i: BackwardsIndex, x: sink Memo) =
-  d.positional
+  d.expectKind(slotted)
   d.items[d.items.len - i.int] = x
 
 proc `[]=`*(d: var Draft, key, val: sink Memo) =
-  d.keyed
+  d.expectKind(bDict)
   d.dict[key] = val
 
 proc add*(d: var Draft, x: sink Memo) =
-  d.positional
+  d.expectKind(slotted)
   d.items.add x
 
 proc insert*(d: var Draft, x: sink Memo, i = 0) =
-  d.positional
+  d.expectKind(slotted)
   d.items.insert(x, i)
 
 proc delete*(d: var Draft, i: int) =
   ## takes out the member at i, keeping the others in order
-  d.positional
+  d.expectKind(slotted)
   d.items.delete(i)
 
 proc del*(d: var Draft, key: Memo) =
   ## takes out key and its value, if the dict has it
-  d.keyed
+  d.expectKind(bDict)
   d.dict.delete(key)
 
 proc incl*(d: var Draft, x: sink Memo) =
-  d.membered
+  d.expectKind(bSet)
   d.els.incl x
 
 proc excl*(d: var Draft, x: Memo) =
-  d.membered
+  d.expectKind(bSet)
   d.els.excl x
 
 template edit*(v: var Memo, body: untyped) =
@@ -580,57 +787,3 @@ template edited*(v: Memo, body: untyped): Memo =
 
 func `[]`*(self: Memo, i: BackwardsIndex): lent Memo =
   self.getChild(self.len - i.int)
-
-proc `[]=`*(v: var Memo, i: int, x: sink Memo) =
-  v.edit:
-    it[i] = x
-
-proc `[]=`*(v: var Memo, i: BackwardsIndex, x: sink Memo) =
-  v.edit:
-    it[i] = x
-
-proc `[]=`*(v: var Memo, key, val: sink Memo) =
-  v.edit:
-    it[key] = val
-
-proc add*(v: var Memo, x: sink Memo) =
-  v.edit:
-    it.add x
-
-proc insert*(v: var Memo, x: sink Memo, i = 0) =
-  v.edit:
-    it.insert(x, i)
-
-proc delete*(v: var Memo, i: int) =
-  v.edit:
-    it.delete i
-
-proc del*(v: var Memo, key: Memo) =
-  v.edit:
-    it.del key
-
-proc incl*(v: var Memo, x: sink Memo) =
-  v.edit:
-    it.incl x
-
-proc excl*(v: var Memo, x: Memo) =
-  v.edit:
-    it.excl x
-
-# ================
-# Misc
-# ================
-
-proc memoize*[T: Walkable](c: Cache, self: sink T): Memo =
-  case self.kind
-  of bNil: c.buildNull(self.mark)
-  of bNum: c.buildAtom(self.digits, bNum, self.mark)
-  of bText..bBytes: c.buildAtom(self.payload, self.kind, self.mark)
-  else: 
-    var items = newSeqOfCap[Memo](self.len)
-    for each in self.children:
-      items.add c.memoize(each)
-    c.buildFrame(move items, self.kind, self.mark)
-
-proc memoize*[T: Walkable](self: sink T): Memo =
-  globalCache().memoize(self)
