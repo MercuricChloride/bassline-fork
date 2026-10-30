@@ -43,7 +43,7 @@ template refuseWith*(err) {.dirty.} =
   template refuse(msg: string) =
     raise newException(err, msg)
 
-  template guard(cond: untyped, msg: string) =
+  template guard(cond: untyped, msg: string) {.used.} =
     if not (cond):
       refuse(msg)
 

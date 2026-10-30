@@ -110,13 +110,16 @@ proc buildRecordAccess(T, V: NimNode, fieldNames: seq[NimNode], rest: NimNode): 
       for i, f in `fieldStrings`:
         yield (i, f)
 
-    proc toValue*[B](`self`: `T`, `b`: B): `V` =
+    proc toValue*[V; B: Builder[V]](`self`: `T`, `b`: B): V =
       ## the record as a value b builds, so it splices into bl
       `b`.buildFrame(`held`, bRec, `self`.mark)
 
+    proc toValue*(`self`: `T`): `V` =
+      `self`.toValue(ByType[`V`]())
+
     proc `dollar`*(`self`: `T`): string =
       if isNil(`self`): "nil"
-      else: toBlText(`self`.toValue(ByType[`V`]()))
+      else: toBlText(`self`.toValue)
 
 macro recordOf*(V: typedesc, rec: untyped, rest: varargs[untyped]): untyped =
   ##[
@@ -392,14 +395,14 @@ template useValue*(V: typedesc) =
     is `recordOf(V, T(…))`. A record splices into bl as the value it
     holds.
   ]##
-  template bl(text: static string): untyped =
+  template bl(text: static string): untyped {.used.} =
     bl(V, text)
 
-  template blet(text: static string, exported: static bool = true): untyped =
+  template blet*(text: static string, exported: static bool = true): untyped {.used.} =
     blet(V, text, exported)
 
-  template record(rec: untyped): untyped =
+  template record(rec: untyped): untyped {.used.} =
     recordOf(V, rec)
 
-  template record(rec, conditions: untyped): untyped =
+  template record(rec, conditions: untyped): untyped {.used.} =
     recordOf(V, rec, conditions)
