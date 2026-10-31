@@ -163,28 +163,25 @@ func holds(n: NodeObj, s: seq[Memo]): bool =
 # Walkable
 # ================
 
-func valid*(self: Memo): bool =
-  true
 func kind*(self: Memo): Kind =
   self.node.kind
 func mark*(self: Memo): bool =
   self.mark
-func payload*(self: Memo): lent string =
-  self.node.payload
-func digits*(self: Memo): string =
-  $self.node.num
-func num*(self: Memo): lent BNum =
+func numVal*(self: Memo): lent BNum =
   self.node.num
-func cmpNums*(a, b: Memo): int =
-  cmpNums(a.node.num, b.node.num)
+
+template getter(name) =
+  func name*(self: Memo): lent string =
+    self.node.payload
+
+getter textVal
+getter symVal
+getter bytesVal
+
 func len*(self: Memo): int =
   self.node[].width
 func getChild*(self: Memo, i: int): lent Memo =
   self.node[].at(i)
-
-iterator children*(self: Memo): lent Memo =
-  for m in self.node[].members:
-    yield m
 
 func sameContents*(a, b: Memo): bool =
   ## whether a and b are one node, so hold the same contents
@@ -686,12 +683,14 @@ proc toMemo*(d: sink Draft): Memo =
 proc memoize*[T: Walkable](c: Cache, self: sink T): Memo =
   case self.kind
   of bNil: c.buildNull(self.mark)
-  of bNum: c.buildAtom(self.digits, bNum, self.mark)
-  of bText..bBytes: c.buildAtom(self.payload, self.kind, self.mark)
-  else: 
+  of bNum: c.buildAtom(self.numStr, bNum, self.mark)
+  of bText: c.buildAtom(self.textVal, bText, self.mark)
+  of bSym: c.buildAtom(self.symVal, bSym, self.mark)
+  of bBytes: c.buildAtom(self.bytesVal, bBytes, self.mark)
+  else:
     var items = newSeqOfCap[Memo](self.len)
-    for each in self.children:
-      items.add c.memoize(each)
+    for i in 0 ..< self.len:
+      items.add c.memoize(self.getChild(i))
     c.buildFrame(move items, self.kind, self.mark)
 
 proc memoize*[T: Walkable](self: sink T): Memo =

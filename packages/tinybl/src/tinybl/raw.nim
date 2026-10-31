@@ -1,8 +1,8 @@
 import ./ce
 
 type RawValue* {.byref.} = object
-  mark, valid: bool
-  case kind: Kind
+  mark*, valid*: bool
+  case kind*: Kind
   of bNil: discard
   of bNum .. bBytes:
     bytes: string
@@ -35,20 +35,14 @@ proc buildFrame*(
 # Walkable
 # ================
 
-proc valid*(self: RawValue): bool =
-  self.valid
+template getter(name) =
+  proc name*(self: RawValue): lent string =
+    return self.bytes
 
-func kind*(self: RawValue): auto =
-  self.kind
-
-func mark*(self: RawValue): bool =
-  self.mark
-
-proc digits*(self: RawValue): lent string =
-  return self.bytes
-
-proc payload*(self: RawValue): lent string =
-  return self.bytes
+getter numVal
+getter textVal
+getter symVal
+getter bytesVal
 
 proc getChild*(self: RawValue, i: int): lent RawValue =
   return self.children[i]
@@ -121,3 +115,23 @@ iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
   while i < self.len:
     yield (self.children[i - 1], self.children[i])
     i.inc 2
+
+when isMainModule:
+  import std/[streams, monotimes, times, os, strutils]
+
+  # the jam, whole, through both types
+  let 
+    jam = readFile("/Users/goose/prg/jordans-bl/jams/jam.blb").repeat(50)
+    size = jam.len / 1_000_000
+  
+  proc decode[T](label: string) =
+    var best = float.high
+    for _ in 0..<7:
+      let s = newStringStream(jam)
+      var r: TypeReader[T]
+      let t0 = getMonoTime()
+      while s.readStream(r): 
+        discard
+      best = min(best, (getMonoTime() - t0).inNanoseconds.float / 1e6)
+    echo label, ": ", best, " ms"
+  decode[RawValue]("decode raw " & $size & "MB")

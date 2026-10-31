@@ -199,7 +199,7 @@ func isBareSpelling*(s: string): bool =
       return false
   true
 
-proc writeWalkable[T: Walkable](v: T, stream: StringStream) =
+proc writeWalkable(v: Walkable, stream: StringStream) =
   mixin children
 
   template writeMark(it) =
@@ -211,25 +211,25 @@ proc writeWalkable[T: Walkable](v: T, stream: StringStream) =
     stream.write("nil")
     writeMark(v)
   of bNum:
-    stream.write(v.digits)
+    stream.write(v.numStr)
     writeMark(v)
   of bText:
     stream.write('"')
-    stream.write(v.payload.escaped('"'))
+    stream.write(v.textVal.escaped('"'))
     stream.write('"')
     writeMark(v)
   of bSym:
-    let s = v.payload
+    let s = v.symVal
     if s.isBareSpelling:
       stream.write s
     else:
       stream.write('\'')
-      stream.write(v.payload.escaped('\''))
+      stream.write(v.symVal.escaped('\''))
       stream.write('\'')
     writeMark(v)
   of bBytes:
     stream.write("0x")
-    stream.write(v.payload.toHex)
+    stream.write(v.bytesVal.toHex)
     writeMark(v)
   of bList, bRec, bSet:
     writeMark(v)
@@ -255,7 +255,7 @@ proc writeWalkable[T: Walkable](v: T, stream: StringStream) =
       stream.write(':')
     stream.write(v.kind.closeChar)
 
-proc toBlText*[T: Walkable](self: T): string =
+proc toBlText*(self: Walkable): string =
   var s = newStringStream()
   writeWalkable(self, s)
   move s.data

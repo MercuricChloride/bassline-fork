@@ -111,7 +111,7 @@ func partialKind*(b: byte): PartialValueKind =
     return pvCloseFrame
   let h = headerData(b)
   case h.kind
-  of bNum..bBytes: 
+  of bNum..bBytes:
     pvAtom
   of bNil:
     guard h.inlineLen == 0, "nil lenBits must be 0"
@@ -254,32 +254,53 @@ type
     proc buildAtom(self: Self, bytes: sink string, kind: Kind, mark: bool): T
     proc buildFrame(self: Self, members: sink seq[T], kind: Kind, mark: bool): T
 
-  Walkable* = concept
+  ToString* = concept v
+    $v is string
+
+  Stringy* = string | ToString
+
+  CheckedVal* = concept v, var mut
+    v is Walkable
+    v.valid is bool
+    mut.validate
+
+  Walkable* = concept v, type T
     ## Walkable is a concept for an object
     ## that supports traversal as though it
     ## were an encoded bassline value with
-    ## correct ce structure.
-    ## 
-    ## payload & digits should return binary 
+    ## correct ce structure
+    ##
+    ## payload & digits should return binary
     ## strings being the payload of an atom
-    ## 
+    ##
     ## children are the constituents of frames
     ## and for dicts it is expected to alternate
     ## K V K V
     ## Same goes with getChild. foo.getChild(0) should
     ## return the first key in the dict, and getChild(1) its value
-    proc valid(self: Self): bool
-    proc kind(self: Self): Kind
-    proc mark(self: Self): bool
-    proc digits(self: Self): string
-    proc payload(self: Self): string
-    proc len(self: Self): int
-    proc getChild(self: Self, idx: int): Self
-    iterator children(self: Self): Self
+    type
+      Num = typeof v.numVal
+    v.kind is Kind
+    v.mark is bool
+    # atoms
+    Num is string | ToString
+    v.textVal is string
+    v.symVal is string
+    v.bytesVal is string
+    # frames
+    v.len is int
+    v.getChild(int) is lent T
 
   ByType*[T] = object
     ## A builder for types that implement Builder[T] without
     ## state and dispatch on the typedesc[T] itself
+
+proc numStr*(self: Walkable): string =
+  self.expectKind(bNum)
+  when self.numVal is string:
+    self.numVal
+  else:
+    $(self.numVal)
 
 proc buildNull*[T](self: ByType[T], mark: bool): T =
   mixin buildNull
@@ -371,7 +392,7 @@ proc readStream*[T;B: Builder[T]](s: Stream, r: var Reader[T,B]): bool =
   ## reads on from where r stopped, answering true once a value was read
   ## whole, storing it in r.value. Otherwise this returns false if it
   ## is starved and can wait to resume without reading anything twice.
-  ## 
+  ##
   ## If invalid CE is read r is poisoned and won't produce anything
   ## useful in the future
   mixin buildNull, buildFrame
@@ -439,26 +460,39 @@ proc writeAtom(stream: Stream, kind: Kind, mark: bool, payload: string) =
   stream.writeHeader(kind, mark, payload.len)
   stream.write payload
 
-proc writeStream*[T: Walkable](stream: Stream, val: T) =
-  guard val.valid, "writing invalid value"
+proc writeStream*(stream: Stream, val: Walkable) =
+  when val is CheckedVal:
+    guard val.valid, "writing invalid value"
+  template emitAtom(s) =
+    stream.writeAtom(val.kind, val.mark, s)
   case val.kind
   of bNil:
     stream.writeHeader(bNil, val.mark, 0)
   of bNum:
-    stream.writeAtom(val.kind, val.mark, val.digits)
-  of bText..bBytes:
-    stream.writeAtom(val.kind, val.mark, val.payload)
+    emitAtom(val.numStr)
+  of bText:
+    emitAtom(val.textVal)
+  of bSym:
+    emitAtom(val.symVal)
+  of bBytes:
+    emitAtom(val.bytesVal)
   else:
     stream.writeHeader(val.kind, val.mark, 0)
-    for child in val.children:
-      stream.writeStream(child)
+    for i in 0..<val.len:
+      stream.writeStream(val.getChild(i))
     stream.write(EndByte)
 
 # ================
 # Walkable Derivations
 # ================
 
-func basslineCmp*[T: Walkable](a, b: T): int =
+type
+  SameContents = concept a, b
+    sameContents(a, b) is bool
+  CmpNums = concept a, b
+    cmpNums(a, b) is int
+
+func basslineCmp*(a, b: Walkable): int =
   ## Implements a generic comparison that matches
   ## CE comparison / memcmp for any `Walkable` type.
   ## See `makeCmp` which will define the
@@ -470,19 +504,25 @@ func basslineCmp*[T: Walkable](a, b: T): int =
       return
   ??cmp(a.kind, b.kind)
   ??cmp(a.mark, b.mark)
-  when compiles(sameContents(a, b)):
+  when a is SameContents:
     if sameContents(a, b):
       return 0
   case a.kind
   of bNil:
     discard
   of bNum:
-    when compiles(cmpNums(a, b)):
-      ??cmpNums(a, b)
+    when a.Num is CmpNums:
+      ??cmpNums(a.numVal, b.numVal)
+    elif a.Num is string:
+      ??cmpShortlex(a.numVal, b.numVal)
     else:
-      ??cmpShortlex(a.digits, b.digits)
-  of bText .. bBytes:
-    ??cmpShortlex(a.payload, b.payload)
+      ??cmpShortlex($(a.numVal), $(b.numVal))
+  of bText:
+    ??cmpShortLex(a.textVal, b.textVal)
+  of bSym:
+    ??cmpShortLex(a.symVal, b.symVal)
+  of bBytes:
+    ??cmpShortlex(a.bytesVal, b.bytesVal)
   of bList, bRec, bSet, bDict:
     for i in 0 ..< min(a.len, b.len):
       ??cmp(a.getChild(i), b.getChild(i))
@@ -493,7 +533,7 @@ template makeCmp*(T) =
   ## terms of `basslineCmp` which implements
   ## a comparison that's equivalent to memcmp
   ## over CE bytes.
-  ## 
+  ##
   ## If the type isn't storing numbers as
   ## a string / bytes, you should implement
   ## `cmpNums(a, b: T)`: int which will allow
@@ -514,10 +554,12 @@ template makeCmp*(T) =
   func `<=`*(a, b: T): bool =
     cmp(a, b) <= 0
 
-proc atomSize[T: Walkable](self: T): int =
+proc atomSize(self: Walkable): int =
   case self.kind
-  of bNum: self.digits.len
-  of bText, bSym, bBytes: self.payload.len
+  of bNum: self.numStr.len
+  of bText: self.textVal.len
+  of bSym: self.symVal.len
+  of bBytes: self.bytesVal.len
   else: 0
 
 proc encodedSize*[T: Walkable](self: T, total: var int) =
@@ -544,6 +586,11 @@ proc ce*[T: Walkable](self: T): string =
   let s = newStringStream(newStringUninit(self.encodedSize))
   s.writeStream(self)
   move s.data
+
+iterator children*[T: Walkable](self: T): T =
+  if self.kind in {bList..bSet}:
+    for i in 0..<self.len:
+      yield self.getChild(i)
 
 iterator walk*[T: Walkable](self: T): T {.closure.} =
   mixin children

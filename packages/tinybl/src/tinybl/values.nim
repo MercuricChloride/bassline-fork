@@ -428,7 +428,7 @@ func cmpNums*(x, y: BNum): int =
 # Value Object
 # ================
 
-type 
+type
   ValueObj* = ref object
     mark*: bool
     case kind*: Kind
@@ -449,26 +449,14 @@ type
 # ================
 # Walkable
 # ================
+template getter(name, field) =
+  proc name*(self: ValueObj): auto =
+    return self.field
 
-proc valid*(self: ValueObj): bool =
-  true
-
-proc kind*(self: ValueObj): Kind =
-  self.kind
-
-proc mark*(self: ValueObj): bool =
-  self.mark
-
-proc digits*(self: ValueObj): string =
-  $self.num
-
-proc payload*(self: ValueObj): lent string =
-  let k: bText .. bBytes = self.kind
-  case k
-  of bText, bSym:
-    return self.text
-  of bBytes:
-    return self.bytes
+getter numVal, num
+getter textVal, text
+getter symVal, text
+getter bytesVal, bytes
 
 func len*(self: ValueObj): int =
   case self.kind
@@ -495,25 +483,9 @@ func getChild*(self: ValueObj, i: int): lent ValueObj =
   else:
     refuse("cannot get child from a non frame type")
 
-iterator children*(self: ValueObj): lent ValueObj =
-  ## a frame's members in CE order, a dict's keys and values alternating,
-  ## and nothing for an atom
-  case self.kind
-  of bList, bRec:
-    for v in self.items:
-      yield v
-  of bDict:
-    for k, v in self.dict:
-      yield k
-      yield v
-  of bSet:
-    for v in self.els:
-      yield v
-  else:
-    discard
-
-func cmpNums*(a, b: ValueObj): int =
-  cmpNums(a.num, b.num)
+iterator entries*(self: ValueObj): tuple[key, val: lent ValueObj] =
+  for k, v in self.dict:
+    yield (k, v)
 
 makeCmp(ValueObj)
 makePrintable(ValueObj)

@@ -1,3 +1,4 @@
+import ./ce
 import std/[options, macros]
 export options
 
@@ -19,3 +20,15 @@ iterator items*[T](s: Search[T]): T =
 
 template search*(T, body): untyped =
   Search[T](sources: (iterator: Option[T] = body))
+
+proc atoms*[T: Walkable](v: T): auto =
+  search T:
+    for each in walk(v):
+      if each.isKind({bNil..bBytes}):
+        yield each
+
+proc frames*[T: Walkable](v: T): auto =
+  search T:
+    for each in walk(v):
+      if each.isKind({bList..bSet}):
+        yield each
