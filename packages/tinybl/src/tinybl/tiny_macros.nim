@@ -204,7 +204,10 @@ type
   Lit = ref object
     ## a value read at compile time, a splice standing where its part goes
     kind: Kind
-    mark, spread: bool
+    mark: bool
+    sigil: char
+      ## what stands in for a part, by name: '$' a splice in bl or a hole
+      ## in a pattern, '@' a spread, '&' a rest, and '\0' for none
     payload, splice: string
     members: seq[Lit]
 
@@ -223,9 +226,9 @@ proc cmp(a, b: Lit): int = 0
   ## text.nim sorts a set with `sort(cmp)`, which takes system's cmp
   ## over `==` and `<`, so those say the same
 
-proc spliced(sigil: char, spread: bool): TextParser[Lit] =
-  (ch(sigil) & chars(Letters + Digits + {'_', '.'}, "name").plus.flatten).map(
-    (m: (char, string)) => Lit(splice: m[1], spread: spread))
+proc spliced(sigil: char, name = Letters + Digits + {'_', '.'}): TextParser[Lit] =
+  (ch(sigil) & chars(name, "name").plus.flatten).map(
+    (m: (char, string)) => Lit(sigil: sigil, splice: m[1]))
 
 # ================
 # At run time
@@ -247,7 +250,11 @@ template splice*(b, x: untyped): untyped =
 
 proc withMark*[T](v: sink T): T =
   mixin setMark
-  result = v
+  when v is ref:
+    result = new T
+    result[] = v[]
+  else:
+    result = v
   result.setMark(true)
 
 proc ordered*[T; B: Builder[T]](b: B, members: sink seq[T], kind: Kind, mark: bool): T =
@@ -289,7 +296,7 @@ proc code(l: Lit, b: NimNode): NimNode =
     result = newStmtList(quote do:
       var `members` = newSeq[typeof(buildNull(`b`, false))]())
     for m in l.members:
-      if m.spread:
+      if m.sigil == '@':
         let (x, each) = (genSym(nskForVar, "x"), parseExpr(m.splice))
         var one = newCall(bindSym"splice", b, x)
         if m.mark:
@@ -314,12 +321,12 @@ proc markedAs*[T](v: sink T, mark: bool): T =
 
 proc readLit(text: string): Lit =
   let reader = basslineForm[Lit, LitBuilder](LitBuilder(),
-    @[spliced('$', false), spliced('@', true)]).complete.resolve
+    @[spliced('$'), spliced('@')]).complete.resolve
   let read = reader.parse(text)
   if not read.isSuccess:
     error "not a value: " & text
   result = read.value
-  if result.spread:
+  if result.sigil == '@':
     error "a spread stands only in a frame: " & text
 
 macro bl*(b: untyped, text: static string): untyped =
@@ -377,6 +384,243 @@ macro blet*(V: typedesc, text: static string, exported: static bool = true): unt
     result.add newLetStmt(held, val.code(builder))
     result.add quote do:
       template `shown`(): untyped = `held`
+
+# ================
+# Patterns
+# ================
+
+proc slotOf[T](v, key: T): int =
+  ## where key stands in a dict or a set, found by bisecting: the slot of
+  ## the value under it in a dict, of the member itself in a set, and -1
+  ## when it is absent
+  mixin cmp, kind, len, getChild
+  let step = if v.kind == bDict: 2 else: 1
+  var (lo, hi) = (0, v.len div step)
+  while lo < hi:
+    let
+      mid = (lo + hi) div 2
+      order = cmp(v.getChild(mid * step), key)
+    if order == 0:
+      return mid * step + step - 1
+    if order < 0: lo = mid + 1 else: hi = mid
+  -1
+
+proc restOf[T](v: T, start: int): seq[T] =
+  ## a list's or a record's members from start on
+  mixin len, getChild
+  result = newSeqOfCap[T](max(v.len - start, 0))
+  for i in start ..< v.len:
+    result.add v.getChild(i)
+
+proc plain(l: Lit): bool =
+  ## whether l holds no hole, rest or splice
+  if l.sigil != '\0':
+    return false
+  for m in l.members:
+    if not m.plain:
+      return false
+  true
+
+type Fitting = object
+  ## what fitting a branch's pattern makes
+  src, builder: NimNode
+    ## the pattern's text, for errors, and what builds its keys
+  checks: seq[NimNode]
+    ## what the subject must pass, in order
+  binds: seq[(string, NimNode)]
+    ## each hole's name and what it reads
+  slots: seq[NimNode]
+    ## where a dict's keys were found, declared before the branches
+
+proc bindTo(f: var Fitting, l: Lit, read: NimNode) =
+  ## binds the hole or rest l to what read reads, and $_ or &_ to nothing
+  if l.splice == "_":
+    return
+  let name = nimSpelling(l.splice, f.src)
+  for (bound, _) in f.binds:
+    if bound == name:
+      error(l.sigil & l.splice & " is bound twice", f.src)
+  f.binds.add (name, read)
+
+proc fit(f: var Fitting, pat: Lit, at: NimNode, anyMark: bool) =
+  ## the checks the value at reads must pass to fit pat, whatever its own
+  ## mark if anyMark, and the holes it binds. A frame's checks come before
+  ## its members', so a member is only read from a frame known to hold it
+  let mark =
+    if anyMark: bindSym"anyMark"
+    elif pat.mark: bindSym"marked"
+    else: bindSym"unmarked"
+  case pat.sigil
+  of '$':
+    if pat.mark:
+      f.checks.add newDotExpr(at, ident"mark")
+    f.bindTo(pat, at)
+    return
+  of '&':
+    error("a rest, &" & pat.splice & ", goes last in a list or record", f.src)
+  of '@':
+    error("@" & pat.splice & " spreads, and a pattern takes a rest, &" & pat.splice, f.src)
+  else:
+    discard
+  let
+    isKind = bindSym"isKind"
+    kind = newLit(pat.kind)
+  case pat.kind
+  of bList, bRec:
+    let
+      rest = pat.members.len > 0 and pat.members[^1].sigil == '&'
+      n = pat.members.len - ord(rest)
+      wide = if rest: ident">=" else: ident"=="
+    f.checks.add quote do:
+      `isKind`(`at`, `kind`, `mark`) and `wide`(`at`.len, `n`)
+    for i in 0 ..< n:
+      f.fit(pat.members[i], newCall(ident"getChild", at, newLit(i)), false)
+    if rest:
+      if pat.members[^1].mark:
+        error("a rest carries no mark: &" & pat.members[^1].splice, f.src)
+      f.bindTo(pat.members[^1], newCall(bindSym"restOf", at, newLit(n)))
+  of bDict:
+    f.checks.add quote do:
+      `isKind`(`at`, bDict, `mark`)
+    for i in countup(0, pat.members.len - 1, 2):
+      if not pat.members[i].plain:
+        error("a hole in a dict's key", f.src)
+      let
+        slot = genSym(nskVar, "slot")
+        key = pat.members[i].code(f.builder)
+        slotOf = bindSym"slotOf"
+      f.slots.add slot
+      f.checks.add quote do:
+        (`slot` = `slotOf`(`at`, `key`); `slot` >= 0)
+      f.fit(pat.members[i + 1], newCall(ident"getChild", at, slot), false)
+  of bSet:
+    if not pat.plain:
+      error("a hole in a set", f.src)
+    f.checks.add quote do:
+      `isKind`(`at`, bSet, `mark`)
+    for m in pat.members:
+      let
+        member = m.code(f.builder)
+        slotOf = bindSym"slotOf"
+      f.checks.add quote do:
+        `slotOf`(`at`, `member`) >= 0
+  # an atom is compared by what it holds, so none is built to compare with
+  of bNum:
+    let (held, numStr) = (newLit(pat.payload), bindSym"numStr")
+    f.checks.add quote do:
+      `isKind`(`at`, bNum, `mark`) and `numStr`(`at`) == `held`
+  of bText, bSym, bBytes:
+    let
+      held = newLit(pat.payload)
+      read = ident(
+        case pat.kind
+        of bText: "textVal"
+        of bSym: "symVal"
+        else: "bytesVal")
+    f.checks.add quote do:
+      `isKind`(`at`, `kind`, `mark`) and `at`.`read` == `held`
+  of bNil:
+    f.checks.add quote do:
+      `isKind`(`at`, bNil, `mark`)
+
+proc readPattern(src: NimNode): (Lit, bool) =
+  ## a branch's pattern, and whether its options let it fit any mark
+  let
+    name = Letters + Digits + {'_', '-'}
+    reader = basslineForm[Lit, LitBuilder](LitBuilder(),
+      @[spliced('$', name), spliced('&', name), spliced('@', name)]).star.complete.resolve
+    read = reader.parse(src.strVal)
+  if not read.isSuccess or read.value.len notin 1 .. 2:
+    error("a pattern, then its options if it has any", src)
+  result = (read.value[0], false)
+  if read.value.len == 2:
+    let options = read.value[1]
+    if options.kind != bSet or options.mark or not options.plain:
+      error("a pattern's options are a set, as {any-mark}", src)
+    for o in options.members:
+      if o.kind == bSym and not o.mark and o.payload == "any-mark":
+        result[1] = true
+      else:
+        error("matchValue has no option but any-mark", src)
+
+macro matchValue*(subject: untyped, branches: varargs[untyped]): untyped =
+  ##[
+    Tries each branch's pattern against `subject` in turn and runs the
+    first that fits, with its holes bound by `let`. A pattern is read as
+    `bl` reads its text. `$name` is a hole, spelled as `blet` spells a
+    name, so `$first-one` binds firstOne. `$name!` is a hole only a
+    marked value fits, and `$_` fits anything and binds nothing.
+    `&name`, last in a list or a record, is a rest, bound to the members
+    after those before it as a seq of the subject's type, and `&_` binds
+    none. A branch may name a Nim value instead of a pattern, as
+    `of ping:` for a name `blet` binds, and fits a subject equal to it.
+    `elif` and `else` branches go in among them as in an `if`.
+
+    A list or record fits one of its kind, mark and length whose
+    members fit in order, or with a rest one at least as long as the
+    members before it. A dict fits one of its mark holding each of its
+    keys, with a value that fits, and a set one holding each of its
+    members, whatever else either holds. An atom fits an equal one.
+    Holes go anywhere but in a dict's keys or in a set. The subject is
+    read only through `Walkable`, so any value type can be matched, and
+    a dict's keys and a set's members are built with the subject's type.
+
+    A pattern may be followed by its options, a set. With {any-mark}
+    the value fits whatever its own mark, so "(q $a) {any-mark}" fits
+    (q 1) and !(q 1). What it holds fits as written.
+
+    matchValue is a statement, or an expression when it ends in an
+    `else` or in a pattern that fits anything after another branch.
+
+      matchValue v:
+      of "!(serve-tcp $port)": echo "serving on ", port
+      of "!(connect-tcp $host $port)": echo "dialling ", host
+      else: discard
+  ]##
+  let
+    subjectSym = genSym(nskLet, "subject")
+    builder = genSym(nskLet, "b")
+    tries = newTree(nnkIfStmt)
+  var slots: seq[NimNode]
+  for i, b in branches:
+    case b.kind
+    of nnkOfBranch:
+      if b.len != 2:
+        error("one pattern a branch", b)
+      if b[0].kind notin {nnkStrLit, nnkTripleStrLit, nnkRStrLit}:
+        # a Nim value, which the subject fits by being equal to it
+        tries.add newTree(nnkElifBranch, infix(subjectSym, "==", b[0]), b[1])
+        continue
+      let (pattern, anyMark) = readPattern(b[0])
+      var f = Fitting(src: b[0], builder: builder)
+      f.fit(pattern, subjectSym, anyMark)
+      slots.add f.slots
+      let body = newStmtList()
+      for (name, at) in f.binds:
+        body.add newLetStmt(ident(name), at)
+      body.add b[1]
+      if f.checks.len == 0 and tries.len > 0 and i == branches.len - 1:
+        # anything fits, as an else does
+        tries.add newTree(nnkElse, body)
+      elif f.checks.len == 0:
+        # an if begins with a condition, and nothing after this is tried
+        tries.add newTree(nnkElifBranch, newLit(true), body)
+      else:
+        var fits = f.checks[0]
+        for check in f.checks[1 .. ^1]:
+          fits = infix(fits, "and", check)
+        tries.add newTree(nnkElifBranch, fits, body)
+    of nnkElifBranch, nnkElse:
+      tries.add b
+    else:
+      error("matchValue takes of, elif and else branches", b)
+  result = newStmtList(newLetStmt(subjectSym, subject))
+  result.add quote do:
+    let `builder` {.used.} = ByType[typeof(`subjectSym`)]()
+  for slot in slots:
+    result.add quote do:
+      var `slot`: int
+  result.add tries
 
 template useValue*(V: typedesc) =
   ##[

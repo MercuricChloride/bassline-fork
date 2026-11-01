@@ -425,11 +425,32 @@ func cmpNums*(x, y: BNum): int =
     cmpInts(x.toInt, y.toInt)
 
 # ================
+# Layers
+# ================
+
+type
+  Layer* = ref object of RootObj
+  Layers* = object
+    data: seq[Layer]
+
+proc add*(self: var Layers, layers: varargs[Layer]) =
+  self.data.add layers
+
+iterator items*(self: Layers): Layer =
+  for each in self.data:
+    yield each
+
+proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
+  for l in self:
+    if l of ty: return ty(l)
+
+# ================
 # Value Object
 # ================
 
 type
   ValueObj* = ref object
+    layers*: Layers
     mark*: bool
     case kind*: Kind
     of bNil: discard
@@ -449,6 +470,7 @@ type
 # ================
 # Walkable
 # ================
+
 template getter(name, field) =
   proc name*(self: ValueObj): auto =
     return self.field
@@ -482,6 +504,9 @@ func getChild*(self: ValueObj, i: int): lent ValueObj =
     return self.els.data[i]
   else:
     refuse("cannot get child from a non frame type")
+
+func `[]`*(self: ValueObj, i: int): lent ValueObj =
+  return self.getChild(i)
 
 iterator entries*(self: ValueObj): tuple[key, val: lent ValueObj] =
   for k, v in self.dict:

@@ -625,5 +625,13 @@ func expectKind*[T](a: T, k: set[Kind], mark = anyMark) =
 func expectKind*[T](a: T, k: Kind, mark = anyMark) =
   expectKind(a, {k}, mark)
 
+func expectAllKind*[T](a: openArray[T], k: set[Kind], mark = anyMark) =
+  for each in a:
+    each.expectKind(k, mark)
+
+func expectAllKind*[T](a: openArray[T], k: Kind, mark = anyMark) =
+  for each in a:
+    each.expectKind(k, mark)
+
 template expectSlot*(v: untyped, i: int) =
   guard i >= 0 and i < v.slotLen, "no slot at " & $i
