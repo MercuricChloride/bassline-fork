@@ -98,6 +98,25 @@ proc readVal(text: string, src: NimNode = nil): Val =
   except CatchableError as e:
     error("not a value: " & text & ", " & e.msg, src)
 
+proc refuseSubsts(v: Val, src: NimNode, top: bool) =
+  ## refuses a rest anywhere in v, and a spread unless among a frame's
+  ## members
+  let sub = v.layers[Subst]
+  if not sub.isNil:
+    if sub.kind == skRest:
+      error("a rest, &" & sub.name & ", stands only in a pattern", src)
+    if sub.kind == skSpread and top:
+      error("a spread, @" & sub.name & ", stands only in a frame", src)
+  for m in v.children:
+    m.refuseSubsts(src, false)
+
+proc readValue(text: string, src: NimNode): Val =
+  ## what bl and blet build: the value text spells, with a Subst on each
+  ## splice in it and each spread among a frame's members
+  result = readVal(text, src)
+  result.attachAll(Subst)
+  result.refuseSubsts(src, true)
+
 proc nimSpelling(name: string, at: NimNode): string =
   ## `file-entry` as a Nim identifier, fileEntry
   var upper = false
@@ -112,29 +131,24 @@ proc nimSpelling(name: string, at: NimNode): string =
   if not validIdentifier(result):
     error(name & " has no spelling as a Nim name", at)
 
-proc nim(s: Subst, at: NimNode): NimNode =
+proc toNim(s: Subst, at: NimNode): NimNode =
   ## the Nim s names, `$file-entry` fileEntry and `$p.x` p's field x
   var parts: seq[string]
   for part in s.name.split('.'):
     parts.add nimSpelling(part, at)
   parseExpr(parts.join("."))
 
-proc codeFor(v: Val, b: NimNode, src: NimNode = nil): NimNode =
-  ## what builds v with the builder b, its substitutions read from Nim
+proc builtBy(v: Val, b: NimNode, src: NimNode = nil): NimNode =
+  ## v as the builder b builds it at run time, its splices and spreads
+  ## read from Nim, as readValue or readPattern found them
   let
     (kind, mark) = (newLit(v.kind), newLit(v.mark))
-    sub = v.attach(Subst)
-  if not sub.isNil:
-    case sub.kind
-    of skSplice:
-      result = newCall(bindSym"splice", b, sub.nim(src))
-      if v.mark:
-        result = newCall(bindSym"withMark", result)
-      return
-    of skSpread:
-      error("a spread, @" & sub.name & ", stands only in a frame", src)
-    of skRest:
-      error("a rest, &" & sub.name & ", stands only in a pattern", src)
+    sub = v.layers[Subst]
+  if not sub.isNil and sub.kind == skSplice:
+    result = newCall(bindSym"splice", b, sub.toNim(src))
+    if v.mark:
+      result = newCall(bindSym"withMark", result)
+    return
   case v.kind
   of bNil:
     newCall(ident"buildNull", b, mark)
@@ -145,9 +159,9 @@ proc codeFor(v: Val, b: NimNode, src: NimNode = nil): NimNode =
     var built = newStmtList(quote do:
       var `members` = newSeq[typeof(buildNull(`b`, false))]())
     for m in v.children:
-      let spread = m.attach(Subst)
+      let spread = m.layers[Subst]
       if not spread.isNil and spread.kind == skSpread:
-        let (x, each) = (genSym(nskForVar, "x"), spread.nim(src))
+        let (x, each) = (genSym(nskForVar, "x"), spread.toNim(src))
         var one = newCall(bindSym"splice", b, x)
         if m.mark:
           one = newCall(bindSym"withMark", one)
@@ -155,7 +169,7 @@ proc codeFor(v: Val, b: NimNode, src: NimNode = nil): NimNode =
           for `x` in `each`:
             `members`.add `one`
       else:
-        let one = m.codeFor(b, src)
+        let one = m.builtBy(b, src)
         built.add quote do:
           `members`.add `one`
     if v.kind in {bList, bRec}:
@@ -170,7 +184,7 @@ macro bl*(b: untyped, text: static string): untyped =
   let builder = genSym(nskLet, "b")
   newBlockStmt(newStmtList(
     newLetStmt(builder, quote do: ByType[`b`]()),
-    readVal(text, b).codeFor(builder, b)))
+    readValue(text, b).builtBy(builder, b)))
 
 macro blet*(V: typedesc, text: static string, exported: static bool = true): untyped =
   ##[
@@ -183,7 +197,7 @@ macro blet*(V: typedesc, text: static string, exported: static bool = true): unt
     `exported` is false.
   ]##
   let
-    v = readVal(text, V)
+    v = readValue(text, V)
     builder = genSym(nskLet, "b")
   var named: seq[(Val, Val)]
   case v.kind
@@ -196,13 +210,13 @@ macro blet*(V: typedesc, text: static string, exported: static bool = true): unt
     error("blet takes a set of symbols or a dict from symbols to values: " & text, V)
   result = newStmtList(newLetStmt(builder, quote do: ByType[`V`]()))
   for (key, val) in named:
-    if key.kind != bSym or not key.attach(Subst).isNil:
+    if key.kind != bSym or not key.layers[Subst].isNil:
       error("blet names only by symbols: " & text, V)
     let
       name = ident(nimSpelling(key.spelled, V))
       held = genSym(nskLet, key.spelled)
       shown = if exported: postfix(name, "*") else: name
-    result.add newLetStmt(held, val.codeFor(builder, V))
+    result.add newLetStmt(held, val.builtBy(builder, V))
     result.add quote do:
       template `shown`(): untyped = `held`
 
@@ -235,7 +249,7 @@ proc restOf[T](v: T, start: int): seq[T] =
 
 proc plain(v: Val): bool =
   ## whether v holds no hole, rest or splice
-  if not v.attach(Subst).isNil:
+  if not v.layers[Subst].isNil:
     return false
   for m in v.children:
     if not m.plain:
@@ -244,8 +258,8 @@ proc plain(v: Val): bool =
 
 type FormKind = enum fHole, fSlots, fKeys, fAtom, fRefused
 
-# what a value must be to fit a node of a pattern, read from the node and
-# its Subst. A hole fits any value, or only a marked one when it is marked,
+# what a value must be to fit a node of a pattern, read from the node once
+# it and all it holds carry their Substs. A hole fits any value, or only a marked one when it is marked,
 # and binds it. A list or record fits one of its kind and mark whose first
 # `width` members fit, and no more of them unless `hole` is a rest, bound
 # to those after. A dict or set fits one of its mark holding its keys or
@@ -254,7 +268,7 @@ type FormKind = enum fHole, fSlots, fKeys, fAtom, fRefused
 layer Constraint(form: FormKind, hole: Subst, width: int, why: string)
 
 proc readConstraint(v: Val): Constraint {.reader.} =
-  let sub = v.attach(Subst)
+  let sub = v.layers[Subst]
   if not sub.isNil:
     case sub.kind
     of skSplice:
@@ -270,7 +284,7 @@ proc readConstraint(v: Val): Constraint {.reader.} =
     if v.len > 0:
       let
         last = v.getChild(v.len - 1)
-        rest = last.attach(Subst)
+        rest = last.layers[Subst]
       if not rest.isNil and rest.kind == skRest:
         if last.mark:
           return newConstraint(fRefused, rest, 0, "a rest carries no mark: &" & rest.name)
@@ -314,9 +328,7 @@ proc fit(f: var Fitting, pat: Val, at: NimNode, anyMark: bool) =
   ## Constraint says, whatever its own mark if anyMark, and the holes it
   ## binds. A frame's checks come before its members', so a member is only
   ## read from a frame known to hold it
-  let need = pat.attach(Constraint)
-  if need.isNil:
-    error("not a pattern", f.src)
+  let need = pat.layers[Constraint]
   let
     isKind = bindSym"isKind"
     kind = newLit(pat.kind)
@@ -326,7 +338,7 @@ proc fit(f: var Fitting, pat: Val, at: NimNode, anyMark: bool) =
       else: bindSym"unmarked"
   case need.form
   of fRefused:
-    error(need.why, f.src)
+    discard # readPattern refused it
   of fHole:
     if pat.mark:
       f.checks.add newDotExpr(at, ident"mark")
@@ -349,25 +361,46 @@ proc fit(f: var Fitting, pat: Val, at: NimNode, anyMark: bool) =
       for i in countup(0, pat.len - 1, 2):
         let
           slot = genSym(nskVar, "slot")
-          key = pat.getChild(i).codeFor(f.builder, f.src)
+          key = pat.getChild(i).builtBy(f.builder, f.src)
         f.slots.add slot
         f.checks.add quote do:
           (`slot` = `slotOf`(`at`, `key`); `slot` >= 0)
         f.fit(pat.getChild(i + 1), newCall(ident"getChild", at, slot), false)
     else:
       for m in pat.children:
-        let member = m.codeFor(f.builder, f.src)
+        let member = m.builtBy(f.builder, f.src)
         f.checks.add quote do:
           `slotOf`(`at`, `member`) >= 0
   of fAtom:
-    var atom = pat.codeFor(f.builder, f.src)
+    var atom = pat.builtBy(f.builder, f.src)
     if anyMark:
       atom = newCall(bindSym"markedAs", atom, newDotExpr(at, ident"mark"))
     f.checks.add quote do:
       `at` == `atom`
 
+proc constrain(v: Val, src: NimNode) =
+  ## attaches its Constraint to v and to each part a value must fit, a
+  ## list's or record's members before any rest and a dict's values,
+  ## refusing a node no value could fit, once they carry their Substs
+  let need = v.attach(Constraint)
+  if need.isNil:
+    error("not a pattern", src)
+  case need.form
+  of fRefused:
+    error(need.why, src)
+  of fSlots:
+    for i in 0 ..< need.width:
+      v.getChild(i).constrain(src)
+  of fKeys:
+    if v.kind == bDict:
+      for i in countup(1, v.len - 1, 2):
+        v.getChild(i).constrain(src)
+  of fHole, fAtom:
+    discard
+
 proc readPattern(src: NimNode): (Val, bool) =
-  ## a branch's pattern, and whether its options let it fit any mark
+  ## a branch's pattern, with a Subst and a Constraint on each of its
+  ## nodes, and whether its options let it fit any mark
   src.expectKind(nnkStrLit)
   var read: seq[Val]
   try:
@@ -377,8 +410,11 @@ proc readPattern(src: NimNode): (Val, bool) =
   if read.len notin 1 .. 2:
     error("a pattern, then its options if it has any", src)
   result = (read[0], false)
+  result[0].attachAll(Subst)
+  result[0].constrain(src)
   if read.len == 2:
     let options = read[1]
+    options.attachAll(Subst)
     if options.kind != bSet or options.mark or not options.plain:
       error("a pattern's options are a set, as {any-mark}", src)
     for o in options.children:

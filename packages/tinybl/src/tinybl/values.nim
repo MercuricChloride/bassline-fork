@@ -611,6 +611,15 @@ proc attach*(v: Val, layer: Layer): bool =
       v.layers.add layer
       return true
 
+proc attachAll*[T: Layer](v: Val, ty: typedesc[T]) =
+  when nimvm:
+    discard v.attach(T)
+    for m in v.children:
+      m.attachAll(T)
+  else:
+    for each in v.walk:
+      discard each.attach ty
+
 proc hasLayer*[T: Layer](v: Val, L: typedesc[T]): bool =
   not v.layers[L].isNil
 
