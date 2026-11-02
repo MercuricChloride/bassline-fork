@@ -1,4 +1,4 @@
-import std/algorithm
+import std/[algorithm, macros]
 import ./[ce, text]
 
 refuseWith BasslineError
@@ -425,30 +425,23 @@ func cmpNums*(x, y: BNum): int =
     cmpInts(x.toInt, y.toInt)
 
 # ================
-# Layers
-# ================
-
-type
-  Layer* = ref object of RootObj
-  Layers* = object
-    data: seq[Layer]
-
-proc add*(self: var Layers, layers: varargs[Layer]) =
-  self.data.add layers
-
-iterator items*(self: Layers): Layer =
-  for each in self.data:
-    yield each
-
-proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
-  for l in self:
-    if l of ty: return ty(l)
-
-# ================
 # Value Object
 # ================
 
 type
+  LayerVTable* = ref object
+    buildDefs*: seq[BuildProc]
+  
+  Layer* = ref object of RootObj
+    ## what a value carries beside itself, never part of its identity
+    vtable*: LayerVTable
+  
+  Layers* = object
+    data: seq[Layer]
+  
+  BuildProc* = proc(v: ValueObj): Layer {.nimcall, raises: [].}
+    ## a layer built from a value, nil when it builds none
+
   ValueObj* = ref object
     layers*: Layers
     mark*: bool
@@ -466,6 +459,93 @@ type
       dict*: SortedTable[ValueObj, ValueObj]
     of bSet:
       els*: SortedSet[ValueObj]
+
+# ================
+# Layers
+# ================
+
+proc add*(self: var Layers, layers: varargs[Layer]) =
+  self.data.add layers
+
+proc len*(self: Layers): int =
+  self.data.len
+
+iterator items*(self: Layers): Layer =
+  for each in self.data:
+    yield each
+
+proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
+  for l in self:
+    if l of ty: return ty(l)
+
+macro layer*(def: untyped) =
+  ## `layer Name(field: Type, …)` declares the layer type Name, its
+  ## constructor `newName`, its builders `Name.vtable` and `Name.build`,
+  ## which answers what the first of them to build one builds
+  def.expectKind({nnkObjConstr, nnkCall})
+  let
+    name = def[0]
+    newName = ident("new" & name.strVal)
+    table = genSym(nskLet, name.strVal & "Vtable")
+    vtable = ident"vtable"
+  var
+    fields = nnkRecList.newTree
+    params = @[name]
+    built = nnkObjConstr.newTree(name, nnkExprColonExpr.newTree(vtable, table))
+  for each in def[1 .. ^1]:
+    each.expectKind(nnkExprColonExpr)
+    fields.add newIdentDefs(postfix(each[0], "*"), each[1])
+    params.add newIdentDefs(each[0], each[1])
+    built.add nnkExprColonExpr.newTree(each[0], each[0])
+  let
+    obj = nnkObjectTy.newTree(
+      newEmptyNode(), nnkOfInherit.newTree(bindSym"Layer"), fields)
+    ty = nnkTypeSection.newTree(nnkTypeDef.newTree(
+      postfix(name, "*"), newEmptyNode(), nnkRefTy.newTree(obj)))
+    construct = newProc(postfix(newName, "*"), params, built)
+  quote do:
+    `ty`
+    let `table` = LayerVTable()
+    `construct`
+    proc `vtable`*(_: typedesc[`name`]): LayerVTable =
+      `table`
+    proc build*(_: typedesc[`name`], v: ValueObj): `name` =
+      for each in `table`.buildDefs:
+        let built = each(v)
+        if not built.isNil:
+          return `name`(built)
+
+macro builder*(def: untyped) =
+  ## adds a proc from a value to a layer to that layer's builders, which
+  ## take a refusal while it builds for building nothing
+  def.expectKind(nnkProcDef)
+  let
+    name = def.name
+    layer = def.params[0]
+    arg = def.params[1][0]
+    wrapped = genSym(nskProc, name.strVal & "Layer")
+  quote do:
+    `def`
+    proc `wrapped`(`arg`: ValueObj): Layer {.nimcall, raises: [].} =
+      try: Layer(`name`(`arg`))
+      except BasslineError: nil
+    `layer`.vtable.buildDefs.add `wrapped`
+
+proc attach*[T: Layer](v: ValueObj, ty: typedesc[T]): T =
+  ## the T v carries, built and put on v when it carries none
+  mixin build
+  result = v.layers[T]
+  if result.isNil:
+    result = T.build(v)
+    if not result.isNil:
+      v.layers.add result
+
+proc hasLayer*[T: Layer](v: ValueObj, L: typedesc[T]): bool =
+  not v.layers[L].isNil
+
+proc `+`*[T: Layer](v: ValueObj, l: typedesc[T]): ValueObj {.discardable.} =
+  discard v.attach(l)
+  v
 
 # ================
 # Walkable
