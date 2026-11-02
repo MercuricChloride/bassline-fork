@@ -430,20 +430,27 @@ func cmpNums*(x, y: BNum): int =
 
 type
   LayerVTable* = ref object
-    buildDefs*: seq[BuildProc]
-  
+    readerDefs*: seq[ReaderProc]
+    bindDefs*: seq[BinderProc]
+
+  ReaderProc* = proc(v: Val): Layer {.nimcall, raises: [].}
+    ## a layer read from a value alone, nil when it reads none
+
+  BinderProc* = proc(self: Layer, v: Val): bool {.nimcall, raises: [].}
+    ## whether a layer made apart from a value goes on it
+
   Layer* = ref object of RootObj
     ## what a value carries beside itself, never part of its identity
     vtable*: LayerVTable
-  
+
   Layers* = object
     data: seq[Layer]
-  
-  BuildProc* = proc(v: ValueObj): Layer {.nimcall, raises: [].}
-    ## a layer built from a value, nil when it builds none
 
-  ValueObj* = ref object
+  Val* = ref object
     layers*: Layers
+    value*: ValObj
+
+  ValObj* = object
     mark*: bool
     case kind*: Kind
     of bNil: discard
@@ -454,11 +461,35 @@ type
     of bBytes:
       bytes*: string
     of bList, bRec:
-      items*: seq[ValueObj]
+      items*: seq[Val]
     of bDict:
-      dict*: SortedTable[ValueObj, ValueObj]
+      dict*: SortedTable[Val, Val]
     of bSet:
-      els*: SortedSet[ValueObj]
+      els*: SortedSet[Val]
+
+proc kind*(self: Val): Kind =
+  self.value.kind
+
+proc mark*(self: Val): bool =
+  self.value.mark
+
+proc num*(self: Val): lent BNum =
+  self.value.num
+
+proc text*(self: Val): lent string =
+  self.value.text
+
+proc bytes*(self: Val): lent string =
+  self.value.bytes
+
+proc items*(self: Val): lent seq[Val] =
+  self.value.items
+
+proc dict*(self: Val): lent SortedTable[Val, Val] =
+  self.value.dict
+
+proc els*(self: Val): lent SortedSet[Val] =
+  self.value.els
 
 # ================
 # Layers
@@ -480,8 +511,8 @@ proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
 
 macro layer*(def: untyped) =
   ## `layer Name(field: Type, …)` declares the layer type Name, its
-  ## constructor `newName`, its builders `Name.vtable` and `Name.build`,
-  ## which answers what the first of them to build one builds
+  ## constructor `newName`, its readers and binders `Name.vtable`, and
+  ## `Name.read`, which answers what the first reader to read one reads
   def.expectKind({nnkObjConstr, nnkCall})
   let
     name = def[0]
@@ -509,41 +540,72 @@ macro layer*(def: untyped) =
     `construct`
     proc `vtable`*(_: typedesc[`name`]): LayerVTable =
       `table`
-    proc build*(_: typedesc[`name`], v: ValueObj): `name` =
-      for each in `table`.buildDefs:
-        let built = each(v)
-        if not built.isNil:
-          return `name`(built)
+    proc read*(_: typedesc[`name`], v: Val): `name` =
+      for each in `table`.readerDefs:
+        let got = each(v)
+        if not got.isNil:
+          return `name`(got)
 
-macro builder*(def: untyped) =
-  ## adds a proc from a value to a layer to that layer's builders, which
-  ## take a refusal while it builds for building nothing
+macro reader*(def: untyped) =
+  ## adds `proc p(v: Val): L` to L's readers, which take a refusal while
+  ## it reads for reading nothing
   def.expectKind(nnkProcDef)
   let
     name = def.name
     layer = def.params[0]
     arg = def.params[1][0]
-    wrapped = genSym(nskProc, name.strVal & "Layer")
+    wrapped = genSym(nskProc, name.strVal & "Reader")
   quote do:
     `def`
-    proc `wrapped`(`arg`: ValueObj): Layer {.nimcall, raises: [].} =
+    proc `wrapped`(`arg`: Val): Layer {.nimcall, raises: [].} =
       try: Layer(`name`(`arg`))
       except BasslineError: nil
-    `layer`.vtable.buildDefs.add `wrapped`
+    `layer`.vtable.readerDefs.add `wrapped`
 
-proc attach*[T: Layer](v: ValueObj, ty: typedesc[T]): T =
-  ## the T v carries, built and put on v when it carries none
-  mixin build
+macro binder*(def: untyped) =
+  ## adds `proc p(self: L, v: Val): bool` to L's binders, which take a
+  ## refusal while it decides for a no
+  def.expectKind(nnkProcDef)
+  let
+    name = def.name
+    self = def.params[1][0]
+    layer = def.params[1][1]
+    arg = def.params[2][0]
+    wrapped = genSym(nskProc, name.strVal & "Binder")
+  quote do:
+    `def`
+    proc `wrapped`(`self`: Layer, `arg`: Val): bool {.nimcall, raises: [].} =
+      try: `name`(`layer`(`self`), `arg`)
+      except BasslineError: false
+    `layer`.vtable.bindDefs.add `wrapped`
+
+proc attach*[T: Layer](v: Val, ty: typedesc[T]): T =
+  ## the T v carries, read from v and put on it when it carries none
+  mixin read
   result = v.layers[T]
   if result.isNil:
-    result = T.build(v)
+    result = T.read(v)
     if not result.isNil:
       v.layers.add result
 
-proc hasLayer*[T: Layer](v: ValueObj, L: typedesc[T]): bool =
+proc attach*(v: Val, layer: Layer): bool =
+  ## whether v carries layer, put on it when the first of its binders
+  ## to take v does
+  for each in v.layers:
+    if each == layer: return true
+  for each in layer.vtable.bindDefs:
+    if each(layer, v):
+      v.layers.add layer
+      return true
+
+proc hasLayer*[T: Layer](v: Val, L: typedesc[T]): bool =
   not v.layers[L].isNil
 
-proc `+`*[T: Layer](v: ValueObj, l: typedesc[T]): ValueObj {.discardable.} =
+proc `+`*[T: Layer](v: Val, l: typedesc[T]): Val {.discardable.} =
+  discard v.attach(l)
+  v
+
+proc `+`*(v: Val, l: Layer): Val {.discardable.} =
   discard v.attach(l)
   v
 
@@ -552,7 +614,7 @@ proc `+`*[T: Layer](v: ValueObj, l: typedesc[T]): ValueObj {.discardable.} =
 # ================
 
 template getter(name, field) =
-  proc name*(self: ValueObj): auto =
+  proc name*(self: Val): auto =
     return self.field
 
 getter numVal, num
@@ -560,7 +622,7 @@ getter textVal, text
 getter symVal, text
 getter bytesVal, bytes
 
-func len*(self: ValueObj): int =
+func len*(self: Val): int =
   case self.kind
   of bList, bRec:
     self.items.len
@@ -571,7 +633,7 @@ func len*(self: ValueObj): int =
   else:
     0
 
-func getChild*(self: ValueObj, i: int): lent ValueObj =
+func getChild*(self: Val, i: int): Val =
   case self.kind
   of bList, bRec:
     return self.items[i]
@@ -585,59 +647,64 @@ func getChild*(self: ValueObj, i: int): lent ValueObj =
   else:
     refuse("cannot get child from a non frame type")
 
-func `[]`*(self: ValueObj, i: int): lent ValueObj =
+func `[]`*(self: Val, i: int): auto =
   return self.getChild(i)
 
-iterator entries*(self: ValueObj): tuple[key, val: lent ValueObj] =
+iterator entries*(self: Val): tuple[key, val: Val] =
   for k, v in self.dict:
     yield (k, v)
 
-makeCmp(ValueObj)
-makePrintable(ValueObj)
+makeCmp(Val)
+makePrintable(Val)
 
 # ================
 # Readable
 # ================
 
-proc buildNull*(T: typedesc[ValueObj], mark: bool): ValueObj =
-  ValueObj(kind: bNil, mark: mark)
+proc buildNull*(T: typedesc[Val], mark: bool): Val =
+  Val(value: ValObj(kind: bNil, mark: mark))
 
-proc buildAtom*(T: typedesc[ValueObj], s: sink string, kind: Kind, mark: bool): ValueObj =
+proc buildAtom*(T: typedesc[Val], s: sink string, kind: Kind, mark: bool): Val =
   let k: bNum .. bBytes = kind
   case k
   of bNum:
-    ValueObj(kind: k, num: initNum(s), mark: mark)
+    Val(value: ValObj(kind: k, num: initNum(s), mark: mark))
   of bText, bSym:
     guard isValidUtf8(s.toBytes), "invalid utf8 bytes"
-    ValueObj(kind: k, text: s, mark: mark)
+    Val(value: ValObj(kind: k, text: s, mark: mark))
   of bBytes:
-    ValueObj(kind: k, bytes: s, mark: mark)
+    Val(value: ValObj(kind: k, bytes: s, mark: mark))
 
 proc buildFrame*(
-    T: typedesc[ValueObj], s: sink seq[ValueObj], kind: Kind, mark: bool
-): ValueObj =
+    T: typedesc[Val], s: sink seq[Val], kind: Kind, mark: bool
+): Val =
   let k: bList .. bSet = kind
   case k
   of bList, bRec:
     if k == bRec:
       guard s.len > 0, "record must have a head"
-    ValueObj(kind: k, mark: mark, items: s)
+    Val(value: ValObj(kind: k, mark: mark, items: s))
   of bDict:
     guard s.len mod 2 == 0, "dict cannot have stranded keys"
     var
-      keys = newSeqOfCap[ValueObj](s.len div 2)
-      vals = newSeqOfCap[ValueObj](s.len div 2)
+      keys = newSeqOfCap[Val](s.len div 2)
+      vals = newSeqOfCap[Val](s.len div 2)
     for i in countup(0, s.len - 1, 2):
       guard keys.len == 0 or keys[^1] < s[i], "dict keys must be strictly ascending"
       keys.add move s[i]
       vals.add move s[i + 1]
-    ValueObj(
+    Val(value: ValObj(
       kind: bDict, mark: mark, dict: toSortedTable(move keys, move vals, sorted = true)
-    )
+    ))
   of bSet:
     for i in 1 ..< s.len:
       guard s[i - 1] < s[i], "set elements must be strictly ascending"
-    ValueObj(kind: bSet, mark: mark, els: toSortedSet(s, sorted = true))
+    Val(value: ValObj(kind: bSet, mark: mark, els: toSortedSet(s, sorted = true)))
 
-proc setMark*(self: var ValueObj, mark: bool) =
-  self.mark = mark
+proc setMark*(self: var Val, mark: bool) =
+  self.value.mark = mark
+
+proc withMark*(v: Val): Val =
+  ## a new node holding v's value, marked, and none of v's layers
+  result = Val(value: v.value)
+  result.value.mark = true

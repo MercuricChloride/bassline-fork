@@ -627,7 +627,7 @@ template useValue*(V: typedesc) =
     Gives a module its own `bl`, `blet` and `record` for values of type
     V, as `refuseWith` gives it `refuse`:
 
-      useValue ValueObj
+      useValue Val
 
       record Point(x, y):
         self.x.isKind(bNum, unmarked)
