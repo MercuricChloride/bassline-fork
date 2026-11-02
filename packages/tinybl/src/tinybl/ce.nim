@@ -29,7 +29,6 @@ const
 
 type
   BasslineError* = object of ValueError
-  CodecError* = object of BasslineError
 
 # ================
 # Error utils
@@ -47,7 +46,7 @@ template refuseWith*(err) {.dirty.} =
     if not (cond):
       refuse(msg)
 
-refuseWith CodecError
+refuseWith BasslineError
 
 # ================
 # Kind & tag parsing
@@ -568,7 +567,11 @@ template makeCmp*(T) =
   ## hold the same contents, whatever their marks,
   ## can implement `sameContents(a, b: T): bool`, and the
   ## comparison skips the walk when it returns true.
-  func cmp*(a, b: T): int =
+  ##
+  ## `cmp` says what it raises because it calls itself through
+  ## `basslineCmp`, and Nim takes a call it is still inferring
+  ## to raise anything.
+  func cmp*(a, b: T): int {.raises: [BasslineError].} =
     basslineCmp(a, b)
   func `==`*(a, b: T): bool =
     cmp(a, b) == 0

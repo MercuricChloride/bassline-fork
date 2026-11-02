@@ -240,7 +240,10 @@ func initNum*(s: string): BNum =
   try:
     BNum(isBig: false, small: parseBiggestInt(s))
   except ValueError:
-    BNum(isBig: true, big: initBigInt(s, 10))
+    try:
+      BNum(isBig: true, big: initBigInt(s, 10))
+    except ValueError:
+      refuse("not a number: " & s)
 
 converter toNum*(n: SomeInteger): BNum =
   initNum(n)
@@ -631,6 +634,16 @@ getter numVal, num
 getter textVal, text
 getter symVal, text
 getter bytesVal, bytes
+
+proc payload*(self: Val): string =
+  case self.kind
+  of bNum:
+    $self.num
+  of bText, bSym:
+    self.text
+  of bBytes:
+    self.bytes
+  else: ""
 
 func len*(self: Val): int =
   case self.kind

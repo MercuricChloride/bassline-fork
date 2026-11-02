@@ -1,234 +1,7 @@
 import std/[macros, algorithm, strutils, sugar]
-import petit_parser
 import ./[ce, values, text]
 
 refuseWith BasslineError
-
-# ================
-# Records
-# ================
-
-proc buildRecordConstructor(T, V: NimNode, fieldNames: seq[NimNode], rest: NimNode): NimNode =
-  ## rest is the field holding the members after the named ones, or nil
-  let
-    factory = ident("new")
-    val = ident("val")
-    res = ident("res")
-    self = ident("self")
-    isValid = ident("isValid")
-    count = fieldNames.len
-
-  var setters = newStmtList()
-
-  for i, each in fieldNames:
-    setters.add quote do:
-      `res`.`each` = `val`.getChild(`i`)
-  if rest != nil:
-    setters.add quote do:
-      `res`.`rest` = newSeqOfCap[`V`](`val`.len - `count`)
-      for i in `count` ..< `val`.len:
-        `res`.`rest`.add `val`.getChild(i)
-
-  let fits =
-    if rest == nil: quote do: `val`.len == `count`
-    else: quote do: `val`.len >= `count`
-
-  result = quote do:
-    proc canFit*(`val`: `V`, _: typedesc[`T`]): bool =
-      `val`.kind == bRec and `fits`
-
-    proc `isValid`*(`self`: `T`): bool
-
-    proc `factory`*(R: typedesc[`T`], `val`: `V`): `T` =
-      ## the record val reads as, or nil when it doesn't fit
-      if `val`.canFit(R):
-        var `res` = R(mark: `val`.mark)
-        `setters`
-        if `isValid`(`res`):
-          return `res`
-
-proc buildRecordAccess(T, V: NimNode, fieldNames: seq[NimNode], rest: NimNode): NimNode =
-  let
-    self = ident("self")
-    idx = ident("idx")
-    val = ident("val")
-    b = ident("b")
-    getChild = ident("[]")
-    setChild = ident("[]=")
-    dollar = ident("$")
-    count = fieldNames.len
-    outside = newLit($T & " has " & $count & " fields")
-
-  var
-    getAt = newTree(nnkCaseStmt, idx)
-    setAt = newTree(nnkCaseStmt, idx)
-    members = newTree(nnkBracket)
-    fieldStrings: seq[string] = @[]
-
-  for i, each in fieldNames:
-    getAt.add newTree(nnkOfBranch, newLit(i), newDotExpr(self, each))
-    setAt.add newTree(nnkOfBranch, newLit(i),
-      newAssignment(newDotExpr(self, each), val))
-    members.add newDotExpr(self, each)
-    fieldStrings.add each.strVal
-
-  var
-    length = newLit(count)
-    held = prefix(members, "@")
-  if rest == nil:
-    let refused = quote do: raise newException(IndexDefect, `outside`)
-    getAt.add newTree(nnkElse, refused)
-    setAt.add newTree(nnkElse, refused)
-  else:
-    # past the named fields is the rest, which refuses an index it lacks
-    getAt.add newTree(nnkElse, quote do: `self`.`rest`[`idx` - `count`])
-    setAt.add newTree(nnkElse, quote do: `self`.`rest`[`idx` - `count`] = `val`)
-    fieldStrings.add rest.strVal
-    length = quote do: `count` + `self`.`rest`.len
-    held =
-      if count == 0: quote do: `self`.`rest`
-      else: quote do: `held` & `self`.`rest`
-
-  result = quote do:
-    proc kind*(_: `T`): Kind =
-      bRec
-
-    proc len*(`self`: `T`): int =
-      `length`
-
-    proc `getChild`*(`self`: `T`, `idx`: int): `V` =
-      `getAt`
-
-    proc `setChild`*(`self`: `T`, `idx`: int, `val`: sink `V`) =
-      `setAt`
-
-    iterator children*(`self`: `T`): `V` =
-      for i in 0..<`self`.len:
-        yield `self`[i]
-
-    iterator fields*(`self`: `T`): (int, string) =
-      for i, f in `fieldStrings`:
-        yield (i, f)
-
-    proc toValue*[V; B: Builder[V]](`self`: `T`, `b`: B): V =
-      ## the record as a value b builds, so it splices into bl
-      `b`.buildFrame(`held`, bRec, `self`.mark)
-
-    proc toValue*(`self`: `T`): `V` =
-      `self`.toValue(ByType[`V`]())
-
-    proc `dollar`*(`self`: `T`): string =
-      if isNil(`self`): "nil"
-      else: toBlText(`self`.toValue)
-
-macro recordOf*(V: typedesc, rec: untyped, rest: varargs[untyped]): untyped =
-  ##[
-    A record whose fields hold values of type V: `recordOf(V, Point(x, y))`
-    is a ref type Point with a mark and the fields x and y, read from a
-    record of two members by `Point.new v`. The block after it, if
-    there is one, is the conditions a record must meet, one a line,
-    each field read by its name and the record as `self`. A last field
-    written `&name`, as in `Call(h, &args)`, holds the members after the
-    named ones as a seq, so `Call.new` reads a record at least as long as
-    the named fields. `useValue` gives a module `record`, this
-    with V said once.
-  ]##
-  rec.expectKind(nnkCall)
-  rec.expectMinLen(2)
-  rec[0].expectKind(nnkIdent)
-
-  result = newStmtList()
-
-  let
-    typeName = rec[0]
-    self = ident("self")
-  var
-    fieldNames: seq[NimNode]
-    restName: NimNode = nil
-    fields = newTree(nnkIdentDefs)
-
-  for i, each in rec[1..^1]:
-    if each.kind == nnkPrefix and each[0].eqIdent("&"):
-      # &name, last, holds the members after the named ones
-      if i != rec.len - 2: error("a rest goes last", each)
-      each[1].expectKind(nnkIdent)
-      restName = each[1]
-      continue
-    each.expectKind(nnkIdent)
-    fieldNames.add each
-    fields.add postfix(each, "*")
-  fields.add(V, newEmptyNode())
-
-  ## all record types will have a mark field
-  let recList = newTree(nnkRecList,
-    newTree(nnkIdentDefs, postfix(ident("mark"), "*"), bindSym"bool", newEmptyNode()))
-  if fieldNames.len > 0: recList.add fields
-  if restName != nil:
-    recList.add newTree(nnkIdentDefs, postfix(restName, "*"),
-      nnkBracketExpr.newTree(bindSym"seq", V), newEmptyNode())
-  let
-    objTy = newTree(nnkObjectTy, newEmptyNode(), newEmptyNode(), recList)
-    exported = postfix(typeName, "*")
-  result.add quote do:
-    type `exported` = ref `objTy`
-
-  result.add buildRecordConstructor(typeName, V, fieldNames, restName)
-  result.add buildRecordAccess(typeName, V, fieldNames, restName)
-
-  var validationBody = newStmtList()
-
-  # each field by its own name, so a condition reads `x` for `self.x`,
-  # splices in bl among them
-  for each in fieldNames & (if restName == nil: @[] else: @[restName]):
-    validationBody.add quote do:
-      template `each`(): untyped {.used.} = `self`.`each`
-
-  case rest.len
-  of 0:
-    discard
-  of 1:
-    let validation = rest[0]
-    for each in validation.children:
-      validationBody.add quote do:
-        if not `each`: return false
-  else:
-    error("expected a stmtList / nothing", rest)
-
-  result.add quote do:
-    proc isValid*(`self`: `typeName`): bool =
-      if isNil(`self`): return false
-      `validationBody`
-      true
-
-type
-  Lit = ref object
-    ## a value read at compile time, a splice standing where its part goes
-    kind: Kind
-    mark: bool
-    sigil: char
-      ## what stands in for a part, by name: '$' a splice in bl or a hole
-      ## in a pattern, '@' a spread, '&' a rest, and '\0' for none
-    payload, splice: string
-    members: seq[Lit]
-
-  LitBuilder = object
-
-proc buildNull(b: LitBuilder, mark: bool): Lit = Lit(kind: bNil, mark: mark)
-proc buildAtom(b: LitBuilder, s: sink string, kind: Kind, mark: bool): Lit =
-  Lit(kind: kind, payload: s, mark: mark)
-proc buildFrame(b: LitBuilder, s: sink seq[Lit], kind: Kind, mark: bool): Lit =
-  Lit(kind: kind, members: s, mark: mark)
-proc setMark(v: var Lit, mark: bool) = v.mark = mark
-proc `==`(a, b: Lit): bool = true
-proc `<`(a, b: Lit): bool = false
-proc cmp(a, b: Lit): int = 0
-  ## order is the running program's, so text keeps the order written.
-  ## text.nim sorts a set with `sort(cmp)`, which takes system's cmp
-  ## over `==` and `<`, so those say the same
-
-proc spliced(sigil: char, name = Letters + Digits + {'_', '.'}): TextParser[Lit] =
-  (ch(sigil) & chars(name, "name").plus.flatten).map(
-    (m: (char, string)) => Lit(sigil: sigil, splice: m[1]))
 
 # ================
 # At run time
@@ -261,6 +34,7 @@ proc ordered*[T; B: Builder[T]](b: B, members: sink seq[T], kind: Kind, mark: bo
   ## a set's members, or a dict's keys and values alternating, put in CE
   ## order and built
   mixin cmp, buildFrame
+  guard kind in {bSet, bDict}, "ordered should only be used with bSet / bDict"
   if kind == bSet:
     members.sort(cmp)
     return b.buildFrame(members, bSet, mark)
@@ -278,64 +52,51 @@ proc ordered*[T; B: Builder[T]](b: B, members: sink seq[T], kind: Kind, mark: bo
 # At compile time
 # ================
 
-proc code(l: Lit, b: NimNode): NimNode =
-  ## what builds l with the builder b
-  if l.splice.len > 0:
-    result = newCall(bindSym"splice", b, parseExpr(l.splice))
-    if l.mark:
-      result = newCall(bindSym"withMark", result)
-    return
-  let (kind, mark) = (newLit(l.kind), newLit(l.mark))
-  case l.kind
-  of bNil:
-    return newCall(ident"buildNull", b, mark)
-  of bNum .. bBytes:
-    return newCall(ident"buildAtom", b, newLit(l.payload), kind, mark)
-  of bList .. bSet:
-    let members = genSym(nskVar, "members")
-    result = newStmtList(quote do:
-      var `members` = newSeq[typeof(buildNull(`b`, false))]())
-    for m in l.members:
-      if m.sigil == '@':
-        let (x, each) = (genSym(nskForVar, "x"), parseExpr(m.splice))
-        var one = newCall(bindSym"splice", b, x)
-        if m.mark:
-          one = newCall(bindSym"withMark", one)
-        result.add quote do:
-          for `x` in `each`:
-            `members`.add `one`
-      else:
-        let one = m.code(b)
-        result.add quote do:
-          `members`.add `one`
-    if l.kind in {bList, bRec}:
-      result.add newCall(ident"buildFrame", b, members, kind, mark)
-    else:
-      result.add newCall(bindSym"ordered", b, members, kind, mark)
-    result = newBlockStmt(result)
-
 proc markedAs*[T](v: sink T, mark: bool): T =
   mixin setMark
   result = v
   result.setMark(mark)
 
-proc readLit(text: string): Lit =
-  let reader = basslineForm[Lit, LitBuilder](LitBuilder(),
-    @[spliced('$'), spliced('@')]).complete.resolve
-  let read = reader.parse(text)
-  if not read.isSuccess:
-    error "not a value: " & text
-  result = read.value
-  if result.sigil == '@':
-    error "a spread stands only in a frame: " & text
+type
+  SubstKind = enum skSplice, skSpread, skRest
 
-macro bl*(b: untyped, text: static string): untyped =
-  ## the value text spells, built by b, a builder or a type that builds
-  ## itself
-  let builder = genSym(nskLet, "b")
-  newBlockStmt(newStmtList(
-    newLetStmt(builder, quote do: ByType[`b`]()),
-    readLit(text).code(builder)))
+# a symbol in bl, blet or a pattern standing for Nim: `$x` splices x, or
+# is a hole in a pattern, `@xs` spreads xs into the frame it stands in,
+# and `&rest`, last in a pattern's list or record, binds the members
+# after. A sigil doubled, `$$x`, spells the symbol `$x`
+layer Subst(name: string, kind: SubstKind)
+
+const Sigils = {'$', '@', '&'}
+
+proc readSubst(v: Val): Subst {.reader.} =
+  if v.kind != bSym or v.text.len < 2 or v.text[0] notin Sigils or
+      v.text[1] == v.text[0]:
+    return nil
+  let kind =
+    case v.text[0]
+    of '$': skSplice
+    of '@': skSpread
+    else: skRest
+  newSubst(v.text[1 .. ^1], kind)
+
+proc sigil(s: Subst): char =
+  case s.kind
+  of skSplice: '$'
+  of skSpread: '@'
+  of skRest: '&'
+
+proc spelled(v: Val): string =
+  ## what v holds, a symbol's doubled sigil halved
+  result = v.payload
+  if v.kind == bSym and result.len >= 2 and result[0] in Sigils and
+      result[1] == result[0]:
+    result = result[1 .. ^1]
+
+proc readVal(text: string, src: NimNode = nil): Val =
+  try:
+    Val.parse(text)
+  except CatchableError as e:
+    error("not a value: " & text & ", " & e.msg, src)
 
 proc nimSpelling(name: string, at: NimNode): string =
   ## `file-entry` as a Nim identifier, fileEntry
@@ -351,6 +112,66 @@ proc nimSpelling(name: string, at: NimNode): string =
   if not validIdentifier(result):
     error(name & " has no spelling as a Nim name", at)
 
+proc nim(s: Subst, at: NimNode): NimNode =
+  ## the Nim s names, `$file-entry` fileEntry and `$p.x` p's field x
+  var parts: seq[string]
+  for part in s.name.split('.'):
+    parts.add nimSpelling(part, at)
+  parseExpr(parts.join("."))
+
+proc codeFor(v: Val, b: NimNode, src: NimNode = nil): NimNode =
+  ## what builds v with the builder b, its substitutions read from Nim
+  let
+    (kind, mark) = (newLit(v.kind), newLit(v.mark))
+    sub = v.attach(Subst)
+  if not sub.isNil:
+    case sub.kind
+    of skSplice:
+      result = newCall(bindSym"splice", b, sub.nim(src))
+      if v.mark:
+        result = newCall(bindSym"withMark", result)
+      return
+    of skSpread:
+      error("a spread, @" & sub.name & ", stands only in a frame", src)
+    of skRest:
+      error("a rest, &" & sub.name & ", stands only in a pattern", src)
+  case v.kind
+  of bNil:
+    newCall(ident"buildNull", b, mark)
+  of bNum .. bBytes:
+    newCall(ident"buildAtom", b, newLit(v.spelled), kind, mark)
+  of bList .. bSet:
+    let members = genSym(nskVar, "members")
+    var built = newStmtList(quote do:
+      var `members` = newSeq[typeof(buildNull(`b`, false))]())
+    for m in v.children:
+      let spread = m.attach(Subst)
+      if not spread.isNil and spread.kind == skSpread:
+        let (x, each) = (genSym(nskForVar, "x"), spread.nim(src))
+        var one = newCall(bindSym"splice", b, x)
+        if m.mark:
+          one = newCall(bindSym"withMark", one)
+        built.add quote do:
+          for `x` in `each`:
+            `members`.add `one`
+      else:
+        let one = m.codeFor(b, src)
+        built.add quote do:
+          `members`.add `one`
+    if v.kind in {bList, bRec}:
+      built.add newCall(ident"buildFrame", b, members, kind, mark)
+    else:
+      built.add newCall(bindSym"ordered", b, members, kind, mark)
+    newBlockStmt(built)
+
+macro bl*(b: untyped, text: static string): untyped =
+  ## the value text spells, built by b, a builder or a type that builds
+  ## itself
+  let builder = genSym(nskLet, "b")
+  newBlockStmt(newStmtList(
+    newLetStmt(builder, quote do: ByType[`b`]()),
+    readVal(text, b).codeFor(builder, b)))
+
 macro blet*(V: typedesc, text: static string, exported: static bool = true): untyped =
   ##[
     Names for values, built by the type V. A set of symbols names each
@@ -362,26 +183,26 @@ macro blet*(V: typedesc, text: static string, exported: static bool = true): unt
     `exported` is false.
   ]##
   let
-    l = readLit(text)
+    v = readVal(text, V)
     builder = genSym(nskLet, "b")
-  var named: seq[(Lit, Lit)]
-  case l.kind
+  var named: seq[(Val, Val)]
+  case v.kind
   of bSet:
-    for each in l.members: named.add (each, each)
+    for each in v.children: named.add (each, each)
   of bDict:
-    for i in countup(0, l.members.len - 1, 2):
-      named.add (l.members[i], l.members[i + 1])
+    for i in countup(0, v.len - 1, 2):
+      named.add (v.getChild(i), v.getChild(i + 1))
   else:
-    error("blet takes a set of symbols or a dict from symbols to values: " & text)
+    error("blet takes a set of symbols or a dict from symbols to values: " & text, V)
   result = newStmtList(newLetStmt(builder, quote do: ByType[`V`]()))
   for (key, val) in named:
-    if key.kind != bSym or key.splice.len > 0:
-      error("blet names only by symbols: " & text)
+    if key.kind != bSym or not key.attach(Subst).isNil:
+      error("blet names only by symbols: " & text, V)
     let
-      name = ident(nimSpelling(key.payload, V))
-      held = genSym(nskLet, key.payload)
+      name = ident(nimSpelling(key.spelled, V))
+      held = genSym(nskLet, key.spelled)
       shown = if exported: postfix(name, "*") else: name
-    result.add newLetStmt(held, val.code(builder))
+    result.add newLetStmt(held, val.codeFor(builder, V))
     result.add quote do:
       template `shown`(): untyped = `held`
 
@@ -412,14 +233,60 @@ proc restOf[T](v: T, start: int): seq[T] =
   for i in start ..< v.len:
     result.add v.getChild(i)
 
-proc plain(l: Lit): bool =
-  ## whether l holds no hole, rest or splice
-  if l.sigil != '\0':
+proc plain(v: Val): bool =
+  ## whether v holds no hole, rest or splice
+  if not v.attach(Subst).isNil:
     return false
-  for m in l.members:
+  for m in v.children:
     if not m.plain:
       return false
   true
+
+type FormKind = enum fHole, fSlots, fKeys, fAtom, fRefused
+
+# what a value must be to fit a node of a pattern, read from the node and
+# its Subst. A hole fits any value, or only a marked one when it is marked,
+# and binds it. A list or record fits one of its kind and mark whose first
+# `width` members fit, and no more of them unless `hole` is a rest, bound
+# to those after. A dict or set fits one of its mark holding its keys or
+# members, and an atom one equal to it. A node no value could fit says
+# `why`, since a layer, read at run time too, holds no NimNode to refuse at
+layer Constraint(form: FormKind, hole: Subst, width: int, why: string)
+
+proc readConstraint(v: Val): Constraint {.reader.} =
+  let sub = v.attach(Subst)
+  if not sub.isNil:
+    case sub.kind
+    of skSplice:
+      return newConstraint(fHole, sub, 0, "")
+    of skRest:
+      return newConstraint(fRefused, sub, 0,
+        "a rest, &" & sub.name & ", goes last in a list or record")
+    of skSpread:
+      return newConstraint(fRefused, sub, 0,
+        "@" & sub.name & " spreads, and a pattern takes a rest, &" & sub.name)
+  case v.kind
+  of bList, bRec:
+    if v.len > 0:
+      let
+        last = v.getChild(v.len - 1)
+        rest = last.attach(Subst)
+      if not rest.isNil and rest.kind == skRest:
+        if last.mark:
+          return newConstraint(fRefused, rest, 0, "a rest carries no mark: &" & rest.name)
+        return newConstraint(fSlots, rest, v.len - 1, "")
+    newConstraint(fSlots, nil, v.len, "")
+  of bDict:
+    for i in countup(0, v.len - 1, 2):
+      if not v.getChild(i).plain:
+        return newConstraint(fRefused, nil, 0, "a hole in a dict's key")
+    newConstraint(fKeys, nil, v.len div 2, "")
+  of bSet:
+    if not v.plain:
+      return newConstraint(fRefused, nil, 0, "a hole in a set")
+    newConstraint(fKeys, nil, v.len, "")
+  else:
+    newConstraint(fAtom, nil, 0, "")
 
 type Fitting = object
   ## what fitting a branch's pattern makes
@@ -432,113 +299,90 @@ type Fitting = object
   slots: seq[NimNode]
     ## where a dict's keys were found, declared before the branches
 
-proc bindTo(f: var Fitting, l: Lit, read: NimNode) =
-  ## binds the hole or rest l to what read reads, and $_ or &_ to nothing
-  if l.splice == "_":
+proc bindTo(f: var Fitting, hole: Subst, read: NimNode) =
+  ## binds the hole or rest to what read reads, and $_ or &_ to nothing
+  if hole.name == "_":
     return
-  let name = nimSpelling(l.splice, f.src)
+  let name = nimSpelling(hole.name, f.src)
   for (bound, _) in f.binds:
     if bound == name:
-      error(l.sigil & l.splice & " is bound twice", f.src)
+      error(hole.sigil & hole.name & " is bound twice", f.src)
   f.binds.add (name, read)
 
-proc fit(f: var Fitting, pat: Lit, at: NimNode, anyMark: bool) =
-  ## the checks the value at reads must pass to fit pat, whatever its own
-  ## mark if anyMark, and the holes it binds. A frame's checks come before
-  ## its members', so a member is only read from a frame known to hold it
-  let mark =
-    if anyMark: bindSym"anyMark"
-    elif pat.mark: bindSym"marked"
-    else: bindSym"unmarked"
-  case pat.sigil
-  of '$':
-    if pat.mark:
-      f.checks.add newDotExpr(at, ident"mark")
-    f.bindTo(pat, at)
-    return
-  of '&':
-    error("a rest, &" & pat.splice & ", goes last in a list or record", f.src)
-  of '@':
-    error("@" & pat.splice & " spreads, and a pattern takes a rest, &" & pat.splice, f.src)
-  else:
-    discard
+proc fit(f: var Fitting, pat: Val, at: NimNode, anyMark: bool) =
+  ## the checks the value at reads must pass to fit pat, as pat's
+  ## Constraint says, whatever its own mark if anyMark, and the holes it
+  ## binds. A frame's checks come before its members', so a member is only
+  ## read from a frame known to hold it
+  let need = pat.attach(Constraint)
+  if need.isNil:
+    error("not a pattern", f.src)
   let
     isKind = bindSym"isKind"
     kind = newLit(pat.kind)
-  case pat.kind
-  of bList, bRec:
+    mark =
+      if anyMark: bindSym"anyMark"
+      elif pat.mark: bindSym"marked"
+      else: bindSym"unmarked"
+  case need.form
+  of fRefused:
+    error(need.why, f.src)
+  of fHole:
+    if pat.mark:
+      f.checks.add newDotExpr(at, ident"mark")
+    f.bindTo(need.hole, at)
+  of fSlots:
     let
-      rest = pat.members.len > 0 and pat.members[^1].sigil == '&'
-      n = pat.members.len - ord(rest)
-      wide = if rest: ident">=" else: ident"=="
+      n = need.width
+      wide = if need.hole.isNil: ident"==" else: ident">="
     f.checks.add quote do:
       `isKind`(`at`, `kind`, `mark`) and `wide`(`at`.len, `n`)
     for i in 0 ..< n:
-      f.fit(pat.members[i], newCall(ident"getChild", at, newLit(i)), false)
-    if rest:
-      if pat.members[^1].mark:
-        error("a rest carries no mark: &" & pat.members[^1].splice, f.src)
-      f.bindTo(pat.members[^1], newCall(bindSym"restOf", at, newLit(n)))
-  of bDict:
+      f.fit(pat.getChild(i), newCall(ident"getChild", at, newLit(i)), false)
+    if not need.hole.isNil:
+      f.bindTo(need.hole, newCall(bindSym"restOf", at, newLit(n)))
+  of fKeys:
+    let slotOf = bindSym"slotOf"
     f.checks.add quote do:
-      `isKind`(`at`, bDict, `mark`)
-    for i in countup(0, pat.members.len - 1, 2):
-      if not pat.members[i].plain:
-        error("a hole in a dict's key", f.src)
-      let
-        slot = genSym(nskVar, "slot")
-        key = pat.members[i].code(f.builder)
-        slotOf = bindSym"slotOf"
-      f.slots.add slot
-      f.checks.add quote do:
-        (`slot` = `slotOf`(`at`, `key`); `slot` >= 0)
-      f.fit(pat.members[i + 1], newCall(ident"getChild", at, slot), false)
-  of bSet:
-    if not pat.plain:
-      error("a hole in a set", f.src)
+      `isKind`(`at`, `kind`, `mark`)
+    if pat.kind == bDict:
+      for i in countup(0, pat.len - 1, 2):
+        let
+          slot = genSym(nskVar, "slot")
+          key = pat.getChild(i).codeFor(f.builder, f.src)
+        f.slots.add slot
+        f.checks.add quote do:
+          (`slot` = `slotOf`(`at`, `key`); `slot` >= 0)
+        f.fit(pat.getChild(i + 1), newCall(ident"getChild", at, slot), false)
+    else:
+      for m in pat.children:
+        let member = m.codeFor(f.builder, f.src)
+        f.checks.add quote do:
+          `slotOf`(`at`, `member`) >= 0
+  of fAtom:
+    var atom = pat.codeFor(f.builder, f.src)
+    if anyMark:
+      atom = newCall(bindSym"markedAs", atom, newDotExpr(at, ident"mark"))
     f.checks.add quote do:
-      `isKind`(`at`, bSet, `mark`)
-    for m in pat.members:
-      let
-        member = m.code(f.builder)
-        slotOf = bindSym"slotOf"
-      f.checks.add quote do:
-        `slotOf`(`at`, `member`) >= 0
-  # an atom is compared by what it holds, so none is built to compare with
-  of bNum:
-    let (held, numStr) = (newLit(pat.payload), bindSym"numStr")
-    f.checks.add quote do:
-      `isKind`(`at`, bNum, `mark`) and `numStr`(`at`) == `held`
-  of bText, bSym, bBytes:
-    let
-      held = newLit(pat.payload)
-      read = ident(
-        case pat.kind
-        of bText: "textVal"
-        of bSym: "symVal"
-        else: "bytesVal")
-    f.checks.add quote do:
-      `isKind`(`at`, `kind`, `mark`) and `at`.`read` == `held`
-  of bNil:
-    f.checks.add quote do:
-      `isKind`(`at`, bNil, `mark`)
+      `at` == `atom`
 
-proc readPattern(src: NimNode): (Lit, bool) =
+proc readPattern(src: NimNode): (Val, bool) =
   ## a branch's pattern, and whether its options let it fit any mark
-  let
-    name = Letters + Digits + {'_', '-'}
-    reader = basslineForm[Lit, LitBuilder](LitBuilder(),
-      @[spliced('$', name), spliced('&', name), spliced('@', name)]).star.complete.resolve
-    read = reader.parse(src.strVal)
-  if not read.isSuccess or read.value.len notin 1 .. 2:
+  src.expectKind(nnkStrLit)
+  var read: seq[Val]
+  try:
+    read = Val.parseMany(src.strVal)
+  except CatchableError as e:
+    error("not a pattern: " & e.msg, src)
+  if read.len notin 1 .. 2:
     error("a pattern, then its options if it has any", src)
-  result = (read.value[0], false)
-  if read.value.len == 2:
-    let options = read.value[1]
+  result = (read[0], false)
+  if read.len == 2:
+    let options = read[1]
     if options.kind != bSet or options.mark or not options.plain:
       error("a pattern's options are a set, as {any-mark}", src)
-    for o in options.members:
-      if o.kind == bSym and not o.mark and o.payload == "any-mark":
+    for o in options.children:
+      if o.kind == bSym and not o.mark and o.text == "any-mark":
         result[1] = true
       else:
         error("matchValue has no option but any-mark", src)
@@ -624,29 +468,18 @@ macro matchValue*(subject: untyped, branches: varargs[untyped]): untyped =
 
 template useValue*(V: typedesc) =
   ##[
-    Gives a module its own `bl`, `blet` and `record` for values of type
-    V, as `refuseWith` gives it `refuse`:
+    Gives a module its own `bl` and `blet` for values of type V, as
+    `refuseWith` gives it `refuse`:
 
       useValue Val
 
-      record Point(x, y):
-        self.x.isKind(bNum, unmarked)
+      let p = bl"(point 1 2)"
+      echo bl"(line $p $p!)"
 
-      let p = Point.new bl"(1 2)"
-      echo bl"(line $p $p)"
-
-    `bl"…"` is `V.bl"…"`, `blet"…"` is `V.blet"…"` and `record T(…)`
-    is `recordOf(V, T(…))`. A record splices into bl as the value it
-    holds.
+    `bl"…"` is `V.bl"…"` and `blet"…"` is `V.blet"…"`.
   ]##
   template bl(text: static string): untyped {.used.} =
     bl(V, text)
 
   template blet*(text: static string, exported: static bool = true): untyped {.used.} =
     blet(V, text, exported)
-
-  template record(rec: untyped): untyped {.used.} =
-    recordOf(V, rec)
-
-  template record(rec, conditions: untyped): untyped {.used.} =
-    recordOf(V, rec, conditions)
