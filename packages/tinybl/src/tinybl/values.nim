@@ -449,6 +449,12 @@ type
   Layers* = object
     data: seq[Layer]
 
+  LayerFlag* = enum
+    ## lfPrivate keeps a layer to its module, and lfStatic to compile
+    ## time: it has only the VM's vtable, so its readers, binders and
+    ## constructor are never part of a program
+    lfPrivate, lfStatic
+
   Val* = ref object
     layers*: Layers
     value*: ValObj
@@ -512,12 +518,23 @@ proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
   for l in self:
     if l of ty: return ty(l)
 
-macro layer*(def: untyped) =
+proc exportRoutines(n: NimNode) =
+  ## puts an export marker on each proc and template in n
+  for each in n:
+    if each.kind == nnkStmtList:
+      each.exportRoutines
+    elif each.kind in {nnkProcDef, nnkTemplateDef} and each[0].kind != nnkPostfix:
+      each[0] = postfix(each[0], "*")
+
+macro layer*(def: untyped, flags: static set[LayerFlag]) =
   ## `layer Name(field: Type, …)` declares the layer type Name, its
   ## constructor `newName`, its readers and binders `Name.vtable`, and
   ## `Name.read`, which answers what the first reader to read one reads.
   ## The VM keeps a vtable of its own, so what runs at compile time sees
-  ## the readers and binders added in `static` above it
+  ## the readers and binders added in `static` above it.
+  ##
+  ## `layer Name(…), {lfPrivate}` exports none of it, and with lfStatic
+  ## the layer is made and read only at compile time.
   def.expectKind({nnkObjConstr, nnkCall})
   let
     name = def[0]
@@ -525,6 +542,12 @@ macro layer*(def: untyped) =
     table = genSym(nskLet, name.strVal & "Vtable")
     vmTable = genSym(nskVar, name.strVal & "VmVtable")
     vtable = ident"vtable"
+    layerFlags = ident"layerFlags"
+    read = ident"read"
+    flagsLit = newLit(flags)
+  # a template, since a proc closing over a static parameter reads it empty
+  template shown(n: NimNode): NimNode =
+    if lfPrivate in flags: n else: postfix(n, "*")
   var
     fields = nnkRecList.newTree
     params = @[name]
@@ -532,30 +555,50 @@ macro layer*(def: untyped) =
       name, nnkExprColonExpr.newTree(vtable, newDotExpr(name, vtable)))
   for each in def[1 .. ^1]:
     each.expectKind(nnkExprColonExpr)
-    fields.add newIdentDefs(postfix(each[0], "*"), each[1])
+    fields.add newIdentDefs(shown(each[0]), each[1])
     params.add newIdentDefs(each[0], each[1])
     built.add nnkExprColonExpr.newTree(each[0], each[0])
   let
     obj = nnkObjectTy.newTree(
       newEmptyNode(), nnkOfInherit.newTree(bindSym"Layer"), fields)
     ty = nnkTypeSection.newTree(nnkTypeDef.newTree(
-      postfix(name, "*"), newEmptyNode(), nnkRefTy.newTree(obj)))
-    construct = newProc(postfix(newName, "*"), params, built)
-  quote do:
-    `ty`
-    let `table` = LayerVTable()
-    var `vmTable` {.compileTime.} = LayerVTable()
-    proc `vtable`*(_: typedesc[`name`]): LayerVTable =
-      when nimvm:
-        result = `vmTable`
-      else:
-        result = `table`
-    `construct`
-    proc read*(_: typedesc[`name`], v: Val): `name` =
+      shown(name), newEmptyNode(), nnkRefTy.newTree(obj)))
+    construct = newProc(shown(newName), params, built)
+  result = newStmtList(ty)
+  if lfStatic in flags:
+    construct.addPragma ident"compileTime"
+    result.add quote do:
+      var `vmTable` {.compileTime.} = LayerVTable()
+      proc `vtable`(_: typedesc[`name`]): LayerVTable {.compileTime.} =
+        `vmTable`
+  else:
+    result.add quote do:
+      let `table` = LayerVTable()
+      var `vmTable` {.compileTime.} = LayerVTable()
+      proc `vtable`(_: typedesc[`name`]): LayerVTable =
+        when nimvm:
+          result = `vmTable`
+        else:
+          result = `table`
+  let readProc = quote do:
+    proc `read`(_: typedesc[`name`], v: Val): `name` =
       for each in `name`.`vtable`.readerDefs:
         let got = each(v)
         if not got.isNil:
           return `name`(got)
+  if lfStatic in flags:
+    readProc.addPragma ident"compileTime"
+  result.add construct, readProc
+  result.add quote do:
+    template `layerFlags`(_: typedesc[`name`]): set[LayerFlag] {.used.} =
+      `flagsLit`
+  if lfPrivate notin flags:
+    result.exportRoutines
+
+template layer*(def: untyped) =
+  ## a layer with no flags. Not a default for `flags`, since a default on a
+  ## static set crashes the compiler (nimsets `s.kind == nkCurly`)
+  layer(def, {})
 
 macro reader*(def: untyped) =
   ## adds `proc p(v: Val): L` to L's readers, which take a refusal while
@@ -571,7 +614,8 @@ macro reader*(def: untyped) =
     proc `wrapped`(`arg`: Val): Layer {.nimcall, raises: [].} =
       try: Layer(`name`(`arg`))
       except BasslineError: nil
-    `layer`.vtable.readerDefs.add `wrapped`
+    when lfStatic notin `layer`.layerFlags:
+      `layer`.vtable.readerDefs.add `wrapped`
     static: `layer`.vtable.readerDefs.add `wrapped`
 
 macro binder*(def: untyped) =
@@ -589,7 +633,8 @@ macro binder*(def: untyped) =
     proc `wrapped`(`self`: Layer, `arg`: Val): bool {.nimcall, raises: [].} =
       try: `name`(`layer`(`self`), `arg`)
       except BasslineError: false
-    `layer`.vtable.bindDefs.add `wrapped`
+    when lfStatic notin `layer`.layerFlags:
+      `layer`.vtable.bindDefs.add `wrapped`
     static: `layer`.vtable.bindDefs.add `wrapped`
 
 proc attach*[T: Layer](v: Val, ty: typedesc[T]): T =

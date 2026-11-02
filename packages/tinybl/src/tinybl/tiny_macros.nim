@@ -64,7 +64,7 @@ type
 # is a hole in a pattern, `@xs` spreads xs into the frame it stands in,
 # and `&rest`, last in a pattern's list or record, binds the members
 # after. A sigil doubled, `$$x`, spells the symbol `$x`
-layer Subst(name: string, kind: SubstKind)
+layer Subst(name: string, kind: SubstKind), {lfPrivate, lfStatic}
 
 const Sigils = {'$', '@', '&'}
 
@@ -265,7 +265,7 @@ type FormKind = enum fHole, fSlots, fKeys, fAtom, fRefused
 # to those after. A dict or set fits one of its mark holding its keys or
 # members, and an atom one equal to it. A node no value could fit says
 # `why`, since a layer, read at run time too, holds no NimNode to refuse at
-layer Constraint(form: FormKind, hole: Subst, width: int, why: string)
+layer Constraint(form: FormKind, hole: Subst, width: int, why: string), {lfPrivate, lfStatic}
 
 proc readConstraint(v: Val): Constraint {.reader.} =
   let sub = v.layers[Subst]
