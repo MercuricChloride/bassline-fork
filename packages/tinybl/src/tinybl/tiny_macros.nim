@@ -378,10 +378,10 @@ proc fit(f: var Fitting, pat: Val, at: NimNode, anyMark: bool) =
     f.checks.add quote do:
       `at` == `atom`
 
-proc constrain(v: Val, src: NimNode) =
+proc constrainParts(v: Val, src: NimNode) =
   ## attaches its Constraint to v and to each part a value must fit, a
   ## list's or record's members before any rest and a dict's values,
-  ## refusing a node no value could fit, once they carry their Substs
+  ## refusing a node no value could fit
   let need = v.attach(Constraint)
   if need.isNil:
     error("not a pattern", src)
@@ -390,13 +390,19 @@ proc constrain(v: Val, src: NimNode) =
     error(need.why, src)
   of fSlots:
     for i in 0 ..< need.width:
-      v.getChild(i).constrain(src)
+      v.getChild(i).constrainParts(src)
   of fKeys:
     if v.kind == bDict:
       for i in countup(1, v.len - 1, 2):
-        v.getChild(i).constrain(src)
+        v.getChild(i).constrainParts(src)
   of fHole, fAtom:
     discard
+
+proc constrain(v: Val, src: NimNode) =
+  ## the Substs in the pattern v, attached once over the whole of it, then
+  ## its Constraints, which are read from them
+  v.attachAll(Subst)
+  v.constrainParts(src)
 
 proc readPattern(src: NimNode): (Val, bool) =
   ## a branch's pattern, with a Subst and a Constraint on each of its
@@ -410,7 +416,6 @@ proc readPattern(src: NimNode): (Val, bool) =
   if read.len notin 1 .. 2:
     error("a pattern, then its options if it has any", src)
   result = (read[0], false)
-  result[0].attachAll(Subst)
   result[0].constrain(src)
   if read.len == 2:
     let options = read[1]

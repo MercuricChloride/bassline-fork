@@ -433,8 +433,10 @@ func cmpNums*(x, y: BNum): int =
 
 type
   LayerVTable* = ref object
-    readerDefs*: seq[ReaderProc]
-    bindDefs*: seq[BinderProc]
+    ## A layer's readers and binders, each with its priority, the lowest
+    ## number first. Those of one priority run in order of first added -> last added
+    readerDefs*: seq[(int, ReaderProc)]
+    bindDefs*: seq[(int, BinderProc)]
 
   ReaderProc* = proc(v: Val): Layer {.nimcall, raises: [].}
     ## a layer read from a value alone, nil when it reads none
@@ -504,6 +506,11 @@ proc els*(self: Val): lent SortedSet[Val] =
 # Layers
 # ================
 
+const
+  LowPriority* = 100
+  MedPriority* = 50
+  HighPriority* = 25
+
 proc add*(self: var Layers, layers: varargs[Layer]) =
   self.data.add layers
 
@@ -517,6 +524,17 @@ iterator items*(self: Layers): Layer =
 proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
   for l in self:
     if l of ty: return ty(l)
+
+proc ranked[P](defs: var seq[(int, P)], def: P, priority: int) =
+  ## puts def after every def that runs before it or with it
+  proc byPriority(d: (int, P), p: int): int = cmp(d[0], p)
+  defs.insert((priority, def), defs.upperBound(priority, byPriority))
+
+proc addReader*(vt: LayerVTable, def: ReaderProc, priority = MedPriority) =
+  vt.readerDefs.ranked(def, priority)
+
+proc addBinder*(vt: LayerVTable, def: BinderProc, priority = MedPriority) =
+  vt.bindDefs.ranked(def, priority)
 
 proc exportRoutines(n: NimNode) =
   ## puts an export marker on each proc and template in n
@@ -582,7 +600,7 @@ macro layer*(def: untyped, flags: static set[LayerFlag]) =
           result = `table`
   let readProc = quote do:
     proc `read`(_: typedesc[`name`], v: Val): `name` =
-      for each in `name`.`vtable`.readerDefs:
+      for (_, each) in `name`.`vtable`.readerDefs:
         let got = each(v)
         if not got.isNil:
           return `name`(got)
@@ -600,9 +618,7 @@ template layer*(def: untyped) =
   ## static set crashes the compiler (nimsets `s.kind == nkCurly`)
   layer(def, {})
 
-macro reader*(def: untyped) =
-  ## adds `proc p(v: Val): L` to L's readers, which take a refusal while
-  ## it reads for reading nothing
+proc readerOf(def, priority: NimNode): NimNode =
   def.expectKind(nnkProcDef)
   let
     name = def.name
@@ -615,12 +631,19 @@ macro reader*(def: untyped) =
       try: Layer(`name`(`arg`))
       except BasslineError: nil
     when lfStatic notin `layer`.layerFlags:
-      `layer`.vtable.readerDefs.add `wrapped`
-    static: `layer`.vtable.readerDefs.add `wrapped`
+      `layer`.vtable.addReader(`wrapped`, `priority`)
+    static: `layer`.vtable.addReader(`wrapped`, `priority`)
 
-macro binder*(def: untyped) =
-  ## adds `proc p(self: L, v: Val): bool` to L's binders, which take a
-  ## refusal while it decides for a no
+macro reader*(def: untyped) =
+  ## adds `proc p(v: Val): L` to L's readers, which take a refusal while
+  ## it reads for reading nothing. `{.reader: HighPriority.}` gives it a
+  ## priority, and without one it has MedPriority
+  readerOf(def, bindSym"MedPriority")
+
+macro reader*(priority, def: untyped) =
+  readerOf(def, priority)
+
+proc binderOf(def, priority: NimNode): NimNode =
   def.expectKind(nnkProcDef)
   let
     name = def.name
@@ -634,8 +657,17 @@ macro binder*(def: untyped) =
       try: `name`(`layer`(`self`), `arg`)
       except BasslineError: false
     when lfStatic notin `layer`.layerFlags:
-      `layer`.vtable.bindDefs.add `wrapped`
-    static: `layer`.vtable.bindDefs.add `wrapped`
+      `layer`.vtable.addBinder(`wrapped`, `priority`)
+    static: `layer`.vtable.addBinder(`wrapped`, `priority`)
+
+macro binder*(def: untyped) =
+  ## adds `proc p(self: L, v: Val): bool` to L's binders, which take a
+  ## refusal while it decides for a no. `{.binder: HighPriority.}` gives it
+  ## a priority, and without one it has MedPriority
+  binderOf(def, bindSym"MedPriority")
+
+macro binder*(priority, def: untyped) =
+  binderOf(def, priority)
 
 proc attach*[T: Layer](v: Val, ty: typedesc[T]): T =
   ## the T v carries, read from v and put on it when it carries none
@@ -651,7 +683,7 @@ proc attach*(v: Val, layer: Layer): bool =
   ## to take v does
   for each in v.layers:
     if each == layer: return true
-  for each in layer.vtable.bindDefs:
+  for (_, each) in layer.vtable.bindDefs:
     if each(layer, v):
       v.layers.add layer
       return true
