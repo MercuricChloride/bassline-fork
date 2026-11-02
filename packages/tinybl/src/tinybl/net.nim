@@ -13,7 +13,7 @@ Nothing is read until something listens to `incoming`, so what arrives
 first waits in the socket rather than being emitted to no one. A side
 that never listens closes `incoming`, or `done` waits on it.
 ]##
-import std/[asyncdispatch, asyncnet, nativesockets, oserrors, streams]
+import std/[asyncdispatch, asyncnet, nativesockets, oserrors]
 from std/posix import shutdown, SHUT_RD, SHUT_WR, EAGAIN, EWOULDBLOCK, ENOBUFS, EINTR
 import ./[events, ce]
 
@@ -23,7 +23,7 @@ type
   Writer = ref object
     ## bytes going out on one socket, in the order they were given: values
     ## emitted into outgoing, as ce, and bytes handed to `send`
-    pending: StringStream   ## given and not yet written, from `sent` on
+    pending: string         ## given and not yet written, from `sent` on
     sent: int
     signal: Future[void]    ## set while the writer waits for more
 
@@ -40,12 +40,11 @@ proc encodeInbox[T](w: Writer, writes: Listener[T], outgoing: Emitter[T]) =
   ## If a BasslineError occurs due to codec refusals its bytes are cut
   ## and everything emitted after it is dropped and the outgoing emitter closes
   for v in writes:
-    let before = w.pending.data.len
+    let before = w.pending.len
     try:
-      w.pending.writeStream(v)
+      w.pending.writeCE(v)
     except BasslineError:
-      w.pending.data.setLen before
-      w.pending.setPosition before
+      w.pending.setLen before
       outgoing.close
       for _ in writes: discard
       return
@@ -70,19 +69,18 @@ proc flush(w: Writer, fd: AsyncFD) {.async.} =
   ## Full socket (EAGAIN, EWOULDBLOCK) is waited on
   ## Kernel out of buffers (ENOBUFS) retries
   ## Otherwise this raises
-  while w.sent < w.pending.data.len:
-    let n = posix.send(fd.SocketHandle, addr w.pending.data[w.sent],
-      w.pending.data.len - w.sent, MSG_NOSIGNAL)
+  while w.sent < w.pending.len:
+    let n = posix.send(fd.SocketHandle, addr w.pending[w.sent],
+      w.pending.len - w.sent, MSG_NOSIGNAL)
     if n > 0:
       w.sent += n
       # drop what is written, so a writer that never quite catches up
       # doesn't hold everything it ever wrote
-      if w.sent * 2 >= w.pending.data.len:
-        let rest = w.pending.data.len - w.sent
+      if w.sent * 2 >= w.pending.len:
+        let rest = w.pending.len - w.sent
         if rest > 0:
-          moveMem(addr w.pending.data[0], addr w.pending.data[w.sent], rest)
-        w.pending.data.setLen rest
-        w.pending.setPosition rest
+          moveMem(addr w.pending[0], addr w.pending[w.sent], rest)
+        w.pending.setLen rest
         w.sent = 0
       continue
     let e = osLastError()
@@ -95,16 +93,14 @@ proc recvTask[T; B: Builder[T]](
   ## reads values off sock and emits them until either side stops
   var
     r = initReader[T, B](builder)
-    s = newStringStream()
+    buf = newString(RecvSize)
   try:
     await incoming.ready
     while not incoming.isDone:
-      s.data.setLen RecvSize
-      let n = await recvInto(sock.getFd.AsyncFD, addr s.data[0], RecvSize)
+      let n = await recvInto(sock.getFd.AsyncFD, addr buf[0], RecvSize)
       if n == 0: break
-      s.data.setLen n
-      s.setPosition 0
-      while s.readStream(r):
+      var pos = 0
+      while r.readCE(buf.toOpenArray(0, n - 1), pos):
         if not incoming.emit(move r.value): break
   except CatchableError: 
     discard
@@ -123,7 +119,7 @@ proc writeTask[T](w: Writer, writes: Listener[T], outgoing: Emitter[T], fd: Asyn
   try:
     while true:
       w.encodeInbox(writes, outgoing)
-      if w.sent < w.pending.data.len:
+      if w.sent < w.pending.len:
         await w.flush(fd)
       elif writes.closed:
         break
@@ -142,7 +138,7 @@ proc wrapSocket*[T: Walkable; B: Builder[T]](
     incoming = newEmitter[T](maxQueueSize)
     outgoing = newEmitter[T](-1)
     writes = outgoing.listen
-    writer = Writer(pending: newStringStream())
+    writer = Writer()
   # closing incoming wakes a recv that is waiting, which then reads nothing
   incoming.done.addCallback(proc() = discard shutdown(sock.getFd, SHUT_RD))
   sock.setSockOpt(OptKeepAlive, keepAlive)
@@ -176,6 +172,6 @@ proc send*[T](self: EventSocket[T], data: string): bool {.discardable.} =
   w.encodeInbox(self.writes, self.outgoing)
   if self.outgoing.isDone:
     return false
-  w.pending.write(data)
+  w.pending.add data
   w.wake
   true

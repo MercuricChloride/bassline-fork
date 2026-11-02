@@ -117,7 +117,7 @@ iterator pairs*(self: RawValue): (lent RawValue, lent RawValue) =
     i.inc 2
 
 when isMainModule:
-  import std/[streams, monotimes, times, os, strutils]
+  import std/[monotimes, times, os, strutils]
 
   # the jam, whole, through both types
   let 
@@ -127,10 +127,11 @@ when isMainModule:
   proc decode[T](label: string) =
     var best = float.high
     for _ in 0..<7:
-      let s = newStringStream(jam)
-      var r: TypeReader[T]
+      var
+        r: TypeReader[T]
+        pos = 0
       let t0 = getMonoTime()
-      while s.readStream(r): 
+      while r.readCE(jam, pos):
         discard
       best = min(best, (getMonoTime() - t0).inNanoseconds.float / 1e6)
     echo label, ": ", best, " ms"

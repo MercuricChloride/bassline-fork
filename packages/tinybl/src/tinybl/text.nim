@@ -1,4 +1,4 @@
-import std/[algorithm, sequtils, strutils, sugar, streams]
+import std/[algorithm, sequtils, strutils, sugar]
 import petit_parser
 import ./ce
 
@@ -199,66 +199,64 @@ func isBareSpelling*(s: string): bool =
       return false
   true
 
-proc writeWalkable(v: Walkable, stream: StringStream) =
+proc writeWalkable(v: Walkable, dst: var string) =
   mixin children
 
   template writeMark(it) =
     if it.mark:
-      stream.write("!")
+      dst.add("!")
 
   case v.kind
   of bNil:
-    stream.write("nil")
+    dst.add("nil")
     writeMark(v)
   of bNum:
-    stream.write(v.numStr)
+    dst.add(v.numStr)
     writeMark(v)
   of bText:
-    stream.write('"')
-    stream.write(v.textVal.escaped('"'))
-    stream.write('"')
+    dst.add('"')
+    dst.add(v.textVal.escaped('"'))
+    dst.add('"')
     writeMark(v)
   of bSym:
     let s = v.symVal
     if s.isBareSpelling:
-      stream.write s
+      dst.add s
     else:
-      stream.write('\'')
-      stream.write(v.symVal.escaped('\''))
-      stream.write('\'')
+      dst.add('\'')
+      dst.add(v.symVal.escaped('\''))
+      dst.add('\'')
     writeMark(v)
   of bBytes:
-    stream.write("0x")
-    stream.write(v.bytesVal.toHex)
+    dst.add("0x")
+    dst.add(v.bytesVal.toHex)
     writeMark(v)
   of bList, bRec, bSet:
     writeMark(v)
-    stream.write(v.kind.openChar)
+    dst.add(v.kind.openChar)
     let hi = v.len - 1
     for i in 0 .. hi:
-      writeWalkable(v.getChild(i), stream)
+      writeWalkable(v.getChild(i), dst)
       if i != hi:
-        stream.write(' ')
-    stream.write(v.kind.closeChar)
+        dst.add(' ')
+    dst.add(v.kind.closeChar)
   of bDict:
     writeMark(v)
-    stream.write(v.kind.openChar)
+    dst.add(v.kind.openChar)
     let hi = v.len - 1
     for i in 0 .. hi:
-      writeWalkable(v.getChild(i), stream)
+      writeWalkable(v.getChild(i), dst)
       if i != hi:
         if i mod 2 == 0:
-          stream.write(": ")
+          dst.add(": ")
         else:
-          stream.write(" ")
+          dst.add(" ")
     if v.len == 0:
-      stream.write(':')
-    stream.write(v.kind.closeChar)
+      dst.add(':')
+    dst.add(v.kind.closeChar)
 
 proc toBlText*(self: Walkable): string =
-  var s = newStringStream()
-  writeWalkable(self, s)
-  move s.data
+  writeWalkable(self, result)
 
 proc parse*[V: Walkable; B: Builder[V]](builder: B, s: string): V =
   ## the one value s spells, made by builder

@@ -512,17 +512,21 @@ proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
 macro layer*(def: untyped) =
   ## `layer Name(field: Type, …)` declares the layer type Name, its
   ## constructor `newName`, its readers and binders `Name.vtable`, and
-  ## `Name.read`, which answers what the first reader to read one reads
+  ## `Name.read`, which answers what the first reader to read one reads.
+  ## The VM keeps a vtable of its own, so what runs at compile time sees
+  ## the readers and binders added in `static` above it
   def.expectKind({nnkObjConstr, nnkCall})
   let
     name = def[0]
     newName = ident("new" & name.strVal)
     table = genSym(nskLet, name.strVal & "Vtable")
+    vmTable = genSym(nskVar, name.strVal & "VmVtable")
     vtable = ident"vtable"
   var
     fields = nnkRecList.newTree
     params = @[name]
-    built = nnkObjConstr.newTree(name, nnkExprColonExpr.newTree(vtable, table))
+    built = nnkObjConstr.newTree(
+      name, nnkExprColonExpr.newTree(vtable, newDotExpr(name, vtable)))
   for each in def[1 .. ^1]:
     each.expectKind(nnkExprColonExpr)
     fields.add newIdentDefs(postfix(each[0], "*"), each[1])
@@ -537,11 +541,15 @@ macro layer*(def: untyped) =
   quote do:
     `ty`
     let `table` = LayerVTable()
-    `construct`
+    var `vmTable` {.compileTime.} = LayerVTable()
     proc `vtable`*(_: typedesc[`name`]): LayerVTable =
-      `table`
+      when nimvm:
+        result = `vmTable`
+      else:
+        result = `table`
+    `construct`
     proc read*(_: typedesc[`name`], v: Val): `name` =
-      for each in `table`.readerDefs:
+      for each in `name`.`vtable`.readerDefs:
         let got = each(v)
         if not got.isNil:
           return `name`(got)
@@ -561,6 +569,7 @@ macro reader*(def: untyped) =
       try: Layer(`name`(`arg`))
       except BasslineError: nil
     `layer`.vtable.readerDefs.add `wrapped`
+    static: `layer`.vtable.readerDefs.add `wrapped`
 
 macro binder*(def: untyped) =
   ## adds `proc p(self: L, v: Val): bool` to L's binders, which take a
@@ -578,6 +587,7 @@ macro binder*(def: untyped) =
       try: `name`(`layer`(`self`), `arg`)
       except BasslineError: false
     `layer`.vtable.bindDefs.add `wrapped`
+    static: `layer`.vtable.bindDefs.add `wrapped`
 
 proc attach*[T: Layer](v: Val, ty: typedesc[T]): T =
   ## the T v carries, read from v and put on it when it carries none

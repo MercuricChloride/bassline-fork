@@ -10,7 +10,7 @@ to keep it as they had it to prevent casting / needless copying.
 This may change in the future, but for now this is how it's done.
 ]##
 from std/bitops import countTrailingZeroBits
-import std/[options, streams]
+import std/options
 export options
 
 when not defined(js):
@@ -239,7 +239,7 @@ func isValidUtf8*(str: string): bool =
   str.toBytes.isValidUtf8
 
 # ================
-# Value / Stream Concepts
+# Value Concepts
 # ================
 
 type
@@ -315,7 +315,7 @@ proc buildFrame*[T](self: ByType[T], members: sink seq[T], kind: Kind, mark: boo
   T.buildFrame(members, kind, mark)
 
 # ================
-# Stream Reading
+# Reading
 # ================
 
 type
@@ -325,7 +325,7 @@ type
     members: seq[T]
 
   Reader*[T,B] = object
-    ## Holds state for stream readers. This includes a stack
+    ## Holds state for reading CE in pieces. This includes a stack
     ## of open frames, the atom header & payloads, as well
     ## as the last whole value read
     open: seq[OpenFrame[T]]
@@ -353,16 +353,29 @@ func starved*[T; B](r: Reader[T, B]): bool =
   ## whether the bytes ran out inside a value rather than between two
   r.open.len > 0 or r.headLen > 0
 
+proc take(dst: var string, src: openArray[char], at, n: int) =
+  ## appends the n bytes of src from at
+  when nimvm:
+    for i in at ..< at + n:
+      dst.add src[i]
+  else:
+    if n > 0:
+      let have = dst.len
+      dst.setLen have + n
+      copyMem(addr dst[have], addr src[at], n)
+
 proc readAtom[T; B: Builder[T]](
-    s: Stream, r: var Reader[T,B], val: var T, n: var int
+    r: var Reader[T,B], src: openArray[char], pos: var int, val: var T, n: var int
 ): bool =
-  ## the atom headed by r.head[0], or false when the bytes run out first
+  ## the atom headed by r.head[0], or false when src runs out first
   mixin buildAtom
   template fill(upTo: int) =
+    while r.headLen < upTo and pos < src.len:
+      r.head[r.headLen] = byte(src[pos])
+      inc r.headLen
+      inc pos
     if r.headLen < upTo:
-      r.headLen += s.readData(addr r.head[r.headLen], upTo - r.headLen)
-      if r.headLen < upTo:
-        return false
+      return false
 
   let (kind, mark, inlineLen) = headerData(r.head[0])
   var length = inlineLen
@@ -378,28 +391,36 @@ proc readAtom[T; B: Builder[T]](
       guard length >= 255, "non minimal large length"
   n = r.headLen + length
   guard r.size + n <= MaxValueBytes, "value larger than MaxValueBytes"
-  let have = r.payload.len
-  if have < length:
-    r.payload.setLen length
-    let got = s.readData(addr r.payload[have], length - have)
-    r.payload.setLen have + got
-    if have + got < length:
-      return false
+  let
+    have = r.payload.len
+    got = min(length - have, src.len - pos)
+  r.payload.take(src, pos, got)
+  pos += got
+  if have + got < length:
+    return false
   val = r.builder.buildAtom(move r.payload, kind, mark)
+  when nimvm:
+    # the VM's move copies, leaving the payload behind
+    r.payload.setLen 0
   true
 
-proc readStream*[T;B: Builder[T]](s: Stream, r: var Reader[T,B]): bool =
-  ## reads on from where r stopped, answering true once a value was read
-  ## whole, storing it in r.value. Otherwise this returns false if it
-  ## is starved and can wait to resume without reading anything twice.
+proc readCE*[T;B: Builder[T]](
+    r: var Reader[T,B], src: openArray[char], pos: var int): bool =
+  ## reads src from pos on, carrying on from where r stopped, and answers
+  ## true once a value was read whole, storing it in r.value, with pos
+  ## just past it. Otherwise src ran out, all of it taken from pos on,
+  ## and r can resume on the bytes that follow without reading anything
+  ## twice.
   ##
   ## If invalid CE is read r is poisoned and won't produce anything
   ## useful in the future
   mixin buildNull, buildFrame
   while true:
     if r.headLen == 0:
-      if s.readData(addr r.head[0], 1) != 1:
+      if pos >= src.len:
         return false
+      r.head[0] = byte(src[pos])
+      inc pos
       r.headLen = 1
     var
       v: T
@@ -421,7 +442,7 @@ proc readStream*[T;B: Builder[T]](s: Stream, r: var Reader[T,B]): bool =
     of pvNil:
       v = r.builder.buildNull(headerData(r.head[0]).mark)
     of pvAtom:
-      if not s.readAtom(r, v, n):
+      if not r.readAtom(src, pos, v, n):
         return false
     r.headLen = 0
     r.size += n
@@ -432,42 +453,44 @@ proc readStream*[T;B: Builder[T]](s: Stream, r: var Reader[T,B]): bool =
       return true
     r.open[^1].members.add move v
 
-iterator readEach*[T;B: Builder[T]](
-    s: Stream, r: var Reader[T,B]): T {.closure.} =
-  while readStream(s, r):
+iterator readEach*[T;B: Builder[T]](r: var Reader[T,B], src: openArray[char]): T =
+  ## every value src finishes, r carrying on from where it stopped
+  var pos = 0
+  while r.readCE(src, pos):
     yield r.value
 
 # ================
-# Stream Writing
+# Writing
 # ================
 
-proc writeHeader(stream: Stream, kind: Kind, mark: bool, len: int) =
+proc writeHeader(dst: var string, kind: Kind, mark: bool, len: int) =
   let
     k: byte = kind.tag
     m: byte = if mark: MarkBit else: 0
     l: byte = byte min(len, 7)
     h: byte = ((k shl 4) or m or l)
-  stream.write h
+  dst.add char(h)
   if len in 7..254:
-    stream.write byte(len)
+    dst.add char(len)
   elif len >= 255:
-    stream.write 0xFF'u8
+    dst.add '\xFF'
     for shift in [24, 16, 8, 0]:
-      stream.write byte((len shr shift) and 0xFF)
+      dst.add char((len shr shift) and 0xFF)
 
-proc writeAtom(stream: Stream, kind: Kind, mark: bool, payload: string) =
+proc writeAtom(dst: var string, kind: Kind, mark: bool, payload: string) =
   guard payload.len <= MaxPayload.int, "payload too large"
-  stream.writeHeader(kind, mark, payload.len)
-  stream.write payload
+  dst.writeHeader(kind, mark, payload.len)
+  dst.add payload
 
-proc writeStream*(stream: Stream, val: Walkable) =
+proc writeCE*(dst: var string, val: Walkable) =
+  ## appends val's CE to dst
   when val is CheckedVal:
     guard val.valid, "writing invalid value"
   template emitAtom(s) =
-    stream.writeAtom(val.kind, val.mark, s)
+    dst.writeAtom(val.kind, val.mark, s)
   case val.kind
   of bNil:
-    stream.writeHeader(bNil, val.mark, 0)
+    dst.writeHeader(bNil, val.mark, 0)
   of bNum:
     emitAtom(val.numStr)
   of bText:
@@ -477,10 +500,10 @@ proc writeStream*(stream: Stream, val: Walkable) =
   of bBytes:
     emitAtom(val.bytesVal)
   else:
-    stream.writeHeader(val.kind, val.mark, 0)
+    dst.writeHeader(val.kind, val.mark, 0)
     for i in 0..<val.len:
-      stream.writeStream(val.getChild(i))
-    stream.write(EndByte)
+      dst.writeCE(val.getChild(i))
+    dst.add char(EndByte)
 
 # ================
 # Walkable Derivations
@@ -583,9 +606,8 @@ proc encodedSize*[T: Walkable](self: T): int =
   self.encodedSize(result)
 
 proc ce*[T: Walkable](self: T): string =
-  let s = newStringStream(newStringUninit(self.encodedSize))
-  s.writeStream(self)
-  move s.data
+  result = newStringOfCap(self.encodedSize)
+  result.writeCE(self)
 
 iterator children*[T: Walkable](self: T): T =
   if self.kind in {bList..bSet}:
