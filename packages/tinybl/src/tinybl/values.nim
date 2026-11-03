@@ -27,21 +27,20 @@ func toSortedTable*[K, V](
   guard keys.len == vals.len, "a value for every key"
   if sorted:
     return SortedTable[K, V](keys: keys, vals: vals)
-  var
-    ks = keys
-    vs = vals
-    order = newSeq[int](ks.len)
-  for i in 0 ..< order.len:
-    order[i] = i
-  order.sort(
-    proc(a, b: int): int =
-      cmp(ks[a], ks[b])
+  # sorted as pairs, by a comparison that captures nothing, which the VM
+  # can compile when this is instantiated for compile time too
+  var entries = newSeqOfCap[(K, V)](keys.len)
+  for i in 0 ..< keys.len:
+    entries.add (move(keys[i]), move(vals[i]))
+  entries.sort(
+    proc(a, b: (K, V)): int =
+      cmp(a[0], b[0])
   )
-  result.keys = newSeqOfCap[K](ks.len)
-  result.vals = newSeqOfCap[V](vs.len)
-  for i in order:
-    result.keys.add move(ks[i])
-    result.vals.add move(vs[i])
+  result.keys = newSeqOfCap[K](entries.len)
+  result.vals = newSeqOfCap[V](entries.len)
+  for each in entries.mitems:
+    result.keys.add move(each[0])
+    result.vals.add move(each[1])
 
 func toSortedTable*[K, V](
     self: openArray[Entry[K, V]], sorted = false

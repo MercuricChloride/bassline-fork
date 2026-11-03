@@ -1,0 +1,47 @@
+pEentry!1€Bat'1793669598172EpriorGsession7
+1793669598Gtrigger pGcreatedWô2õ¹>œÀ\¨Ði{nÿpEslots€G>>parentpFobjectWXd½Œö$'/¿-Aîpƒ      pEentry!2€Bat'1793669598172Eprior!1Gsession7
+1793669598Gtrigger pGdefinedWXd½Œö$'/¿-AîpƒG	workspacepFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry!3€Bat'1793669602437Eprior!2Gsession7
+1793669598Gtrigger pG	evaluatedCman  pEentry!4€Bat'1793669606457Eprior!3Gsession7
+1793669598Gtrigger pG	evaluatedpCman   pEentry!5€Bat'1793670044287Eprior!4Gsession7
+1793670039Gtrigger pG	evaluatedFmanual  pEentry!6€Bat'1793670047152Eprior!5Gsession7
+1793670039Gtrigger pG	evaluatedpFmanual   pEentry!7€Bat'1793670047152Eprior!6Gsession7
+1793670039Gtrigger!6 pGrefusedpFmanual 7Enot callable: (object 0x969965A95BCDE2D8316B76C682DADE7F) in (manual)  pEentry!8€Bat'1793670054263Eprior!7Gsession7
+1793670039Gtrigger pG	evaluatedpGdescribeFmanual   pEentry!9€Bat'1793670077747Eprior!8Gsession7
+1793670039Gtrigger pG	evaluatedpCdocFmanual   pEentry"10€Bat'1793670077748Eprior!9Gsession7
+1793670039Gtrigger!9 pGrefusedpCdocFmanual 7Knot understood: (doc manual) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"11€Bat'1793670080340Eprior"10Gsession7
+1793670039Gtrigger pG	evaluatedpDdocsFmanual   pEentry"12€Bat'1793670080340Eprior"11Gsession7
+1793670039Gtrigger"11 pGrefusedpDdocsFmanual 7Lnot understood: (docs manual) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"13€Bat'1793670088116Eprior"12Gsession7
+1793670039Gtrigger pG	evaluatedpGdescribeFmanual   pEentry"14€Bat'1793670095915Eprior"13Gsession7
+1793670039Gtrigger pG	evaluatedpCmanFmanual   pEentry"15€Bat'1793670106916Eprior"14Gsession7
+1793670039Gtrigger pG	evaluatedpCmanDsend   pEentry"16€Bat'1793670133688Eprior"15Gsession7
+1793670039Gtrigger pG	evaluatedGtutorial  pEentry"17€Bat'1793670133688Eprior"16Gsession7
+1793670039Gtrigger"16 pGrefusedGtutorial7unbound: tutorial  pEentry"18€Bat'1793670136803Eprior"17Gsession7
+1793670039Gtrigger pG	evaluatedpGtutorial   pEentry"19€Bat'1793670136803Eprior"18Gsession7
+1793670039Gtrigger"18 pGrefusedpGtutorial 7Inot understood: (tutorial) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"20€Bat'1793670140925Eprior"19Gsession7
+1793670039Gtrigger pG	evaluatedpGtutorial   pEentry"21€Bat'1793670140925Eprior"20Gsession7
+1793670039Gtrigger"20 pGrefusedpGtutorial 7Inot understood: (tutorial) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"22€Bat'1793670147249Eprior"21Gsession7
+1793670039Gtrigger pG	evaluatedpFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"23€Bat'1793670147249Eprior"22Gsession7
+1793670039Gtrigger"22 pGrefusedpFobjectWô2õ¹>œÀ\¨Ði{nÿ 7jnot understood: (object 0xF432F5B93E059C8FC05CA8D0697B6EFF) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"24€Bat'1793670153486Eprior"23Gsession7
+1793670039Gtrigger pG	evaluatedpGdescribepFobjectWô2õ¹>œÀ\¨Ði{nÿ    pEentry"25€Bat'1793670153487Eprior"24Gsession7
+1793670039Gtrigger"24 pGrefusedpGdescribepFobjectWô2õ¹>œÀ\¨Ði{nÿ  7jnot understood: (object 0xF432F5B93E059C8FC05CA8D0697B6EFF) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"26€Bat'1793670345875Eprior"25Gsession7
+1793670343Gtrigger pG	evaluatedpEtrace   pEentry"27€Bat'1793670345876Eprior"26Gsession7
+1793670343Gtrigger"26 pGrefusedpEtrace 70(trace on), (trace off) or (trace FORM): (trace)  pEentry"28€Bat'1793670348323Eprior"27Gsession7
+1793670343Gtrigger pG	evaluatedpEtraceBon   pEentry"29€Bat'1793670354059Eprior"28Gsession7
+1793670343Gtrigger pG	evaluatedpGdescribeCfoo   pEentry"30€Bat'1793670354059Eprior"29Gsession7
+1793670343Gtrigger"29 pDsentpGdescribeCfoo pFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"31€Bat'1793670354059Eprior"30Gsession7
+1793670343Gtrigger"29 pDsentCfoopFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"32€Bat'1793670354059Eprior"31Gsession7
+1793670343Gtrigger"29 pGrefusedpGdescribeCfoo 7unbound: foo  pEentry"33€Bat'1793670364536Eprior"32Gsession7
+1793670343Gtrigger pG	evaluatedpCdocGdocumenting   pEentry"34€Bat'1793670364536Eprior"33Gsession7
+1793670343Gtrigger"33 pDsentpCdocGdocumenting pFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"35€Bat'1793670364537Eprior"34Gsession7
+1793670343Gtrigger"33 pGrefusedpCdocGdocumenting 7Pnot understood: (doc documenting) by (object 0xF432F5B93E059C8FC05CA8D0697B6EFF)  pEentry"36€Bat'1793670371115Eprior"35Gsession7
+1793670343Gtrigger pG	evaluatedpGdescribeGdocumenting   pEentry"37€Bat'1793670371115Eprior"36Gsession7
+1793670343Gtrigger"36 pDsentpGdescribeGdocumenting pFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"38€Bat'1793670371116Eprior"37Gsession7
+1793670343Gtrigger"36 pDsentGdocumentingpFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"39€Bat'1793670371116Eprior"38Gsession7
+1793670343Gtrigger"36 pGrefusedpGdescribeGdocumenting 7unbound: documenting  pEentry"40€Bat'1793670374220Eprior"39Gsession7
+1793670343Gtrigger pG	evaluatedpGdescribeDdocs   pEentry"41€Bat'1793670374220Eprior"40Gsession7
+1793670343Gtrigger"40 pDsentpGdescribeDdocs pFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"42€Bat'1793670374221Eprior"41Gsession7
+1793670343Gtrigger"40 pDsentDdocspFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"43€Bat'1793670374221Eprior"42Gsession7
+1793670343Gtrigger"40 pGrefusedpGdescribeDdocs 7unbound: docs  pEentry"44€Bat'1793670376993Eprior"43Gsession7
+1793670343Gtrigger pG	evaluatedpGdescribeCman   pEentry"45€Bat'1793670376993Eprior"44Gsession7
+1793670343Gtrigger"44 pDsentpGdescribeCman pFobjectWô2õ¹>œÀ\¨Ði{nÿ   pEentry"46€Bat'1793670376994Eprior"45Gsession7
+1793670343Gtrigger"44 pDsentCmanpFobjectWô2õ¹>œÀ\¨Ði{nÿ   
