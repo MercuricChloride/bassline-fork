@@ -8,91 +8,98 @@ refuseWith BasslineError
 # ================
 
 type
-  Entry*[K, V] = tuple[key: K, val: V]
+  Entry*[K, V] = object
+    key*: K
+    val*: V
+
   Pair*[T] = Entry[T, T]
   SortedTable*[K, V] = object
-    keys: seq[K]
-    vals: seq[V]
+    entries: seq[Entry[K, V]]
 
-func keys*[K, V](self: SortedTable[K, V]): lent seq[K] =
-  self.keys
+func entries*[K, V](self: SortedTable[K, V]): lent seq[Entry[K, V]] =
+  self.entries
 
-func vals*[K, V](self: SortedTable[K, V]): lent seq[V] =
-  self.vals
+func cmpKeys*[K, V](a, b: Entry[K, V]): int =
+  mixin cmp
+  cmp(a.key, b.key)
+
+func cmpKeys*[K, V](a: Entry[K, V], b: K): int =
+  mixin cmp
+  cmp(a.key, b)
 
 func toSortedTable*[K, V](
-    keys: sink seq[K], vals: sink seq[V], sorted = false
+    entries: sink seq[Entry[K, V]], sorted = false
 ): SortedTable[K, V] =
   mixin cmp
-  guard keys.len == vals.len, "a value for every key"
   if sorted:
-    return SortedTable[K, V](keys: keys, vals: vals)
+    return SortedTable[K, V](entries: entries)
   # sorted as pairs, by a comparison that captures nothing, which the VM
   # can compile when this is instantiated for compile time too
-  var entries = newSeqOfCap[(K, V)](keys.len)
-  for i in 0 ..< keys.len:
-    entries.add (move(keys[i]), move(vals[i]))
-  entries.sort(
-    proc(a, b: (K, V)): int =
-      cmp(a[0], b[0])
-  )
-  result.keys = newSeqOfCap[K](entries.len)
-  result.vals = newSeqOfCap[V](entries.len)
-  for each in entries.mitems:
-    result.keys.add move(each[0])
-    result.vals.add move(each[1])
+  entries.sort(cmpKeys)
+  SortedTable[K, V](entries: entries)
 
 func toSortedTable*[K, V](
     self: openArray[Entry[K, V]], sorted = false
 ): SortedTable[K, V] =
-  var
-    keys = newSeqOfCap[K](self.len)
-    vals = newSeqOfCap[V](self.len)
-  for e in self:
-    keys.add e.key
-    vals.add e.val
-  toSortedTable(move keys, move vals, sorted)
+  toSortedTable(@self, sorted)
+
+func toSortedTable*[T](ravel: sink seq[T], sorted = false): SortedTable[T, T] =
+  guard ravel.len mod 2 == 0, "ravel len must be even"
+  var entries = newSeqOfCap[Entry[T, T]](ravel.len div 2)
+  for i in countup(1, ravel.high, 2):
+    entries.add Entry[T, T](key: move ravel[i - 1], val: move ravel[i])
+  toSortedTable(entries, sorted)
+
+func toRavel*[T](self: sink SortedTable[T, T]): seq[T] =
+  var s = newSeqOfCap[T](self.entries.len * 2)
+  for each in self.entries:
+    s.add move(each)
+  s
 
 func lowerIdx[K, V](self: SortedTable[K, V], key: K): int =
   ## the first index whose key is not below key
   mixin cmp
-  self.keys.lowerBound(key, cmp)
+  self.entries.lowerBound(key, cmpKeys)
 
 func indexOf*[K, V](self: SortedTable[K, V], key: K): int =
   ## key's index, or -1 when it has none
   mixin cmp
   let i = self.lowerIdx(key)
-  if i < self.keys.len and cmp(self.keys[i], key) == 0: i else: -1
+  if i < self.len and cmpKeys(self.entries[i], key) == 0: i else: -1
 
 func put*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   mixin cmp
   let i = self.lowerIdx(key)
-  if i < self.keys.len and cmp(self.keys[i], key) == 0:
-    self.vals[i] = val
+  if i < self.entries.len and cmpKeys(self.entries[i], key) == 0:
+    self.entries[i].val = val
   else:
-    self.keys.insert(key, i)
-    self.vals.insert(val, i)
+    self.entries.insert(Entry[K,V](key: key, val: val), i)
 
 func delete*[K, V](self: var SortedTable[K, V], key: K) =
   let i = self.indexOf(key)
   if i != -1:
-    self.keys.delete(i)
-    self.vals.delete(i)
+    self.entries.delete(i)
 
 func get*[K, V](self: SortedTable[K, V], key: K): lent V =
   let i = self.indexOf(key)
   if i == -1:
     raise newException(KeyError, "key not found")
-  self.vals[i]
+  self.entries[i]
+
+func getRavel*[T](self: SortedTable[T,T], i: int): lent T =
+  if i mod 2 == 0:
+    return self.entries[i div 2].key
+  else:
+    return self.entries[i div 2].val
 
 func len*[K, V](self: SortedTable[K, V]): Natural =
-  self.keys.len
+  self.entries.len
 
 func low*[K, V](self: SortedTable[K, V]): lent K =
-  self.keys[0]
+  self.entries[0].key
 
 func high*[K, V](self: SortedTable[K, V]): lent K =
-  self.keys[self.keys.len - 1]
+  self.entries[self.entries.high].key
 
 # ================
 # Table Sugar
@@ -101,28 +108,27 @@ func high*[K, V](self: SortedTable[K, V]): lent K =
 func getOrPut*[K, V](self: var SortedTable[K, V], key: K, val: sink V): lent V =
   mixin cmp
   let i = self.lowerIdx(key)
-  if i == self.keys.len or cmp(self.keys[i], key) != 0:
-    self.keys.insert(key, i)
-    self.vals.insert(val, i)
-  self.vals[i]
+  if i == self.entries.len or cmpKeys(self.entries[i], key) != 0:
+    self.entries.insert Entry[K,V](key: key, val: val)
+  self.entries[i].val
 
 func getOr*[K, V](self: SortedTable[K, V], key: K, val: V): V =
   let i = self.indexOf(key)
   if i == -1:
     val
   else:
-    self.vals[i]
+    self.entries[i].val
 
 func contains*[K, V](self: SortedTable[K, V], key: K): bool =
   self.indexOf(key) != -1
 
-iterator items*[K, V](self: SortedTable[K, V]): lent V =
-  for v in self.vals:
-    yield v
+iterator items*[K, V](self: SortedTable[K, V]): lent Entry[K,V] =
+  for each in self.entries:
+    yield each
 
-iterator pairs*[K, V](self: SortedTable[K, V]): Entry[lent K, lent V] =
-  for i in 0 ..< self.keys.len:
-    yield (self.keys[i], self.vals[i])
+iterator pairs*[K, V](self: SortedTable[K, V]): (lent K, lent V) =
+  for i in 0 ..< self.entries.len:
+    yield (self.entries[i].key, self.entries[i].val)
 
 func `[]`*[K, V](self: SortedTable[K, V], key: K): lent V =
   self.get(key)
@@ -131,7 +137,7 @@ func `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
   let i = self.indexOf(key)
   if i == -1:
     raise newException(KeyError, "key not found")
-  self.vals[i]
+  self.entries[i].val
 
 func `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   self.put(key, val)
@@ -313,15 +319,25 @@ compare `<=`, bool
 compare `==`, bool
 
 func addFits(a, b: int): bool =
-  if b >= 0: a <= high(int) - b else: a >= low(int) - b
+  if b >= 0:
+    a <= high(int) - b
+  else:
+    a >= low(int) - b
 
 func subFits(a, b: int): bool =
-  if b >= 0: a >= low(int) + b else: a <= high(int) + b
+  if b >= 0:
+    a >= low(int) + b
+  else:
+    a <= high(int) + b
 
 func mulFits(a, b: int): bool =
   if a == 0 or b == 0:
     return true
-  let most = if (a < 0) != (b < 0): magnitude(low(int)) else: magnitude(high(int))
+  let most =
+    if (a < 0) != (b < 0):
+      magnitude(low(int))
+    else:
+      magnitude(high(int))
   magnitude(a) <= most div magnitude(b)
 
 func divFits(a, b: int): bool =
@@ -457,7 +473,8 @@ type
     ## lfPrivate keeps a layer to its module, and lfStatic to compile
     ## time: it has only the VM's vtable, so its readers, binders and
     ## constructor are never part of a program
-    lfPrivate, lfStatic
+    lfPrivate
+    lfStatic
 
   Val* = ref object
     layers*: Layers
@@ -536,11 +553,14 @@ iterator items*(self: Layers): Layer =
 
 proc `[]`*[T: Layer](self: Layers, ty: typedesc[T]): T =
   for l in self:
-    if l of ty: return ty(l)
+    if l of ty:
+      return ty(l)
 
 proc ranked[P](defs: var seq[(int, P)], def: P, priority: int) =
   ## puts def after every def that runs before it or with it
-  proc byPriority(d: (int, P), p: int): int = cmp(d[0], p)
+  proc byPriority(d: (int, P), p: int): int =
+    cmp(d[0], p)
+
   defs.insert((priority, def), defs.upperBound(priority, byPriority))
 
 proc addReader*(vt: LayerVTable, def: ReaderProc, priority = MedPriority) =
@@ -564,7 +584,8 @@ proc kebab(name: string): string =
   ## `SlotPlace` as `slot-place`
   for i, c in name:
     if c in {'A' .. 'Z'}:
-      if i > 0: result.add '-'
+      if i > 0:
+        result.add '-'
       result.add chr(ord(c) + 32)
     else:
       result.add c
@@ -586,11 +607,14 @@ proc written(name, newName: NimNode, fields: seq[NimNode]): NimNode =
     reads = genSym(nskProc, name.strVal & "Head")
     heads = bindSym"layerHeads"
   result = newStmtList quote do:
-    proc `reads`(v: Val): Layer {.nimcall, raises: [].} = `name`.read(v)
+    proc `reads`(v: Val): Layer {.nimcall, raises: [].} =
+      `name`.read(v)
+
     `heads`[`head`] = `reads`
   for each in fields:
-    if not (each[1].kind == nnkIdent and
-        each[1].strVal in ["Val", "string", "int", "BNum"]):
+    if not (
+      each[1].kind == nnkIdent and each[1].strVal in ["Val", "string", "int", "BNum"]
+    ):
       return
   let
     self = genSym(nskParam, "l")
@@ -607,15 +631,19 @@ proc written(name, newName: NimNode, fields: seq[NimNode]): NimNode =
   result.add quote do:
     method mold(`self`: `name`): Val =
       Val.buildFrame(@`members`, bRec, false)
+
     proc `defaultReader`(`v`: Val): Layer {.nimcall, raises: [].} =
       try:
-        if `v`.kind == bRec and `v`.len == `width` and
-            `v`.getChild(0) == headSym(`head`):
+        if `v`.kind == bRec and `v`.len == `width` and `v`.getChild(0) == headSym(
+          `head`
+        ):
           result = `built`
       except BasslineError:
         result = nil
+
     `name`.vtable.addReader(`defaultReader`, LowPriority)
-    static: `name`.vtable.addReader(`defaultReader`, LowPriority)
+    static:
+      `name`.vtable.addReader(`defaultReader`, LowPriority)
 
 proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
   ## one type section declaring every layer in defs, so they may refer to
@@ -623,7 +651,11 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
   ## def is `Name(field: Type, …)` or `Name`, and `… of Base` inherits
   ## from the layer Base
   proc shown(n: NimNode): NimNode =
-    if lfPrivate in flags: n else: postfix(n, "*")
+    if lfPrivate in flags:
+      n
+    else:
+      postfix(n, "*")
+
   var parsed: seq[tuple[name, base: NimNode, fields: seq[NimNode]]]
   for def in defs:
     var (shape, base) = (def, NimNode(nil))
@@ -644,8 +676,7 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
   while ordered.len < parsed.len:
     let before = ordered.len
     for p in parsed:
-      if $p.name notin done and
-          (p.base.isNil or $p.base notin names or $p.base in done):
+      if $p.name notin done and (p.base.isNil or $p.base notin names or $p.base in done):
         ordered.add p
         done.add $p.name
     if ordered.len == before:
@@ -660,25 +691,34 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
   for (name, base, defFields) in ordered:
     let
       newName = ident("new" & name.strVal)
-      inherits = if base.isNil: bindSym"Layer" else: base
+      inherits =
+        if base.isNil:
+          bindSym"Layer"
+        else:
+          base
       fresh =
-        if base.isNil: newCall(bindSym"LayerVTable")
-        else: nnkObjConstr.newTree(bindSym"LayerVTable",
-          nnkExprColonExpr.newTree(ident"parent", newDotExpr(base, vtable)))
+        if base.isNil:
+          newCall(bindSym"LayerVTable")
+        else:
+          nnkObjConstr.newTree(
+            bindSym"LayerVTable",
+            nnkExprColonExpr.newTree(ident"parent", newDotExpr(base, vtable)),
+          )
       table = genSym(nskLet, name.strVal & "Vtable")
       vmTable = genSym(nskVar, name.strVal & "VmVtable")
     var
       fields = nnkRecList.newTree
       params = @[name]
       built = nnkObjConstr.newTree(
-        name, nnkExprColonExpr.newTree(vtable, newDotExpr(name, vtable)))
+        name, nnkExprColonExpr.newTree(vtable, newDotExpr(name, vtable))
+      )
     for each in defFields:
       each.expectKind(nnkExprColonExpr)
       fields.add newIdentDefs(shown(each[0]), each[1])
       params.add newIdentDefs(each[0], each[1])
       built.add nnkExprColonExpr.newTree(each[0], each[0])
-    let obj = nnkObjectTy.newTree(
-      newEmptyNode(), nnkOfInherit.newTree(inherits), fields)
+    let obj =
+      nnkObjectTy.newTree(newEmptyNode(), nnkOfInherit.newTree(inherits), fields)
     types.add nnkTypeDef.newTree(shown(name), newEmptyNode(), nnkRefTy.newTree(obj))
     let construct = newProc(shown(newName), params, built)
     if lfStatic in flags:
@@ -687,6 +727,7 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
         var `vmTable` {.compileTime.} = `fresh`
         proc `vtable`(_: typedesc[`name`]): LayerVTable {.compileTime.} =
           `vmTable`
+
     else:
       result.add quote do:
         let `table` = `fresh`
@@ -696,18 +737,21 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
             result = `vmTable`
           else:
             result = `table`
-    let readProc = quote do:
+
+    let readProc = quote:
       proc `read`(_: typedesc[`name`], v: Val): `name` =
         for (_, each) in `name`.`vtable`.readerDefs:
           let got = each(v)
           if not got.isNil:
             return `name`(got)
+
     if lfStatic in flags:
       readProc.addPragma ident"compileTime"
     result.add construct, readProc
     result.add quote do:
       template `layerFlags`(_: typedesc[`name`]): set[LayerFlag] {.used.} =
         `flagsLit`
+
     if lfStatic notin flags:
       result.add written(name, newName, defFields)
   if lfPrivate notin flags:
@@ -733,9 +777,12 @@ macro layers*(args: varargs[untyped]) =
   ## are made and read only at compile time. One macro takes both, since a
   ## block given where an overload takes static flags is checked as them
   case args.len
-  of 1: newCall(bindSym"layersWith", nnkCurly.newTree, args[0])
-  of 2: newCall(bindSym"layersWith", args[0], args[1])
-  else: error("layers takes its flags, if any, then its block", args[0])
+  of 1:
+    newCall(bindSym"layersWith", nnkCurly.newTree, args[0])
+  of 2:
+    newCall(bindSym"layersWith", args[0], args[1])
+  else:
+    error("layers takes its flags, if any, then its block", args[0])
 
 macro layer*(def: untyped, flags: static set[LayerFlag]) =
   ## `layer Name(field: Type, …)`, one layer declared as `layers` declares
@@ -752,14 +799,18 @@ proc readerOf(def, priority: NimNode): NimNode =
     layer = def.params[0]
     arg = def.params[1][0]
     wrapped = genSym(nskProc, name.strVal & "Reader")
-  quote do:
+  quote:
     `def`
     proc `wrapped`(`arg`: Val): Layer {.nimcall, raises: [].} =
-      try: Layer(`name`(`arg`))
-      except BasslineError: nil
+      try:
+        Layer(`name`(`arg`))
+      except BasslineError:
+        nil
+
     when lfStatic notin `layer`.layerFlags:
       `layer`.vtable.addReader(`wrapped`, `priority`)
-    static: `layer`.vtable.addReader(`wrapped`, `priority`)
+    static:
+      `layer`.vtable.addReader(`wrapped`, `priority`)
 
 macro reader*(def: untyped) =
   ## adds `proc p(v: Val): L` to L's readers, which take a refusal while
@@ -778,14 +829,18 @@ proc binderOf(def, priority: NimNode): NimNode =
     layer = def.params[1][1]
     arg = def.params[2][0]
     wrapped = genSym(nskProc, name.strVal & "Binder")
-  quote do:
+  quote:
     `def`
     proc `wrapped`(`self`: Layer, `arg`: Val): bool {.nimcall, raises: [].} =
-      try: `name`(`layer`(`self`), `arg`)
-      except BasslineError: false
+      try:
+        `name`(`layer`(`self`), `arg`)
+      except BasslineError:
+        false
+
     when lfStatic notin `layer`.layerFlags:
       `layer`.vtable.addBinder(`wrapped`, `priority`)
-    static: `layer`.vtable.addBinder(`wrapped`, `priority`)
+    static:
+      `layer`.vtable.addBinder(`wrapped`, `priority`)
 
 macro binder*(def: untyped) =
   ## adds `proc p(self: L, v: Val): bool` to L's binders, which take a
@@ -809,7 +864,8 @@ proc attach*(v: Val, layer: Layer): bool =
   ## whether v carries layer, put on it when the first of its binders
   ## to take v does, its own type's before those it inherits
   for each in v.layers:
-    if each == layer: return true
+    if each == layer:
+      return true
   var table = layer.vtable
   while not table.isNil:
     for (_, each) in table.bindDefs:
@@ -859,7 +915,8 @@ proc payload*(self: Val): string =
     self.text
   of bBytes:
     self.bytes
-  else: ""
+  else:
+    ""
 
 func len*(self: Val): int =
   case self.kind
@@ -877,10 +934,7 @@ func getChild*(self: Val, i: int): Val =
   of bList, bRec:
     return self.items[i]
   of bDict:
-    if i mod 2 == 0:
-      return self.dict.keys[i div 2]
-    else:
-      return self.dict.vals[i div 2]
+    return self.dict.getRavel(i)
   of bSet:
     return self.els.data[i]
   else:
@@ -914,9 +968,7 @@ proc buildAtom*(T: typedesc[Val], s: sink string, kind: Kind, mark: bool): Val =
   of bBytes:
     Val(value: ValObj(kind: k, bytes: s, mark: mark))
 
-proc buildFrame*(
-    T: typedesc[Val], s: sink seq[Val], kind: Kind, mark: bool
-): Val =
+proc buildFrame*(T: typedesc[Val], s: sink seq[Val], kind: Kind, mark: bool): Val =
   let k: bList .. bSet = kind
   case k
   of bList, bRec:
@@ -925,16 +977,16 @@ proc buildFrame*(
     Val(value: ValObj(kind: k, mark: mark, items: s))
   of bDict:
     guard s.len mod 2 == 0, "dict cannot have stranded keys"
-    var
-      keys = newSeqOfCap[Val](s.len div 2)
-      vals = newSeqOfCap[Val](s.len div 2)
-    for i in countup(0, s.len - 1, 2):
-      guard keys.len == 0 or keys[^1] < s[i], "dict keys must be strictly ascending"
-      keys.add move s[i]
-      vals.add move s[i + 1]
-    Val(value: ValObj(
-      kind: bDict, mark: mark, dict: toSortedTable(move keys, move vals, sorted = true)
-    ))
+    if s.len > 2:
+      for i in countup(2, s.len - 1, 2):
+        guard s[i-2] < s[i], "dict keys must be strictly ascending"
+    Val(
+      value: ValObj(
+        kind: bDict,
+        mark: mark,
+        dict: toSortedTable(move s, sorted = true),
+      )
+    )
   of bSet:
     for i in 1 ..< s.len:
       guard s[i - 1] < s[i], "set elements must be strictly ascending"
@@ -947,6 +999,7 @@ proc withMark*(v: Val): Val =
   ## a new node holding v's value, marked, and none of v's layers
   result = Val(value: v.value)
   result.value.mark = true
+
 # ================
 # Writing layers
 # ================
@@ -961,15 +1014,20 @@ proc readLayer*(form: Val): Layer =
     if not reads.isNil:
       return reads(form)
 
-proc moldField*(v: Val): Val = v
+proc moldField*(v: Val): Val =
+  v
 
-proc moldField*(s: string): Val = Val.buildAtom(s, bText, false)
+proc moldField*(s: string): Val =
+  Val.buildAtom(s, bText, false)
 
-proc moldField*(n: int): Val = Val.buildAtom($n, bNum, false)
+proc moldField*(n: int): Val =
+  Val.buildAtom($n, bNum, false)
 
-proc moldField*(n: BNum): Val = Val.buildAtom($n, bNum, false)
+proc moldField*(n: BNum): Val =
+  Val.buildAtom($n, bNum, false)
 
-proc readField*(v: Val, _: typedesc[Val]): Val = v
+proc readField*(v: Val, _: typedesc[Val]): Val =
+  v
 
 proc readField*(v: Val, _: typedesc[string]): string =
   guard v.kind in {bText, bSym}, "not text: " & $v

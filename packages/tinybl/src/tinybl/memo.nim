@@ -121,12 +121,7 @@ func at(n: NodeObj, i: int): lent Memo =
   of bList, bRec:
     return n.items[i]
   of bDict:
-    (
-      if i mod 2 == 0:
-        return n.dict.keys[i div 2]
-      else:
-        return n.dict.vals[i div 2]
-    )
+    return n.dict.getRavel(i)
   of bSet:
     return n.els.data[i]
   else:
@@ -138,9 +133,9 @@ iterator members(n: NodeObj): lent Memo =
     for m in n.items:
       yield m
   of bDict:
-    for i in 0 ..< n.dict.len:
-      yield n.dict.keys[i]
-      yield n.dict.vals[i]
+    for k,v in n.dict:
+      yield k
+      yield v
   of bSet:
     for m in n.els:
       yield m
@@ -318,21 +313,19 @@ func keyLen*(self: Memo): int =
 func getKey*(self, key: Memo): lent Memo =
   ## a dict's value for key, found by bisecting its keys
   self.expectKind(bDict)
-  let i = self.node.dict.indexOf(key)
-  guard i != -1, "the dict has no such key"
-  self.node.dict.vals[i]
+  self.node.dict[key]
 
 func keyAt*(self: Memo, i: int): lent Memo =
   ## a dict's key or a set's member at rank i, in CE order
   self.expectKind(keyed)
   if self.kind == bDict:
-    return self.node.dict.keys[i]
+    return self.node.dict.getRavel(i)
   return self.node.els.data[i]
 
 func valueAt*(self: Memo, i: int): lent Memo =
   ## a dict's value under the key at rank i
   self.expectKind(bDict)
-  self.node.dict.vals[i]
+  self.node.dict.getRavel(i)
 
 func rankOf*(self, key: Memo): int =
   ## key's rank among a dict's keys or a set's members, found by
@@ -353,7 +346,7 @@ iterator getItems*(self: Memo): lent Memo =
     for m in self.node.els:
       yield m
   of bDict:
-    for k in self.node.dict.keys:
+    for k,v in self.node.dict:
       yield k
   else:
     refuse "only a frame has items"
@@ -367,14 +360,14 @@ iterator getSlots*(self: Memo): tuple[pos: int, val: Memo] =
 iterator getPairs*(self: Memo): tuple[key, val: Memo] =
   ## a dict's keys and values, in CE order of the keys
   guard self.kind == bDict, "only a dict has keys and values"
-  for i in 0 ..< self.node.dict.len:
-    yield (self.node.dict.keys[i], self.node.dict.vals[i])
+  for k,v in self.node.dict:
+    yield (k,v)
 
 iterator getKeys*(self: Memo): lent Memo =
   ## a dict's keys or a set's members, in CE order
   case self.kind
   of bDict:
-    for k in self.node.dict.keys:
+    for k,v in self.node.dict:
       yield k
   of bSet:
     for m in self.node.els:
@@ -385,7 +378,7 @@ iterator getKeys*(self: Memo): lent Memo =
 iterator getValues*(self: Memo): lent Memo =
   ## a dict's values, in CE order of their keys
   guard self.kind == bDict, "only a dict has values"
-  for v in self.node.dict.vals:
+  for k,v in self.node.dict:
     yield v
 
 # ================
@@ -429,17 +422,11 @@ proc made(c: Cache, k: bList .. bSet, h: Hash, s: sink seq[Memo]): Node =
   of bList, bRec:
     Node(kind: k, hash: h, cache: c, items: s)
   of bDict:
-    var
-      keys = newSeqOfCap[Memo](s.len div 2)
-      vals = newSeqOfCap[Memo](s.len div 2)
-    for i in countup(0, s.len - 1, 2):
-      keys.add move s[i]
-      vals.add move s[i + 1]
     Node(
       kind: bDict,
       hash: h,
       cache: c,
-      dict: toSortedTable(move keys, move vals, sorted = true),
+      dict: toSortedTable(s, sorted = true),
     )
   of bSet:
     Node(kind: bSet, hash: h, cache: c, els: toSortedSet(s, sorted = true))
@@ -541,6 +528,14 @@ func sameMembers(a, b: openArray[Memo]): bool =
       return false
   true
 
+func sameMembers(a,b: SortedTable[Memo, Memo]): bool =
+  if a.len != b.len:
+    return false
+  for i in 0..<(a.len*2):
+    if a.getRavel(i).node != b.getRavel(i).node or a.getRavel(i).mark != b.getRavel(i).mark:
+      return false
+  true
+
 func mixMember(h: var Hash, m: Memo) =
   ## m mixed into a frame's hash as buildFrame mixes each member
   h = h !& m.node.hash !& hash(m.mark)
@@ -569,8 +564,7 @@ proc keptDict(c: Cache, d: sink SortedTable[Memo, Memo], mark: bool): Memo =
     node: c.kept(
       h,
       n,
-      n.kind == bDict and n.dict.keys.sameMembers(d.keys) and
-        n.dict.vals.sameMembers(d.vals),
+      n.kind == bDict and n.dict.sameMembers(d),
       Node(kind: bDict, hash: h, cache: c, dict: d),
     ),
     mark: mark,
@@ -649,6 +643,13 @@ func allIn(s: openArray[Memo], c: Cache): bool =
       return false
   true
 
+func allIn(s: SortedTable[Memo,Memo], c: Cache): bool =
+  ## whether s's members are all c's
+  for k,v in s:
+    if k.node.cache != c or v.node.cache != c:
+      return false
+  true
+
 proc toMemo*(d: sink Draft): Memo =
   ## the value d makes, kept in the cache d was drafted from, a member
   ## from another cache brought in
@@ -662,7 +663,7 @@ proc toMemo*(d: sink Draft): Memo =
     c.broughtIn(d.items)
     result = c.keptSlots(d.kind, move d.items, d.mark)
   of bDict:
-    if d.dict.keys.allIn(c) and d.dict.vals.allIn(c):
+    if d.dict.allIn(c):
       result = c.keptDict(move d.dict, d.mark)
     else:
       var s = newSeqOfCap[Memo](2 * d.dict.len)

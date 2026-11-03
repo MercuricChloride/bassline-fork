@@ -23,6 +23,6 @@ proc removeBinaries(dir: string) =
     if d.endsWith ".dSYM": rmDir d
     else: removeBinaries d
 
-task clean, "remove the binaries nim c leaves beside tests/ and examples/":
+task removeBinaries, "remove the binaries nim c leaves beside tests/ and examples/":
   removeBinaries "tests"
   removeBinaries "examples"
