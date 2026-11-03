@@ -1,4 +1,4 @@
-import std/[algorithm, macros]
+import std/[algorithm, macros, tables]
 import ./[ce, text]
 
 refuseWith BasslineError
@@ -434,9 +434,12 @@ func cmpNums*(x, y: BNum): int =
 type
   LayerVTable* = ref object
     ## A layer's readers and binders, each with its priority, the lowest
-    ## number first. Those of one priority run in order of first added -> last added
+    ## number first. Those of one priority run in order of first added -> last added.
+    ## `parent` is the vtable of the layer it inherits from, whose binders
+    ## take its layers too
     readerDefs*: seq[(int, ReaderProc)]
     bindDefs*: seq[(int, BinderProc)]
+    parent*: LayerVTable
 
   ReaderProc* = proc(v: Val): Layer {.nimcall, raises: [].}
     ## a layer read from a value alone, nil when it reads none
@@ -502,6 +505,10 @@ proc dict*(self: Val): lent SortedTable[Val, Val] =
 proc els*(self: Val): lent SortedSet[Val] =
   self.value.els
 
+proc fresh*(v: Val): Val =
+  ## a new node holding v's value and none of its layers
+  Val(value: v.value)
+
 # ================
 # Layers
 # ================
@@ -513,6 +520,13 @@ const
 
 proc add*(self: var Layers, layers: varargs[Layer]) =
   self.data.add layers
+
+proc remove*(self: var Layers, layer: Layer) =
+  ## takes that very layer off
+  for i, each in self.data:
+    if each == layer:
+      self.data.delete(i)
+      return
 
 proc len*(self: Layers): int =
   self.data.len
@@ -536,86 +550,200 @@ proc addReader*(vt: LayerVTable, def: ReaderProc, priority = MedPriority) =
 proc addBinder*(vt: LayerVTable, def: BinderProc, priority = MedPriority) =
   vt.bindDefs.ranked(def, priority)
 
+method mold*(l: Layer): Val {.base, raises: [BasslineError].} =
+  ## the value l is written as, read back by the reader of its type that
+  ## reads that form. nil when l can't be written. A layer declared with
+  ## fields that are each a Val, string, int or BNum is written
+  ## `(kebab-name FIELD …)` unless it says otherwise
+  nil
+
+var layerHeads*: Table[string, ReaderProc]
+  ## the reader of the layer type each written head names, so a form
+  ## `(HEAD …)` is read by the type HEAD names
+
+proc kebab(name: string): string =
+  ## `SlotPlace` as `slot-place`
+  for i, c in name:
+    if c in {'A' .. 'Z'}:
+      if i > 0: result.add '-'
+      result.add chr(ord(c) + 32)
+    else:
+      result.add c
+
 proc exportRoutines(n: NimNode) =
-  ## puts an export marker on each proc and template in n
+  ## puts an export marker on each proc, method and template in n
   for each in n:
     if each.kind == nnkStmtList:
       each.exportRoutines
-    elif each.kind in {nnkProcDef, nnkTemplateDef} and each[0].kind != nnkPostfix:
+    elif each.kind in {nnkProcDef, nnkMethodDef, nnkTemplateDef} and
+        each[0].kind != nnkPostfix:
       each[0] = postfix(each[0], "*")
 
-macro layer*(def: untyped, flags: static set[LayerFlag]) =
-  ## `layer Name(field: Type, …)` declares the layer type Name, its
-  ## constructor `newName`, its readers and binders `Name.vtable`, and
-  ## `Name.read`, which answers what the first reader to read one reads.
-  ## The VM keeps a vtable of its own, so what runs at compile time sees
-  ## the readers and binders added in `static` above it.
-  ##
-  ## `layer Name(…), {lfPrivate}` exports none of it, and with lfStatic
-  ## the layer is made and read only at compile time.
-  def.expectKind({nnkObjConstr, nnkCall})
+proc written(name, newName: NimNode, fields: seq[NimNode]): NimNode =
+  ## the layer's head in layerHeads and, when each field can be written,
+  ## its `mold` as `(head FIELD …)` and a reader of that form
   let
-    name = def[0]
-    newName = ident("new" & name.strVal)
-    table = genSym(nskLet, name.strVal & "Vtable")
-    vmTable = genSym(nskVar, name.strVal & "VmVtable")
+    head = newLit(kebab(name.strVal))
+    reads = genSym(nskProc, name.strVal & "Head")
+    heads = bindSym"layerHeads"
+  result = newStmtList quote do:
+    proc `reads`(v: Val): Layer {.nimcall, raises: [].} = `name`.read(v)
+    `heads`[`head`] = `reads`
+  for each in fields:
+    if not (each[1].kind == nnkIdent and
+        each[1].strVal in ["Val", "string", "int", "BNum"]):
+      return
+  let
+    self = genSym(nskParam, "l")
+    v = genSym(nskParam, "v")
+    defaultReader = genSym(nskProc, name.strVal & "Default")
+    moldField = ident"moldField"
+    readField = ident"readField"
+    members = nnkBracket.newTree(newCall(ident"headSym", head))
+    built = newCall(newName)
+    width = newLit(fields.len + 1)
+  for i, each in fields:
+    members.add newCall(moldField, newDotExpr(self, each[0]))
+    built.add newCall(readField, newCall(ident"getChild", v, newLit(i + 1)), each[1])
+  result.add quote do:
+    method mold(`self`: `name`): Val =
+      Val.buildFrame(@`members`, bRec, false)
+    proc `defaultReader`(`v`: Val): Layer {.nimcall, raises: [].} =
+      try:
+        if `v`.kind == bRec and `v`.len == `width` and
+            `v`.getChild(0) == headSym(`head`):
+          result = `built`
+      except BasslineError:
+        result = nil
+    `name`.vtable.addReader(`defaultReader`, LowPriority)
+    static: `name`.vtable.addReader(`defaultReader`, LowPriority)
+
+proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
+  ## one type section declaring every layer in defs, so they may refer to
+  ## each other, then each one's vtable, constructor, `read` and flags. A
+  ## def is `Name(field: Type, …)` or `Name`, and `… of Base` inherits
+  ## from the layer Base
+  proc shown(n: NimNode): NimNode =
+    if lfPrivate in flags: n else: postfix(n, "*")
+  var parsed: seq[tuple[name, base: NimNode, fields: seq[NimNode]]]
+  for def in defs:
+    var (shape, base) = (def, NimNode(nil))
+    if def.kind == nnkInfix and def[0].eqIdent"of":
+      (shape, base) = (def[1], def[2])
+    if shape.kind == nnkIdent:
+      parsed.add (shape, base, newSeq[NimNode]())
+    else:
+      shape.expectKind({nnkObjConstr, nnkCall})
+      parsed.add (shape[0], base, shape[1 .. ^1])
+  # a base declared here goes before its heirs, whose vtables point at it
+  var
+    ordered: typeof(parsed)
+    done: seq[string]
+    names: seq[string]
+  for p in parsed:
+    names.add $p.name
+  while ordered.len < parsed.len:
+    let before = ordered.len
+    for p in parsed:
+      if $p.name notin done and
+          (p.base.isNil or $p.base notin names or $p.base in done):
+        ordered.add p
+        done.add $p.name
+    if ordered.len == before:
+      error("layers that inherit from each other in a cycle", defs[0])
+  let
+    types = nnkTypeSection.newTree
     vtable = ident"vtable"
     layerFlags = ident"layerFlags"
     read = ident"read"
     flagsLit = newLit(flags)
-  # a template, since a proc closing over a static parameter reads it empty
-  template shown(n: NimNode): NimNode =
-    if lfPrivate in flags: n else: postfix(n, "*")
-  var
-    fields = nnkRecList.newTree
-    params = @[name]
-    built = nnkObjConstr.newTree(
-      name, nnkExprColonExpr.newTree(vtable, newDotExpr(name, vtable)))
-  for each in def[1 .. ^1]:
-    each.expectKind(nnkExprColonExpr)
-    fields.add newIdentDefs(shown(each[0]), each[1])
-    params.add newIdentDefs(each[0], each[1])
-    built.add nnkExprColonExpr.newTree(each[0], each[0])
-  let
-    obj = nnkObjectTy.newTree(
-      newEmptyNode(), nnkOfInherit.newTree(bindSym"Layer"), fields)
-    ty = nnkTypeSection.newTree(nnkTypeDef.newTree(
-      shown(name), newEmptyNode(), nnkRefTy.newTree(obj)))
-    construct = newProc(shown(newName), params, built)
-  result = newStmtList(ty)
-  if lfStatic in flags:
-    construct.addPragma ident"compileTime"
+  result = newStmtList(types)
+  for (name, base, defFields) in ordered:
+    let
+      newName = ident("new" & name.strVal)
+      inherits = if base.isNil: bindSym"Layer" else: base
+      fresh =
+        if base.isNil: newCall(bindSym"LayerVTable")
+        else: nnkObjConstr.newTree(bindSym"LayerVTable",
+          nnkExprColonExpr.newTree(ident"parent", newDotExpr(base, vtable)))
+      table = genSym(nskLet, name.strVal & "Vtable")
+      vmTable = genSym(nskVar, name.strVal & "VmVtable")
+    var
+      fields = nnkRecList.newTree
+      params = @[name]
+      built = nnkObjConstr.newTree(
+        name, nnkExprColonExpr.newTree(vtable, newDotExpr(name, vtable)))
+    for each in defFields:
+      each.expectKind(nnkExprColonExpr)
+      fields.add newIdentDefs(shown(each[0]), each[1])
+      params.add newIdentDefs(each[0], each[1])
+      built.add nnkExprColonExpr.newTree(each[0], each[0])
+    let obj = nnkObjectTy.newTree(
+      newEmptyNode(), nnkOfInherit.newTree(inherits), fields)
+    types.add nnkTypeDef.newTree(shown(name), newEmptyNode(), nnkRefTy.newTree(obj))
+    let construct = newProc(shown(newName), params, built)
+    if lfStatic in flags:
+      construct.addPragma ident"compileTime"
+      result.add quote do:
+        var `vmTable` {.compileTime.} = `fresh`
+        proc `vtable`(_: typedesc[`name`]): LayerVTable {.compileTime.} =
+          `vmTable`
+    else:
+      result.add quote do:
+        let `table` = `fresh`
+        var `vmTable` {.compileTime.} = `fresh`
+        proc `vtable`(_: typedesc[`name`]): LayerVTable =
+          when nimvm:
+            result = `vmTable`
+          else:
+            result = `table`
+    let readProc = quote do:
+      proc `read`(_: typedesc[`name`], v: Val): `name` =
+        for (_, each) in `name`.`vtable`.readerDefs:
+          let got = each(v)
+          if not got.isNil:
+            return `name`(got)
+    if lfStatic in flags:
+      readProc.addPragma ident"compileTime"
+    result.add construct, readProc
     result.add quote do:
-      var `vmTable` {.compileTime.} = LayerVTable()
-      proc `vtable`(_: typedesc[`name`]): LayerVTable {.compileTime.} =
-        `vmTable`
-  else:
-    result.add quote do:
-      let `table` = LayerVTable()
-      var `vmTable` {.compileTime.} = LayerVTable()
-      proc `vtable`(_: typedesc[`name`]): LayerVTable =
-        when nimvm:
-          result = `vmTable`
-        else:
-          result = `table`
-  let readProc = quote do:
-    proc `read`(_: typedesc[`name`], v: Val): `name` =
-      for (_, each) in `name`.`vtable`.readerDefs:
-        let got = each(v)
-        if not got.isNil:
-          return `name`(got)
-  if lfStatic in flags:
-    readProc.addPragma ident"compileTime"
-  result.add construct, readProc
-  result.add quote do:
-    template `layerFlags`(_: typedesc[`name`]): set[LayerFlag] {.used.} =
-      `flagsLit`
+      template `layerFlags`(_: typedesc[`name`]): set[LayerFlag] {.used.} =
+        `flagsLit`
+    if lfStatic notin flags:
+      result.add written(name, newName, defFields)
   if lfPrivate notin flags:
     result.exportRoutines
 
+macro layersWith(flags: static set[LayerFlag], body: untyped) =
+  body.expectKind(nnkStmtList)
+  var defs: seq[NimNode]
+  for each in body:
+    if each.kind != nnkCommentStmt:
+      defs.add each
+  layerDecls(defs, flags)
+
+macro layers*(args: varargs[untyped]) =
+  ## `layers:` then `Name(field: Type, …)` on each line declares each layer
+  ## type Name, its constructor `newName`, its readers and binders
+  ## `Name.vtable`, and `Name.read`, which answers what the first reader to
+  ## read one reads. The types are declared together, so they may refer to
+  ## each other. The VM keeps a vtable of its own, so what runs at compile
+  ## time sees the readers and binders added in `static` above it.
+  ##
+  ## `layers {lfPrivate}:` exports none of it, and with lfStatic the layers
+  ## are made and read only at compile time. One macro takes both, since a
+  ## block given where an overload takes static flags is checked as them
+  case args.len
+  of 1: newCall(bindSym"layersWith", nnkCurly.newTree, args[0])
+  of 2: newCall(bindSym"layersWith", args[0], args[1])
+  else: error("layers takes its flags, if any, then its block", args[0])
+
+macro layer*(def: untyped, flags: static set[LayerFlag]) =
+  ## `layer Name(field: Type, …)`, one layer declared as `layers` declares
+  ## them, and `layer Name(…), {lfPrivate}` with flags
+  layerDecls(@[def], flags)
+
 template layer*(def: untyped) =
-  ## a layer with no flags. Not a default for `flags`, since a default on a
-  ## static set crashes the compiler (nimsets `s.kind == nkCurly`)
   layer(def, {})
 
 proc readerOf(def, priority: NimNode): NimNode =
@@ -680,13 +808,16 @@ proc attach*[T: Layer](v: Val, ty: typedesc[T]): T =
 
 proc attach*(v: Val, layer: Layer): bool =
   ## whether v carries layer, put on it when the first of its binders
-  ## to take v does
+  ## to take v does, its own type's before those it inherits
   for each in v.layers:
     if each == layer: return true
-  for (_, each) in layer.vtable.bindDefs:
-    if each(layer, v):
-      v.layers.add layer
-      return true
+  var table = layer.vtable
+  while not table.isNil:
+    for (_, each) in table.bindDefs:
+      if each(layer, v):
+        v.layers.add layer
+        return true
+    table = table.parent
 
 proc attachAll*[T: Layer](v: Val, ty: typedesc[T]) =
   when nimvm:
@@ -817,3 +948,38 @@ proc withMark*(v: Val): Val =
   ## a new node holding v's value, marked, and none of v's layers
   result = Val(value: v.value)
   result.value.mark = true
+# ================
+# Writing layers
+# ================
+
+proc headSym*(head: string): Val =
+  Val.buildAtom(head, bSym, false)
+
+proc readLayer*(form: Val): Layer =
+  ## the layer form reads as, by its head, nil when nothing reads it
+  if form.kind == bRec and form.len > 0 and form.getChild(0).kind == bSym:
+    let reads = layerHeads.getOrDefault(form.getChild(0).text)
+    if not reads.isNil:
+      return reads(form)
+
+proc moldField*(v: Val): Val = v
+
+proc moldField*(s: string): Val = Val.buildAtom(s, bText, false)
+
+proc moldField*(n: int): Val = Val.buildAtom($n, bNum, false)
+
+proc moldField*(n: BNum): Val = Val.buildAtom($n, bNum, false)
+
+proc readField*(v: Val, _: typedesc[Val]): Val = v
+
+proc readField*(v: Val, _: typedesc[string]): string =
+  guard v.kind in {bText, bSym}, "not text: " & $v
+  v.text
+
+proc readField*(v: Val, _: typedesc[BNum]): BNum =
+  guard v.kind == bNum, "not a number: " & $v
+  v.num
+
+proc readField*(v: Val, _: typedesc[int]): int =
+  guard v.kind == bNum and v.num.isInt, "not an int: " & $v
+  v.num.toInt
