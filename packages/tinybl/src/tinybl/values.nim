@@ -52,8 +52,9 @@ func toSortedTable*[T](ravel: sink seq[T], sorted = false): SortedTable[T, T] =
 
 func toRavel*[T](self: sink SortedTable[T, T]): seq[T] =
   var s = newSeqOfCap[T](self.entries.len * 2)
-  for each in self.entries:
-    s.add move(each)
+  for each in self.entries.mitems:
+    s.add move(each.key)
+    s.add move(each.val)
   s
 
 func lowerIdx[K, V](self: SortedTable[K, V], key: K): int =
@@ -141,6 +142,9 @@ func `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
 
 func `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   self.put(key, val)
+
+proc sort*[K,V](self: var SortedTable[K,V]) =
+  self.entries.sort(cmpKeys)
 
 # ================
 # Sorted Set

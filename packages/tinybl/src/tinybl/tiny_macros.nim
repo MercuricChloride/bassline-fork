@@ -38,15 +38,8 @@ proc ordered*[T; B: Builder[T]](b: B, members: sink seq[T], kind: Kind, mark: bo
   if kind == bSet:
     members.sort(cmp)
     return b.buildFrame(members, bSet, mark)
-  var entries = newSeqOfCap[(T, T)](members.len div 2)
-  for i in countup(0, members.len - 1, 2):
-    entries.add (move members[i], move members[i + 1])
-  entries.sort((x, y: (T, T)) => cmp(x[0], y[0]))
-  var flat = newSeqOfCap[T](members.len)
-  for e in entries.mitems:
-    flat.add move e[0]
-    flat.add move e[1]
-  b.buildFrame(flat, bDict, mark)
+  else:
+    return b.buildFrame(members.toSortedTable.toRavel, bDict, mark)
 
 # ================
 # At compile time
