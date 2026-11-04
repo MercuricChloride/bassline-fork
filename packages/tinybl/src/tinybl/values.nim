@@ -1,5 +1,6 @@
-import std/[algorithm, macros, tables]
-import ./[ce, text]
+import std/algorithm, macros, tables, options, strutils
+import bigints
+import ./ce, text
 
 refuseWith BasslineError
 
@@ -15,6 +16,12 @@ type
   Pair*[T] = Entry[T, T]
   SortedTable*[K, V] = object
     entries: seq[Entry[K, V]]
+
+func toEntry*[T](self: sink array[2,T]): Entry[T,T] =
+  Entry[T,T](key: self[0], val: self[1])
+
+func toArray*[T](self: sink Entry[T,T]): array[2,T] =
+  [self.key, self.val]
 
 func entries*[K, V](self: SortedTable[K, V]): lent seq[Entry[K, V]] =
   self.entries
@@ -85,7 +92,7 @@ func get*[K, V](self: SortedTable[K, V], key: K): lent V =
   let i = self.indexOf(key)
   if i == -1:
     raise newException(KeyError, "key not found")
-  self.entries[i]
+  self.entries[i].val
 
 func getRavel*[T](self: SortedTable[T,T], i: int): lent T =
   if i mod 2 == 0:
@@ -223,9 +230,6 @@ func high*[T](self: SortedSet[T]): lent T =
 # ================
 # BNum
 # ================
-
-import std/[options, strutils]
-import bigints
 
 type BNum* = object
   case isBig*: bool
@@ -451,6 +455,12 @@ func cmpNums*(x, y: BNum): int =
 # ================
 
 type
+  ReaderProc* = proc(v: Val): Layer {.nimcall, raises: [].}
+    ## a layer read from a value alone, nil when it reads none
+
+  BinderProc* = proc(self: Layer, v: Val): bool {.nimcall, raises: [].}
+    ## whether a layer made apart from a value goes on it
+
   LayerVTable* = ref object
     ## A layer's readers and binders, each with its priority, the lowest
     ## number first. Those of one priority run in order of first added -> last added.
@@ -459,12 +469,6 @@ type
     readerDefs*: seq[(int, ReaderProc)]
     bindDefs*: seq[(int, BinderProc)]
     parent*: LayerVTable
-
-  ReaderProc* = proc(v: Val): Layer {.nimcall, raises: [].}
-    ## a layer read from a value alone, nil when it reads none
-
-  BinderProc* = proc(self: Layer, v: Val): bool {.nimcall, raises: [].}
-    ## whether a layer made apart from a value goes on it
 
   Layer* = ref object of RootObj
     ## what a value carries beside itself, never part of its identity
@@ -580,10 +584,6 @@ method mold*(l: Layer): Val {.base, raises: [BasslineError].} =
   ## `(kebab-name FIELD …)` unless it says otherwise
   nil
 
-var layerHeads*: Table[string, ReaderProc]
-  ## the reader of the layer type each written head names, so a form
-  ## `(HEAD …)` is read by the type HEAD names
-
 proc kebab(name: string): string =
   ## `SlotPlace` as `slot-place`
   for i, c in name:
@@ -609,12 +609,9 @@ proc written(name, newName: NimNode, fields: seq[NimNode]): NimNode =
   let
     head = newLit(kebab(name.strVal))
     reads = genSym(nskProc, name.strVal & "Head")
-    heads = bindSym"layerHeads"
   result = newStmtList quote do:
     proc `reads`(v: Val): Layer {.nimcall, raises: [].} =
       `name`.read(v)
-
-    `heads`[`head`] = `reads`
   for each in fields:
     if not (
       each[1].kind == nnkIdent and each[1].strVal in ["Val", "string", "int", "BNum"]
@@ -654,7 +651,8 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
   ## each other, then each one's vtable, constructor, `read` and flags. A
   ## def is `Name(field: Type, …)` or `Name`, and `… of Base` inherits
   ## from the layer Base
-  proc shown(n: NimNode): NimNode =
+  
+  template shown(n): untyped =
     if lfPrivate in flags:
       n
     else:
@@ -731,7 +729,6 @@ proc layerDecls(defs: seq[NimNode], flags: set[LayerFlag]): NimNode =
         var `vmTable` {.compileTime.} = `fresh`
         proc `vtable`(_: typedesc[`name`]): LayerVTable {.compileTime.} =
           `vmTable`
-
     else:
       result.add quote do:
         let `table` = `fresh`
@@ -933,7 +930,7 @@ func len*(self: Val): int =
   else:
     0
 
-func getChild*(self: Val, i: int): Val =
+func getChild*(self: Val, i: int): lent Val =
   case self.kind
   of bList, bRec:
     return self.items[i]
@@ -944,15 +941,19 @@ func getChild*(self: Val, i: int): Val =
   else:
     refuse("cannot get child from a non frame type")
 
-func `[]`*(self: Val, i: int): auto =
-  return self.getChild(i)
-
 iterator entries*(self: Val): tuple[key, val: Val] =
   for k, v in self.dict:
     yield (k, v)
 
 makeCmp(Val)
 makePrintable(Val)
+
+func `[]`*(self: Val, i: int): lent Val =
+  return self.getChild(i)
+
+func `[]`*(self, key: Val): lent Val =
+  guard self.kind == bDict, "expected a dict"
+  return self.dict.get(key)
 
 # ================
 # Readable
@@ -1003,44 +1004,3 @@ proc withMark*(v: Val): Val =
   ## a new node holding v's value, marked, and none of v's layers
   result = Val(value: v.value)
   result.value.mark = true
-
-# ================
-# Writing layers
-# ================
-
-proc headSym*(head: string): Val =
-  Val.buildAtom(head, bSym, false)
-
-proc readLayer*(form: Val): Layer =
-  ## the layer form reads as, by its head, nil when nothing reads it
-  if form.kind == bRec and form.len > 0 and form.getChild(0).kind == bSym:
-    let reads = layerHeads.getOrDefault(form.getChild(0).text)
-    if not reads.isNil:
-      return reads(form)
-
-proc moldField*(v: Val): Val =
-  v
-
-proc moldField*(s: string): Val =
-  Val.buildAtom(s, bText, false)
-
-proc moldField*(n: int): Val =
-  Val.buildAtom($n, bNum, false)
-
-proc moldField*(n: BNum): Val =
-  Val.buildAtom($n, bNum, false)
-
-proc readField*(v: Val, _: typedesc[Val]): Val =
-  v
-
-proc readField*(v: Val, _: typedesc[string]): string =
-  guard v.kind in {bText, bSym}, "not text: " & $v
-  v.text
-
-proc readField*(v: Val, _: typedesc[BNum]): BNum =
-  guard v.kind == bNum, "not a number: " & $v
-  v.num
-
-proc readField*(v: Val, _: typedesc[int]): int =
-  guard v.kind == bNum and v.num.isInt, "not an int: " & $v
-  v.num.toInt
