@@ -16,6 +16,7 @@ that never listens closes `incoming`, or `done` waits on it.
 import std/[asyncdispatch, asyncnet, nativesockets, oserrors]
 from std/posix import shutdown, SHUT_RD, SHUT_WR, EAGAIN, EWOULDBLOCK, ENOBUFS, EINTR
 import ./[events, ce]
+export events
 
 const RecvSize* {.intdefine.} = 64 * 1024
 
@@ -165,7 +166,7 @@ proc close*[T](self: EventSocket[T]) =
   self.incoming.close
   self.outgoing.close
 
-proc send*[T](self: EventSocket[T], data: string): bool {.discardable.} =
+proc sendRaw*[T](self: EventSocket[T], data: string): bool {.discardable.} =
   ## writes data as given, after every value emitted before it, until
   ## outgoing closes
   let w = self.writer
@@ -175,3 +176,6 @@ proc send*[T](self: EventSocket[T], data: string): bool {.discardable.} =
   w.pending.add data
   w.wake
   true
+
+proc send*[T](self: EventSocket[T], val: sink T): bool {.discardable.} =
+  self.outgoing.emit(val)

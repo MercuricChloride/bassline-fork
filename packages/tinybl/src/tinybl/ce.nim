@@ -126,6 +126,12 @@ func partialKind*(b: byte): PartialValueKind =
 template toBytes*(a: string): openArray[byte] =
   a.toOpenArrayByte(0, a.high)
 
+func toString*(bytes: openArray[byte]): string =
+  ## bytes as the string tinybl holds a payload in
+  result = newString(bytes.len)
+  if bytes.len > 0:
+    copyMem(addr result[0], addr bytes[0], bytes.len)
+
 # ================
 # CE comparisons
 # ================

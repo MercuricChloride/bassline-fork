@@ -8,7 +8,10 @@ type
     signal: Future[void]
     heard: Future[void]
 
-  Source*[T] = ref object
+  Source*[T] = object
+    emitter: Emitter[T]
+
+  Target*[T] = object
     emitter: Emitter[T]
 
   Listener*[T] = ref object
@@ -106,6 +109,12 @@ proc close*[T](self: Source[T]) =
 proc done*[T](self: Source[T]): Future[void] =
   self.emitter.done
 
+proc target*[T](self: Emitter[T]): Target[T] =
+  Target[T](emitter: self)
+
+proc emit*[T](self: Target[T], val: sink T): bool {.discardable.} =
+  self.emitter.emit(val)
+
 func closed*[T](self: Listener[T]): bool =
   self.closed
 
@@ -141,3 +150,8 @@ template onEvent*[T](listener: Listener[T], evt, body) =
       for evt in l:
         body
       if l.closed: break
+
+proc dump*[T](self: Listener[T], target: Target[T]) {.async.} =
+  self.onEvent e:
+    if not target.emit(e):
+      close(self)
