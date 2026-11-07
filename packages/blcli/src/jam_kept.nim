@@ -140,7 +140,7 @@ proc running*(what: Value) =
   if fd < 0: return
   let bytes = what.ce.toString
   if flock(fd, LOCK_EX or LOCK_NB) != 0 or
-     posix.write(fd, unsafeAddr bytes[0], bytes.len) != bytes.len:
+     posix.write(fd, addr bytes[0], bytes.len) != bytes.len:
     discard posix.close(fd)
     return
   moveFile(path & ".new", path)   # the lock lasts as long as fd

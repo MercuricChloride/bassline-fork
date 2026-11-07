@@ -71,7 +71,7 @@ proc fixedBytes[N: static int](v: Value, mark: bool, name: string): array[N, byt
   ## v, which must be exactly N bytes, as the array that holds them
   sized(v, N, mark, name)
   if N > 0:
-    copyMem(addr result[0], unsafeAddr v.bytes[0], N)
+    copyMem(addr result[0], addr v.bytes[0], N)
 
 proc oneOf(s: string, allowed: openArray[string], name: string): string =
   guard s in allowed, name & " must be one of " & allowed.join(" ") &

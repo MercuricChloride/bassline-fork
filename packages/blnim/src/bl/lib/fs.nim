@@ -210,7 +210,7 @@ proc store*(k: Keep, v: Value): Value =
     guard ftruncate(k.fd, Off(k.seen)) == 0, "can't cut " & k.path
   var written = 0
   while written < ce.len:
-    let n = posix.write(k.fd, ce[written].unsafeAddr, ce.len - written)
+    let n = posix.write(k.fd, ce[written].addr, ce.len - written)
     if n < 0: raiseOSError(osLastError(), k.path)
     written += n
   k.held[result] = (k.seen, ce.len)

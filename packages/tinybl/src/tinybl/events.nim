@@ -19,7 +19,9 @@ type
     signal: Future[void]
     closed: bool
 
-proc newEmitter*[T](maxQueueSize = 10): Emitter[T] =
+const DefaultEventQueueSize {.intdefine.} = 10
+
+proc newEmitter*[T](maxQueueSize = DefaultEventQueueSize): Emitter[T] =
   Emitter[T](maxQueueSize: maxQueueSize, signal: newFuture[void]("newEmitter"),
     heard: newFuture[void]("emitter ready"))
 
