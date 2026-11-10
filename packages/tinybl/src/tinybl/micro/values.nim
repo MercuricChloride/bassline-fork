@@ -27,15 +27,6 @@ type
     of bSet:
       vset*: SortedSet[Value]
 
-  FramePart* = object
-    val*: Value
-    case
-    of El: discard
-    of Pair:
-      key*: Value
-    of Slot:
-      slot*: int
-
   Live* = ref object of RootObj
   Send* = ref object of Live
   Search* = ref object of Live
@@ -62,10 +53,6 @@ method send*(self: Send, val: sink Value): bool {.base, raises: [].} =
 
 method search*(self: Search, val: sink Value): (iterator: Value) {.base, raises: [].} =
   iterator: Value = discard
-
-# ================
-# Live
-# ================
 
 func hash*(self: Live): Hash =
   hash cast[pointer](self)
@@ -107,17 +94,13 @@ func asNode*(self: var Value): var Node =
     return n
   else: refuse "not data"
 
-# ================
-# Node
-# ================
+func node*(self: sink Value): Node =
+  case self
+  of Data(n): n
+  of Bound(l): l.reify
 
 func isFrame*(self: Node): bool =
   self.kind in {bList..bSet}
-
-func isFrame*(self: Value): bool =
-  case self
-  of Data(n): n.isFrame
-  else: false
 
 func len*(a: Node): int =
   case a.kind
@@ -185,77 +168,6 @@ iterator children*(a: Node): lent Value =
       yield a.vset.data[i]
   else: discard
 
-iterator mChildFrames(self: var Node): var Node =
-  case self.kind
-  of bList, bRec:
-    for each in self.vseq.mitems:
-      if each.isFrame:
-        yield each.asNode
-  of bDict:
-    for entry in self.vdict.entries.mitems:
-      if entry.key.isFrame:
-        yield entry.key.asNode
-      if entry.val.isFrame:
-        yield entry.val.asNode
-  of bSet:
-    for each in self.vset.data.mitems:
-      if each.isFrame:
-        yield each.asNode
-  else: discard
-
-iterator mframes*(self: var Node): var Node {.closure.} =
-  if self.isFrame:
-    yield self
-    for each in self.mChildFrames:
-      for deep in each.mframes:
-        yield deep
-
-iterator parts*(a: Node): FramePart =
-  case a.kind
-  of bList, bRec:
-    for i,v in a.vseq:
-      yield Slot(slot: i, val: v)
-  of bDict:
-    for k,v in a.vdict:
-      yield Pair(key: k, val: v)
-  of bSet:
-    for v in a.vset:
-      yield El(val: v)
-  else: discard
-
-iterator takeParts*(a: sink Node): FramePart =
-  ## resets `a`'s internal state so that we can 
-  ## use `a`.add with the new parts to update it
-  case a.kind
-  of bList, bRec:
-    for i,v in a.vseq.mpairs:
-      yield Slot(slot: i, val: move v)
-  of bDict:
-    var entries = move a.vdict.entries
-    a.vdict.entries.setLen(0)
-    for entry in entries.mitems:
-      yield Pair(key: move(entry.key), val: move(entry.val))
-  of bSet:
-    var els = move a.vset.data
-    a.vset.data.setLen(0)
-    for entry in els.mitems:
-      yield El(val: move entry)
-  else: discard
-
-func apply*(a: var Node, parts: varargs[FramePart]) =
-  for p in parts:
-    case p
-    of Pair(k):
-      guard a.kind == bDict, "must apply pair to dict"
-      a.vdict.insert(k, p.val)
-    of Slot(i):
-      guard a.kind in {bList, bRec}, "must apply a slot to list / rec"
-      guard i in 0..<a.vseq.len, "slot out of bounds"
-      a.vseq[i] = p.val
-    of El:
-      guard a.kind == bSet, "must apply El to set: " & $a.kind
-      a.vset.incl p.val
-
 # ================
 # Value
 # ================
@@ -282,79 +194,79 @@ func `<=`*(a,b: Value): bool =
 func `==`*(a,b: Value): bool =
   cmp(a,b) == 0
 
-func len*(a: Value): int =
-  case a
-  of Data(n): n.len
-  else: 0
+func hash*(self: Value): Hash
 
-iterator parts*(a: Value): FramePart =
-  case a
-  of Data(a):
-    for part in a.parts:
-      yield part
-  else: discard
-
-iterator children*(self: Value): lent Value =
-  if self.isNode:
-    for i in 0 ..< self.asNode.len:
-      yield self.asNode.getChild(i)
-
-iterator walk*(self: Value): lent Value {.closure.} =
-  ## post order walk over self
-  yield self
-  for child in self.children:
-    for each in child.walk:
-      yield each
+func hash*(self: Node): Hash =
+  var h = self.kind.hash !& self.mark.hash
+  case self.kind
+  of bNil: discard
+  of bNum:
+    h = h !& self.vnum.hash
+  of bText, bSym, bBytes:
+    h = h !& self.vstr.hash
+  else:
+    for each in self.children:
+      h = h !& each.hash
+  !$h
 
 func hash*(self: Value): Hash =
-  case self
-  of Bound(a): a.hash
-  of Data:
-    var h: Hash
-    for each in self.walk:
-      case each
-      of Bound(a):
-        h = h !& a.hash
-      of Data(a):
-        h = h !& a.kind.hash
-        h = h !& a.mark.hash
-        case a.kind
-        of bNum:
-          h = h !& a.vnum.hash
-        of bText,bSym,bBytes:
-          h = h !& a.vstr.hash
-        else: discard
-    !$ h
+  if self.isLive: self.asLive.hash
+  else: self.asNode.hash
 
 # ================
 # Reification
 # ================
 
-func isPureData*(a: Value): bool =
-  for each in a.walk:
-    if each.isLive: return false
+func isPureData*(a: Value): bool
+
+func isPureData*(n: Node): bool =
+  for each in n.children:
+    if not each.isPureData: return false
   true
 
-func reify*(self: sink Value): Value
+func isPureData*(a: Value): bool =
+  a.isNode and a.asNode.isPureData
 
-func reify*(self: sink Node): Value =
-  if self.isFrame: 
-    var changes = newSeqofCap[FramePart](self.len)
-    for p in self.takeParts:
-      var part = p
-      case part
-      of Pair(k):
-        k = k.reify
-      else: discard
-      part.val = part.val.reify
-      changes.add part
-    self.apply changes
-  self.toValue
+func reifyIn(self: var Value): bool
 
-func reify*(self: sink Value): Value =
-  case self
-  of Data(n): n.reify
-  of Bound(l): l.reify.reify
+func reifyIn(self: var Node): bool =
+  case self.kind
+  of bList, bRec:
+    for i in 0 ..< self.vseq.len:
+      if self.vseq[i].reifyIn: result = true
+  of bSet:
+    for i in 0 ..< self.vset.data.len:
+      if self.vset.data[i].reifyIn: result = true
+    if result:
+      var members = move self.vset.data
+      self.vset.data.setLen 0
+      for m in members.mitems:
+        self.vset.incl move m
+  of bDict:
+    for i in 0 ..< self.vdict.entries.len:
+      if self.vdict.entries[i].key.reifyIn: result = true
+      if self.vdict.entries[i].val.reifyIn: result = true
+    if result:
+      var entries = move self.vdict.entries
+      self.vdict.entries.setLen 0
+      for e in entries.mitems:
+        self.vdict.insert(move e.key, move e.val)
+  else: discard
+
+func reifyIn(self: var Value): bool =
+  if self.isLive:
+    self = self.asLive.reify.toValue
+    discard self.asNode.reifyIn
+    true
+  else:
+    self.asNode.reifyIn
+
+func reify*(self: sink Node): Node =
+  discard self.reifyIn
+  self
+
+func reify*(self: sink Value): Node =
+  self.node.reify
 
 # ================
 # Builder
@@ -408,9 +320,7 @@ proc writeReified(n: Node, enc: var Enc) =
     enc.writeClose
 
 proc write*(self: sink Value, enc: var Enc) =
-  case self.reify
-  of Data(n): n.writeReified(enc)
-  of Bound: refuse "should never reach"
+  self.reify.writeReified(enc)
 
 when isMainModule:
   import std/[monotimes, times, strutils]
@@ -429,4 +339,22 @@ when isMainModule:
         discard
       best = min(best, (getMonoTime() - t0).inNanoseconds.float / 1e6)
     echo label, ": ", best, " ms"
+
+  proc encode(label: string) =
+    var
+      best = float.high
+      s = ""
+      r = initReader(BuildValue)
+      values: seq[Value] = @[]
+    for each in r.readEach(jam):
+      values.add each 
+    for _ in 0..<7:
+      s.setLen(0)
+      let elements = BuildValue.frame(values, bList, false)
+      let t0 = getMonoTime()
+      elements.write(s)
+      best = min(best, (getMonoTime() - t0).inNanoseconds.float / 1e6)
+    echo label, ": ", best, " ms"
+
   decode("decode value " & $size & "MB")
+  encode("encode value " & $size & "MB")

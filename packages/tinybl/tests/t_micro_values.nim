@@ -1,4 +1,4 @@
-import std/unittest
+import std/[unittest, os]
 import tinybl/micro/[ce, values]
 
 test "a live value is always > a node value":
@@ -26,10 +26,16 @@ method reify(self: File): Node =
   ]
   Node(vseq: items, kind: bRec, mark: true)
 
+method write(self: File, s: string) =
+  self.path.expandFilename.writeFile(s)
+
+method resolve(self: File): string =
+  self.path.expandTilde.readFile
+
 proc exampleValue(): Value =
   BuildValue.frame(@[
-    toValue File(path: "/tmp/foo.bar"),
-    toValue File(path: "/tmp/foo.bar")
+    toValue File(path: "/tmp/foo.txt"),
+    toValue File(path: "/tmp/foo.txt")
   ], bSet, false)
 
 test "can reify":
@@ -38,15 +44,25 @@ test "can reify":
     bar = foo.reify
   check not foo.isPureData
   check bar.isPureData
-  check foo.len == 2
+  check foo.asNode.len == 2
   check bar.len == 1
+  let f = File(foo.node.getChild(0).asLive)
+  let old = f.resolve
+  echo "content: ", old
+  f.write("hello from the test")
+  echo f.resolve
+  f.write(old)
+  echo f.resolve
 
-test "can round trip":
+test "round trips":
   let foo = exampleValue()
   var
     s = ""
     reader = initReader(BuildValue)
   foo.write(s)
-  for one in reader.readEach(s):
-    check one == foo.reify
-    check one != foo
+  let one = reader.readOne(s)
+
+  check one.node == foo.reify
+  # this should fail because foo.node won't reify the files
+  check one.node != foo.node
+  check one != foo

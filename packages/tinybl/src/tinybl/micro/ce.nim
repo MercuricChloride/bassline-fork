@@ -385,6 +385,12 @@ iterator readEach*[T;B:Builder[T]](r: var Reader[T,B], src: openArray[char]): T 
   while r.readCE(src, pos):
     yield move r.value
 
+proc readOne*[T;B: Builder[T]](r: var Reader[T,B], src: openArray[char]): T =
+  for one in r.readEach(src):
+    return one
+  refuse("failed to read one")
+  
+
 # ================
 # Writing
 # ================
