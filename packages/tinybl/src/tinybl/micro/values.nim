@@ -44,6 +44,12 @@ type
 
 const BuildValue* = ValueBuilder()
 
+func toValue*(self: sink Node): Value =
+  Data(data: self)
+
+func toValue*(self: Live): Value =
+  Bound(live: self)
+
 # ================
 # Live methods
 # ================
@@ -217,19 +223,37 @@ iterator parts*(a: Node): FramePart =
       yield El(val: v)
   else: discard
 
-func add*(a: var Node, parts: varargs[FramePart]) =
+iterator takeParts*(a: sink Node): FramePart =
+  ## resets `a`'s internal state so that we can 
+  ## use `a`.add with the new parts to update it
+  case a.kind
+  of bList, bRec:
+    for i,v in a.vseq.mpairs:
+      yield Slot(slot: i, val: move v)
+  of bDict:
+    var entries = move a.vdict.entries
+    a.vdict.entries.setLen(0)
+    for entry in entries.mitems:
+      yield Pair(key: move(entry.key), val: move(entry.val))
+  of bSet:
+    var els = move a.vset.data
+    a.vset.data.setLen(0)
+    for entry in els.mitems:
+      yield El(val: move entry)
+  else: discard
+
+func apply*(a: var Node, parts: varargs[FramePart]) =
   for p in parts:
     case p
     of Pair(k):
       guard a.kind == bDict, "must apply pair to dict"
-      a.vdict[k] = p.val
+      a.vdict.insert(k, p.val)
     of Slot(i):
       guard a.kind in {bList, bRec}, "must apply a slot to list / rec"
-      if a.vseq.len <= i:
-        a.vseq.setLen(i-1)
+      guard i in 0..<a.vseq.len, "slot out of bounds"
       a.vseq[i] = p.val
     of El:
-      guard a.kind == bSet, "must apply El to set"
+      guard a.kind == bSet, "must apply El to set: " & $a.kind
       a.vset.incl p.val
 
 # ================
@@ -258,6 +282,11 @@ func `<=`*(a,b: Value): bool =
 func `==`*(a,b: Value): bool =
   cmp(a,b) == 0
 
+func len*(a: Value): int =
+  case a
+  of Data(n): n.len
+  else: 0
+
 iterator parts*(a: Value): FramePart =
   case a
   of Data(a):
@@ -272,7 +301,7 @@ iterator children*(self: Value): lent Value =
       yield each
   else: discard
 
-iterator walk*(self: Value): Value {.closure.} =
+iterator walk*(self: Value): lent Value {.closure.} =
   ## post order walk over self
   yield self
   for child in self.children:
@@ -298,6 +327,36 @@ func hash*(self: Value): Hash =
           h = h !& a.vstr.hash
         else: discard
     !$ h
+
+# ================
+# Reification
+# ================
+
+func isPureData*(a: Value): bool =
+  for each in a.walk:
+    if each.isLive: return false
+  true
+
+func reify*(self: sink Value): Value
+
+func reify*(self: sink Node): Value =
+  if self.isFrame: 
+    var changes = newSeqofCap[FramePart](self.len)
+    for p in self.takeParts:
+      var part = p
+      case part
+      of Pair(k):
+        k = k.reify
+      else: discard
+      part.val = part.val.reify
+      changes.add part
+    self.apply changes
+  self.toValue
+
+func reify*(self: sink Value): Value =
+  case self
+  of Data(n): n.reify
+  of Bound(l): l.reify.reify
 
 # ================
 # Builder
@@ -331,6 +390,29 @@ proc frame*(_: ValueBuilder, s: sink seq[Value], kind, mark): Value =
   of bList:
     Data(data: Node(kind: bList, mark: mark, vseq: s))
   else: refuse("not a frame")
+
+# ================
+# Enc
+# ================
+
+proc writeReified(n: sink Node, enc: var Enc) =
+  case n.kind
+  of bNil: 
+    enc.writeNull(n.mark)
+  of bNum: 
+    enc.writeAtom(n.kind, n.mark, $n.vnum)
+  of bText,bSym,bBytes:
+    enc.writeAtom(n.kind, n.mark, n.vstr)
+  else:
+    enc.writeOpen(n.kind, n.mark)
+    for each in n.children:
+      each.write(enc)
+    enc.writeClose
+
+proc write*(self: sink Value, enc: var Enc) =
+  case self.reify
+  of Data(n): n.writeReified(enc)
+  of Bound: refuse "should never reach"
 
 when isMainModule:
   import std/[monotimes, times, strutils]

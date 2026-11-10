@@ -281,13 +281,22 @@ func indexOf*[K, V](self: SortedTable[K, V], key: K): int =
   let i = self.lowerIdx(key)
   if i < self.len and cmpKeys(self.entries[i], key) == 0: i else: -1
 
-func put*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
+func put*[K, V](
+    self: var SortedTable[K, V], 
+    key: sink K, val: sink V,
+    force = true) =
   mixin cmp
   let i = self.lowerIdx(key)
   if i < self.entries.len and cmpKeys(self.entries[i], key) == 0:
+    if not force:
+      refuse "key already exists"
     self.entries[i].val = val
   else:
     self.entries.insert(SortedEntry[K,V](key: key, val: val), i)
+
+func insert*[K,V](self: var SortedTable[K,V], key: sink K, val: sink V) =
+  ## like put, but throws is this will replace an existing key
+  self.put(key, val, force = false)
 
 func delete*[K, V](self: var SortedTable[K, V], key: K) =
   let i = self.indexOf(key)
