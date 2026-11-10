@@ -174,15 +174,15 @@ func `<=`*(a,b:Node): bool =
 iterator children*(a: Node): lent Value =
   case a.kind
   of bList, bRec:
-    for v in a.vseq:
-      yield v
+    for i in 0 ..< a.vseq.len:
+      yield a.vseq[i]
   of bDict:
-    for k,v in a.vdict:
-      yield k
-      yield v
+    for i in 0 ..< a.vdict.entries.len:
+      yield a.vdict.entries[i].key
+      yield a.vdict.entries[i].val
   of bSet:
-    for v in a.vset:
-      yield v
+    for i in 0 ..< a.vset.data.len:
+      yield a.vset.data[i]
   else: discard
 
 iterator mChildFrames(self: var Node): var Node =
@@ -295,11 +295,9 @@ iterator parts*(a: Value): FramePart =
   else: discard
 
 iterator children*(self: Value): lent Value =
-  case self
-  of Data(a):
-    for each in a.children:
-      yield each
-  else: discard
+  if self.isNode:
+    for i in 0 ..< self.asNode.len:
+      yield self.asNode.getChild(i)
 
 iterator walk*(self: Value): lent Value {.closure.} =
   ## post order walk over self
@@ -395,7 +393,7 @@ proc frame*(_: ValueBuilder, s: sink seq[Value], kind, mark): Value =
 # Enc
 # ================
 
-proc writeReified(n: sink Node, enc: var Enc) =
+proc writeReified(n: Node, enc: var Enc) =
   case n.kind
   of bNil: 
     enc.writeNull(n.mark)
@@ -406,7 +404,7 @@ proc writeReified(n: sink Node, enc: var Enc) =
   else:
     enc.writeOpen(n.kind, n.mark)
     for each in n.children:
-      each.write(enc)
+      each.asNode.writeReified(enc)
     enc.writeClose
 
 proc write*(self: sink Value, enc: var Enc) =
