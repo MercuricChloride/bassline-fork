@@ -239,12 +239,12 @@ func isValidUtf8*(str: string): bool =
 # ================
 
 type
-  BuildAlg*[V] = concept
+  Builder*[V] = concept
     proc null(self: Self, mark: bool): V
     proc atom(self: Self, s: sink string, k: Kind, m: bool): V
     proc frame(self: Self, s: sink seq[V], k: Kind, m: bool): V
 
-  EncAlg* = concept e
+  Enc* = concept e
     e.writeNull(bool)
     e.writeAtom(Kind, bool, sink string)
     e.writeOpen(Kind, bool)
@@ -273,11 +273,12 @@ type
     builder*: B
     value*: V
 
-const DefaultFrameCap* {.intdefine.} = 3
+const
+  DefaultFrameCap* {.intdefine.} = 3
   ## Default size of seqs for frames
-  ## 3 seems to be a good optimization
+  ## 3 seems to be a good size
 
-func initReader*[V; B: BuildAlg[V]](
+func initReader*[V; B: Builder[V]](
     builder: B, cap = MaxDepth, frameCap = DefaultFrameCap
 ): Reader[V, B] =
   Reader[V, B](
@@ -299,7 +300,7 @@ proc take(dst: var string, src: openArray[char], at, n: int) =
       copyMem(beginStore(dst, have + n, have), addr src[at], n)
       endStore(dst)
 
-proc readAtom[V; B: BuildAlg[V]](
+proc readAtom[V; B: Builder[V]](
     r: var Reader[V,B], src: openArray[char], pos: var int, val: var V, n: var int
 ): bool =
   mixin atom
@@ -337,7 +338,7 @@ proc readAtom[V; B: BuildAlg[V]](
     r.payload.setLen 0
   true
 
-proc readCE*[T;B: BuildAlg[T]](
+proc readCE*[T;B: Builder[T]](
     r: var Reader[T,B], src: openArray[char], pos: var int): bool =
   mixin null, frame
   while true:
@@ -378,7 +379,7 @@ proc readCE*[T;B: BuildAlg[T]](
       return true
     r.open[^1].members.add move v
 
-iterator readEach*[T;B:BuildAlg[T]](r: var Reader[T,B], src: openArray[char]): T =
+iterator readEach*[T;B:Builder[T]](r: var Reader[T,B], src: openArray[char]): T =
   ## every value src finishes r carrying on from where it stopped
   var pos = 0
   while r.readCE(src, pos):
