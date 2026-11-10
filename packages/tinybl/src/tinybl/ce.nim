@@ -128,9 +128,9 @@ template toBytes*(a: string): openArray[byte] =
 
 func toString*(bytes: openArray[byte]): string =
   ## bytes as the string tinybl holds a payload in
-  result = newString(bytes.len)
   if bytes.len > 0:
-    copyMem(addr result[0], addr bytes[0], bytes.len)
+    copyMem(beginStore(result, bytes.len), addr bytes[0], bytes.len)
+    endStore(result)
 
 # ================
 # CE comparisons
@@ -366,8 +366,8 @@ proc take(dst: var string, src: openArray[char], at, n: int) =
   else:
     if n > 0:
       let have = dst.len
-      dst.setLen have + n
-      copyMem(addr dst[have], addr src[at], n)
+      copyMem(beginStore(dst, have + n, have), addr src[at], n)
+      endStore(dst)
 
 proc readAtom[T; B: Builder[T]](
     r: var Reader[T,B], src: openArray[char], pos: var int, val: var T, n: var int
