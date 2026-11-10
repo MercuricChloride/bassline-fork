@@ -215,33 +215,33 @@ func cmpNums*(x, y: BNum): int =
 # ================
 
 type
-  Entry*[K, V] = object
+  SortedEntry*[K, V] = object
     key*: K
     val*: V
 
-  Pair*[T] = Entry[T, T]
+  SortedPair*[T] = SortedEntry[T, T]
   SortedTable*[K, V] = object
-    entries: seq[Entry[K, V]]
+    entries*: seq[SortedEntry[K, V]]
 
-func toEntry*[T](self: sink array[2,T]): Entry[T,T] =
-  Entry[T,T](key: self[0], val: self[1])
+func toEntry*[T](self: sink array[2,T]): SortedEntry[T,T] =
+  SortedEntry[T,T](key: self[0], val: self[1])
 
-func toArray*[T](self: sink Entry[T,T]): array[2,T] =
+func toArray*[T](self: sink SortedEntry[T,T]): array[2,T] =
   [self.key, self.val]
 
-func entries*[K, V](self: SortedTable[K, V]): lent seq[Entry[K, V]] =
+func entries*[K, V](self: SortedTable[K, V]): lent seq[SortedEntry[K, V]] =
   self.entries
 
-func cmpKeys*[K, V](a, b: Entry[K, V]): int =
+func cmpKeys*[K, V](a, b: SortedEntry[K, V]): int =
   mixin cmp
   cmp(a.key, b.key)
 
-func cmpKeys*[K, V](a: Entry[K, V], b: K): int =
+func cmpKeys*[K, V](a: SortedEntry[K, V], b: K): int =
   mixin cmp
   cmp(a.key, b)
 
 func toSortedTable*[K, V](
-    entries: sink seq[Entry[K, V]], sorted = false
+    entries: sink seq[SortedEntry[K, V]], sorted = false
 ): SortedTable[K, V] =
   mixin cmp
   if sorted:
@@ -252,15 +252,15 @@ func toSortedTable*[K, V](
   SortedTable[K, V](entries: entries)
 
 func toSortedTable*[K, V](
-    self: openArray[Entry[K, V]], sorted = false
+    self: openArray[SortedEntry[K, V]], sorted = false
 ): SortedTable[K, V] =
   toSortedTable(@self, sorted)
 
 func fromRavel*[T](ravel: sink seq[T], sorted = false): SortedTable[T, T] =
   guard ravel.len mod 2 == 0, "ravel len must be even"
-  var entries = newSeqOfCap[Entry[T, T]](ravel.len div 2)
+  var entries = newSeqOfCap[SortedEntry[T, T]](ravel.len div 2)
   for i in countup(1, ravel.high, 2):
-    entries.add Entry[T, T](key: move ravel[i - 1], val: move ravel[i])
+    entries.add SortedEntry[T, T](key: move ravel[i - 1], val: move ravel[i])
   toSortedTable(entries, sorted)
 
 func toRavel*[T](self: sink SortedTable[T, T]): seq[T] =
@@ -287,7 +287,7 @@ func put*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
   if i < self.entries.len and cmpKeys(self.entries[i], key) == 0:
     self.entries[i].val = val
   else:
-    self.entries.insert(Entry[K,V](key: key, val: val), i)
+    self.entries.insert(SortedEntry[K,V](key: key, val: val), i)
 
 func delete*[K, V](self: var SortedTable[K, V], key: K) =
   let i = self.indexOf(key)
@@ -323,7 +323,7 @@ func getOrPut*[K, V](self: var SortedTable[K, V], key: K, val: sink V): lent V =
   mixin cmp
   let i = self.lowerIdx(key)
   if i == self.entries.len or cmpKeys(self.entries[i], key) != 0:
-    self.entries.insert Entry[K,V](key: key, val: val)
+    self.entries.insert SortedEntry[K,V](key: key, val: val)
   self.entries[i].val
 
 func getOr*[K, V](self: SortedTable[K, V], key: K, val: V): V =
@@ -336,7 +336,7 @@ func getOr*[K, V](self: SortedTable[K, V], key: K, val: V): V =
 func contains*[K, V](self: SortedTable[K, V], key: K): bool =
   self.indexOf(key) != -1
 
-iterator items*[K, V](self: SortedTable[K, V]): lent Entry[K,V] =
+iterator items*[K, V](self: SortedTable[K, V]): lent SortedEntry[K,V] =
   for each in self.entries:
     yield each
 
@@ -364,7 +364,7 @@ proc sort*[K,V](self: var SortedTable[K,V]) =
 # ================
 
 type SortedSet*[T] {.byref.} = object
-  data: seq[T]
+  data*: seq[T]
 
 func toSortedSet*[T](self: openArray[T], sorted = false): SortedSet[T] =
   mixin cmp

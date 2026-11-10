@@ -1,4 +1,4 @@
-import std/[strutils, hashes]
+import std/hashes
 import bigints
 import ./[ce, types]
 
@@ -26,6 +26,15 @@ type
       vdict*: SortedTable[Value, Value]
     of bSet:
       vset*: SortedSet[Value]
+
+  FramePart* = object
+    val*: Value
+    case
+    of El: discard
+    of Pair:
+      key*: Value
+    of Slot:
+      slot*: int
 
   Live* = ref object of RootObj
   Send* = ref object of Live
@@ -77,17 +86,32 @@ func asLive*(self: Value): Live =
   of Bound(v): v
   else: refuse("not live")
 
+func isNode*(self: Value): bool =
+  not self.isLive
+
+func asNode*(self: Value): lent Node =
+  case self
+  of Data(n): 
+    return n
+  else: refuse("not data")
+
+func asNode*(self: var Value): var Node =
+  case self
+  of Data(n):
+    return n
+  else: refuse "not data"
+
 # ================
 # Node
 # ================
 
-func isNode*(self: Value): bool =
-  not self.isLive
+func isFrame*(self: Node): bool =
+  self.kind in {bList..bSet}
 
-func asNode*(self: Value): Node =
+func isFrame*(self: Value): bool =
   case self
-  of Data(n): n
-  else: refuse("not data")
+  of Data(n): n.isFrame
+  else: false
 
 func len*(a: Node): int =
   case a.kind
@@ -110,6 +134,8 @@ func getChild*(a: Node, i: int): lent Value =
   else: refuse("not a frame")
 
 func cmp*(a,b: Value): int
+func `==`*(a,b: Value): bool
+func `<`*(a,b: Value): bool
 
 func cmp*(a,b: Node): int =
   template `??`(x,y) =
@@ -139,6 +165,73 @@ func `<`*(a,b: Node): bool =
 func `<=`*(a,b:Node): bool =
   cmp(a,b) <= 0
 
+iterator children*(a: Node): lent Value =
+  case a.kind
+  of bList, bRec:
+    for v in a.vseq:
+      yield v
+  of bDict:
+    for k,v in a.vdict:
+      yield k
+      yield v
+  of bSet:
+    for v in a.vset:
+      yield v
+  else: discard
+
+iterator mChildFrames(self: var Node): var Node =
+  case self.kind
+  of bList, bRec:
+    for each in self.vseq.mitems:
+      if each.isFrame:
+        yield each.asNode
+  of bDict:
+    for entry in self.vdict.entries.mitems:
+      if entry.key.isFrame:
+        yield entry.key.asNode
+      if entry.val.isFrame:
+        yield entry.val.asNode
+  of bSet:
+    for each in self.vset.data.mitems:
+      if each.isFrame:
+        yield each.asNode
+  else: discard
+
+iterator mframes*(self: var Node): var Node {.closure.} =
+  if self.isFrame:
+    yield self
+    for each in self.mChildFrames:
+      for deep in each.mframes:
+        yield deep
+
+iterator parts*(a: Node): FramePart =
+  case a.kind
+  of bList, bRec:
+    for i,v in a.vseq:
+      yield Slot(slot: i, val: v)
+  of bDict:
+    for k,v in a.vdict:
+      yield Pair(key: k, val: v)
+  of bSet:
+    for v in a.vset:
+      yield El(val: v)
+  else: discard
+
+func add*(a: var Node, parts: varargs[FramePart]) =
+  for p in parts:
+    case p
+    of Pair(k):
+      guard a.kind == bDict, "must apply pair to dict"
+      a.vdict[k] = p.val
+    of Slot(i):
+      guard a.kind in {bList, bRec}, "must apply a slot to list / rec"
+      if a.vseq.len <= i:
+        a.vseq.setLen(i-1)
+      a.vseq[i] = p.val
+    of El:
+      guard a.kind == bSet, "must apply El to set"
+      a.vset.incl p.val
+
 # ================
 # Value
 # ================
@@ -165,33 +258,46 @@ func `<=`*(a,b: Value): bool =
 func `==`*(a,b: Value): bool =
   cmp(a,b) == 0
 
-iterator children*(a: Value): Value =
+iterator parts*(a: Value): FramePart =
   case a
   of Data(a):
-    case a.kind
-    of bList, bRec:
-      for each in a.vseq:
-        yield each
-    of bDict:
-      for k,v in a.vdict:
-        yield k; yield v
-    of bSet:
-      for each in a.vseq:
-        yield each
-    else: discard
+    for part in a.parts:
+      yield part
+  else: discard
+
+iterator children*(self: Value): lent Value =
+  case self
+  of Data(a):
+    for each in a.children:
+      yield each
   else: discard
 
 iterator walk*(self: Value): Value {.closure.} =
+  ## post order walk over self
   yield self
   for child in self.children:
     for each in child.walk:
       yield each
 
-iterator living*(self: Value): Live =
-  for each in self.walk:
-    case each
-    of Bound(v): yield v
-    else: discard
+func hash*(self: Value): Hash =
+  case self
+  of Bound(a): a.hash
+  of Data:
+    var h: Hash
+    for each in self.walk:
+      case each
+      of Bound(a):
+        h = h !& a.hash
+      of Data(a):
+        h = h !& a.kind.hash
+        h = h !& a.mark.hash
+        case a.kind
+        of bNum:
+          h = h !& a.vnum.hash
+        of bText,bSym,bBytes:
+          h = h !& a.vstr.hash
+        else: discard
+    !$ h
 
 # ================
 # Builder
@@ -227,7 +333,7 @@ proc frame*(_: ValueBuilder, s: sink seq[Value], kind, mark): Value =
   else: refuse("not a frame")
 
 when isMainModule:
-  import std/[monotimes, times]
+  import std/[monotimes, times, strutils]
 
   # the jam, whole, through both types
   let 
