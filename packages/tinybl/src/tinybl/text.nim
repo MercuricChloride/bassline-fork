@@ -1,6 +1,6 @@
-import std/[algorithm, sequtils, strutils, sugar]
+import std/[sequtils, strutils, sugar]
 import petit_parser
-import ./ce
+import ./micro
 
 type TextParser[T] = Parser[string, T]
 
@@ -45,24 +45,14 @@ proc space*(): TextParser[Nothing] =
   ## Whitespace or a `;` comment.
   chars(" \t\n\r", "whitespace").skip / (ch(';') & neg(newline()).star).skip
 
-proc flat[V](entries: sink seq[(V, V)]): seq[V] =
-  result = newSeqOfCap[V](2 * entries.len)
-  for e in entries.mitems:
-    result.add move e[0]
-    result.add move e[1]
-
-proc basslineValue*[V; B: Builder[V]](
-    builder: B, extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
-): TextParser[V] =
-  ## One value, bare, made by `builder`. `extensions` are tried before a
-  ## symbol, and the `reserved` words are never read as one. A `!` sets
-  ## the value's mark with its own `setMark`.
-  mixin cmp, buildNull, buildAtom, buildFrame, setMark
-  # the parser keeps its own builder, shared by every part of it
-  var builder = builder
+proc basslineValue*(
+    extensions: seq[TextParser[Node]] = @[], reserved: seq[string] = @[]
+): TextParser[Node] =
+  ## One value, bare. `extensions` are tried before a symbol, and the
+  ## `reserved` words are never read as one.
   let
     ws = space()
-    value = undefined[string, V]("value")
+    value = undefined[string, Node]("value")
     form = value.trim(ws)
     ends = notAhead(noneOf(Delims, "symbol character"))
 
@@ -71,98 +61,90 @@ proc basslineValue*[V; B: Builder[V]](
     bytesTok = sequence((str("0x"), hexBody, ends))
       .flatten("bytes")
       .where(b => (b.len - 2 - b.count('_')) mod 2 == 0, "an even count of hex digits")
-      .map(b => builder.buildAtom(parseHexStr(b[2 .. ^1].replace("_", "")), bBytes, false))
+      .map(b => Bytes(parseHexStr(b[2 .. ^1].replace("_", "")), false))
     numberStart = digit().skip / (ch('-') & digit()).skip
     digits = ch('0').skip / (between('1', '9') & (ch('_').optional & digit()).star).skip
     numberTok = sequence((ch('-').optional, digits, ends))
       .flatten("number")
       .where(n => n != "-0", "a number")
-      .map(n => builder.buildAtom(n.replace("_", ""), bNum, false))
-    nilTok = (str("nil") & ends).map(_ => builder.buildNull(false))
-    text = quoted('"').map((s: sink string) => builder.buildAtom(s, bText, false))
-    quotedSymbol = quoted('\'').map((s: sink string) => builder.buildAtom(s, bSym, false))
+      .map(n => Num(n.replace("_", ""), false))
+    nilTok = (str("nil") & ends).map(_ => null().toNode)
+    text = quoted('"').map((s: sink string) => Text(s, false))
+    quotedSymbol = quoted('\'').map((s: sink string) => Sym(s, false))
     bare = noneOf(Delims, "symbol character").plus.flatten("symbol")
     keyword = choice(reserved.map(w => (str(w) & ends).skip("'" & w & "'")))
     symbol = sequence((notAhead(numberStart), notAhead(keyword), bare)).pick(2).map(
-        (s: sink string) => builder.buildAtom(s, bSym, false)
+        (s: sink string) => Sym(s, false)
       )
     rawAtom = choice(
       @[bytesTok, numberTok, nilTok, text, quotedSymbol] & extensions & @[symbol]
     )
-    atom = (rawAtom & (ch('!') & ends).skip.optional).map(
-      proc(m: sink (V, Option[Nothing])): auto =
-        if m[1].isSome:
-          m[0].setMark(true)
-        move m[0]
+    # a bool, since an Option of the empty Nothing reads as none in the VM (Nim 2.4.0)
+    marked = (ch('!') & ends).skip.map(_ => true).optional(false)
+    atom = (rawAtom & marked).map(
+      proc(m: sink (Node, bool)): auto =
+        if m[1]:
+          ! move m[0]
+        else:
+          move m[0]
     )
 
     list = delimited(ch('['), ch(']').trim(ws), form.star).map(
-        (items: sink seq[V]) => builder.buildFrame(items, bList, false)
+        (items: sink seq[Node]) => List(items, false)
       )
     record = delimited(ch('('), ch(')').trim(ws), form.plus).map(
-        (items: sink seq[V]) => builder.buildFrame(items, bRec, false)
+        (items: sink seq[Node]) => Rec(items, false)
       )
     colon = ch(':').trim(ws)
     entries = ((form & colon).pick(0) & form).star
     members = form.star
     # the first member, read once, decides between a dict and a set
     braced = (form & (colon & form).pick(1).optional).callCC(
-      proc(next: TextParser[(V, Option[V])], ctx: Context[string]): Result[V] =
+      proc(next: TextParser[(Node, Option[Node])], ctx: Context[string]): Result[Node] =
         var f = next.parseOn(ctx)
         if not f.isSuccess:
-          return failedAs(V, f)
+          return failedAs(Node, f)
         var (k, v) = f.take
         if v.isSome:
           var r = entries.parseOn(ctx.at(f.pos))
           if not r.isSuccess:
-            return failedAs(V, r)
+            return failedAs(Node, r)
           var es = r.take
-          es.insert((move k, v.get), 0)
-          es.sort((a, b) => cmp(a[0], b[0]))
-          succeed(builder.buildFrame(flat(es), bDict, false), r.pos)
+          es.insert((move k, move v.get), 0)
+          succeed(Dict(es), r.pos)
         else:
           var r = members.parseOn(ctx.at(f.pos))
           if not r.isSuccess:
-            return failedAs(V, r)
+            return failedAs(Node, r)
           var items = r.take
           items.insert(move k, 0)
-          items.sort(cmp)
-          succeed(builder.buildFrame(items, bSet, false), r.pos)
+          succeed(Set(items), r.pos)
     )
-    emptyDict = colon.map(_ => builder.buildFrame(@[], bDict, false))
-    emptySet = epsilon[string, V](builder.buildFrame(@[], bSet, false))
+    emptyDict = colon.map(_ => Dict(@[], false))
+    emptySet = epsilon[string, Node](Set(@[], false))
     braces = delimited(ch('{'), ch('}').trim(ws), emptyDict / braced / emptySet)
     frame = list / record / braces
     markedFrame = (ch('!') & frame).pick(1).map(
-        proc(m: sink V): auto =
-          m.setMark(true)
-          m
+        proc(m: sink Node): auto =
+          ! m
       )
 
   value.define(markedFrame / frame / atom)
   value
 
-proc basslineForm*[V; B: Builder[V]](
-    builder: B, extensions: seq[TextParser[V]] = @[], reserved: seq[string] = @[]
-): TextParser[V] =
+proc basslineForm*(
+    extensions: seq[TextParser[Node]] = @[], reserved: seq[string] = @[]
+): TextParser[Node] =
   ## One value and the space around it.
-  basslineValue(builder, extensions, reserved).trim(space())
+  basslineValue(extensions, reserved).trim(space())
 
-proc basslineParser*[V; B: Builder[V]](builder: B): TextParser[V] =
+proc basslineParser*(): TextParser[Node] =
   ## Exactly one value.
-  basslineForm(builder).complete.resolve
+  basslineForm().complete.resolve
 
-proc basslineParser*[V](): TextParser[V] =
-  ## Exactly one value, of a type that builds itself.
-  basslineParser(ByType[V]())
-
-proc basslineDocument*[V; B: Builder[V]](builder: B): TextParser[seq[V]] =
+proc basslineDocument*(): TextParser[seq[Node]] =
   ## Any number of values, including none.
-  basslineForm(builder).star.trim(space()).complete.resolve
-
-proc basslineDocument*[V](): TextParser[seq[V]] =
-  ## Any number of values, including none, of a type that builds itself.
-  basslineDocument(ByType[V]())
+  basslineForm().star.trim(space()).complete.resolve
 
 proc openChar(k: Kind): char =
   case k
@@ -199,78 +181,85 @@ func isBareSpelling*(s: string): bool =
       return false
   true
 
-proc writeWalkable(v: Walkable, dst: var string) =
-  mixin children
-
-  template writeMark(it) =
-    if it.mark:
+proc writeText(n: Value, dst: var string) =
+  template writeMark() =
+    if n.mark:
       dst.add("!")
 
-  case v.kind
+  case n.kind
   of bNil:
     dst.add("nil")
-    writeMark(v)
+    writeMark()
   of bNum:
-    dst.add(v.numStr)
-    writeMark(v)
+    dst.add($n.vnum)
+    writeMark()
   of bText:
     dst.add('"')
-    dst.add(v.textVal.escaped('"'))
+    dst.add(n.vstr.escaped('"'))
     dst.add('"')
-    writeMark(v)
+    writeMark()
   of bSym:
-    let s = v.symVal
-    if s.isBareSpelling:
-      dst.add s
+    if n.vstr.isBareSpelling:
+      dst.add n.vstr
     else:
       dst.add('\'')
-      dst.add(v.symVal.escaped('\''))
+      dst.add(n.vstr.escaped('\''))
       dst.add('\'')
-    writeMark(v)
+    writeMark()
   of bBytes:
     dst.add("0x")
-    dst.add(v.bytesVal.toHex)
-    writeMark(v)
+    dst.add(n.vstr.toHex)
+    writeMark()
   of bList, bRec, bSet:
-    writeMark(v)
-    dst.add(v.kind.openChar)
-    let hi = v.len - 1
+    writeMark()
+    dst.add(n.kind.openChar)
+    let hi = n.len - 1
     for i in 0 .. hi:
-      writeWalkable(v.getChild(i), dst)
+      n.member(i).asValue.writeText(dst)
       if i != hi:
         dst.add(' ')
-    dst.add(v.kind.closeChar)
+    dst.add(n.kind.closeChar)
   of bDict:
-    writeMark(v)
-    dst.add(v.kind.openChar)
-    let hi = v.len - 1
+    writeMark()
+    dst.add(n.kind.openChar)
+    let hi = n.len - 1
     for i in 0 .. hi:
-      writeWalkable(v.getChild(i), dst)
+      n.member(i).asValue.writeText(dst)
       if i != hi:
         if i mod 2 == 0:
           dst.add(": ")
         else:
           dst.add(" ")
-    if v.len == 0:
+    if n.len == 0:
       dst.add(':')
-    dst.add(v.kind.closeChar)
+    dst.add(n.kind.closeChar)
 
-proc toBlText*(self: Walkable): string =
-  writeWalkable(self, result)
+proc toBlText*(self: Value): string =
+  if self.isPure:
+    self.writeText(result)
+  else:
+    self.reifyDeep.writeText(result)
 
-proc parse*[V: Walkable; B: Builder[V]](builder: B, s: string): V =
-  ## the one value s spells, made by builder
-  var r = basslineParser(builder).parse(s)
-  r.take
+proc toBlText*(self: Node): string =
+  if self.isPure:
+    self.asValue.writeText(result)
+  else:
+    self.reifyDeep.writeText(result)
 
-proc parse*(T: typedesc[Walkable], s: string): T =
-  ## the one value s spells, of a type that builds itself
-  parse(ByType[T](), s)
+proc `$`*(self: Value): string =
+  self.toBlText
 
-proc parseMany*(T: typedesc[Walkable], s: string): seq[T] =
-  var r = basslineDocument[T]().parse(s)
-  r.take
+proc `$`*(self: Node): string =
+  self.toBlText
 
-template makePrintable*(Ty) =
-  proc `$`*(self: Ty): string =
-    self.toBlText
+proc parse*(_: typedesc[Value], s: string): Value =
+  ## the one value s spells
+  var r = basslineParser().parse(s)
+  var read = r.take
+  move read.asValue
+
+proc parseMany*(_: typedesc[Value], s: string): seq[Value] =
+  var r = basslineDocument().parse(s)
+  var read = r.take
+  for each in read.mitems:
+    result.add move each.asValue

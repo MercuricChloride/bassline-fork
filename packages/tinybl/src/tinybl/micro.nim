@@ -447,14 +447,14 @@ func normalize*[T](self: var SortedSet[T]) =
 type
   Live* = ref object of RootObj
 
-  Value* = object
+  Node* = object
     case
-    of Data:
-      data*: Node
+    of Plain:
+      value*: Value
     of Bound:
       live*: Live
 
-  Node* = object
+  Value* = object
     mark*: bool
     case kind*: Kind
     of bNil: discard
@@ -463,73 +463,73 @@ type
     of bText, bSym, bBytes:
       vstr*: string
     of bList, bRec:
-      vseq*: seq[Value]
+      vseq*: seq[Node]
     of bDict:
-      vdict*: SortedTable[Value, Value]
+      vdict*: SortedTable[Node, Node]
     of bSet:
-      vset*: SortedSet[Value]
+      vset*: SortedSet[Node]
 
-func toValue*(self: sink Node): Value {.inline.} =
-  Data(data: self)
+func toNode*(self: sink Value): Node {.inline.} =
+  Plain(value: self)
 
-func toValue*(self: Live): Value =
+func toNode*(self: Live): Node =
   Bound(live: self)
 
-method reify*(self: Live): Node {.base, raises: [BasslineError].} =
+method reify*(self: Live): Value {.base, sideEffect, raises: [BasslineError].} =
   refuse "reify must be implemented!"
 
 # ================
 # Doors
 # ================
 
-func isLive*(self: Value): bool =
+func isBound*(self: Node): bool =
   case self
   of Bound: true
   else: false
 
-func isNode*(self: Value): bool =
-  not self.isLive
+func isPlain*(self: Node): bool =
+  not self.isBound
 
-func asLive*(self: Value): Live =
+func asLive*(self: Node): Live =
   case self
   of Bound(v): v
   else: refuse("not live")
 
-func asNode*(self: Value): lent Node =
+func asValue*(self: Node): lent Value =
   case self
-  of Data(n):
+  of Plain(n):
     return n
   else: refuse("not data")
 
-func asNode*(self: var Value): var Node =
+func asValue*(self: var Node): var Value =
   case self
-  of Data(n):
+  of Plain(n):
     return n
   else: refuse "not data"
 
-func node*(self: sink Value): Node =
+proc reify*(self: sink Node): Value =
   case self
-  of Data(n): n
+  of Plain(n): n
   of Bound(l): l.reify
 
 # ================
-# Nodes
+# Members
 # ================
 
-func isFrame*(self: Node): bool =
+func isFrame*(self: Value): bool =
   self.kind in {bList..bSet}
 
-func len*(a: Node): int =
+func len*(a: Value): int =
   case a.kind
   of bList, bRec:
     a.vseq.len
   of bDict:
-    a.vdict.len
+    a.vdict.len * 2
   of bSet:
     a.vset.len
   else: 0
 
-func getChild*(a: Node, i: int): lent Value =
+func member*(a: Value, i: int): lent Node =
   case a.kind
   of bList, bRec:
     return a.vseq[i]
@@ -539,7 +539,7 @@ func getChild*(a: Node, i: int): lent Value =
     return a.vset.data[i]
   else: refuse("not a frame")
 
-iterator children*(a: Node): lent Value =
+iterator members*(a: Value): lent Node =
   # by index: looping over the members through a binding copies them whole
   case a.kind
   of bList, bRec:
@@ -561,9 +561,9 @@ iterator children*(a: Node): lent Value =
 func cmp*(a, b: Live): int =
   cmp(cast[int](a), cast[int](b))
 
-func cmp*(a, b: Value): int
+func cmp*(a, b: Node): int
 
-func cmp*(a, b: Node): int =
+func cmp*(a, b: Value): int =
   template `??`(x,y) =
     let r = cmp(x,y)
     if r != 0: return r
@@ -579,19 +579,19 @@ func cmp*(a, b: Node): int =
     cmpShortlex(a.vstr, b.vstr)
   of bList,bRec,bDict,bSet:
     for i in 0 ..< min(a.len, b.len):
-      a.getChild(i) ?? b.getChild(i)
+      a.member(i) ?? b.member(i)
     cmp(b.len, a.len)
 
-func cmp*(a, b: Value): int =
+func cmp*(a, b: Node): int =
   case a
   of Bound(x):
     case b
-    of Data: 1
+    of Plain: 1
     of Bound(y): cmp(x, y)
-  of Data(x):
+  of Plain(x):
     case b
     of Bound: -1
-    of Data(y): cmp(x, y)
+    of Plain(y): cmp(x, y)
 
 template ordered(T: typedesc) =
   func `==`*(a, b: T): bool =
@@ -604,15 +604,15 @@ template ordered(T: typedesc) =
     cmp(a, b) <= 0
 
 ordered Live
-ordered Node
 ordered Value
+ordered Node
 
 func hash*(self: Live): Hash =
   hash cast[pointer](self)
 
-func hash*(self: Value): Hash
+func hash*(self: Node): Hash
 
-func hash*(self: Node): Hash =
+func hash*(self: Value): Hash =
   var h = self.kind.hash !& self.mark.hash
   case self.kind
   of bNil: discard
@@ -621,75 +621,75 @@ func hash*(self: Node): Hash =
   of bText, bSym, bBytes:
     h = h !& self.vstr.hash
   else:
-    for each in self.children:
+    for each in self.members:
       h = h !& each.hash
   !$h
 
-func hash*(self: Value): Hash =
-  if self.isLive: self.asLive.hash
-  else: self.asNode.hash
+func hash*(self: Node): Hash =
+  if self.isBound: self.asLive.hash
+  else: self.asValue.hash
 
 # ================
 # Constructors
 # ================
 
-func null*(mark = false): Node {.inline.} =
-  Node(kind: bNil, mark: mark)
+func null*(mark = false): Value {.inline.} =
+  Value(kind: bNil, mark: mark)
 
-func atom*(kind: Kind, payload: sink string, mark = false): Node {.inline.} =
+func atom*(kind: Kind, payload: sink string, mark = false): Value {.inline.} =
   case kind
   of bNum:
-    Node(kind: bNum, mark: mark, vnum: initNum(payload))
+    Value(kind: bNum, mark: mark, vnum: initNum(payload))
   of bText, bSym:
     guard isValidUtf8(payload), "invalid utf8 bytes"
-    Node(kind: kind, mark: mark, vstr: payload)
+    Value(kind: kind, mark: mark, vstr: payload)
   of bBytes:
-    Node(kind: bBytes, mark: mark, vstr: payload)
+    Value(kind: bBytes, mark: mark, vstr: payload)
   else:
     refuse "not an atom"
 
-func build(kind: Kind, members: sink seq[Value], mark, inOrder: bool): Node =
+func build(kind: Kind, members: sink seq[Node], mark, inOrder: bool): Value =
   case kind
   of bList, bRec:
     guard kind == bList or members.len > 0, "record must have a head"
-    Node(kind: kind, mark: mark, vseq: members)
+    Value(kind: kind, mark: mark, vseq: members)
   of bDict:
     guard members.len mod 2 == 0, "dict cannot have stranded keys"
     let dict = fromRavel(members, sorted = inOrder)
     guard dict.strictlyAscending,
       (if inOrder: "dict keys must be strictly ascending" else: "dict key repeated")
-    Node(kind: bDict, mark: mark, vdict: dict)
+    Value(kind: bDict, mark: mark, vdict: dict)
   of bSet:
     let els = toSortedSet(members, sorted = inOrder)
     guard els.strictlyAscending,
       (if inOrder: "set elements must be strictly ascending" else: "set element repeated")
-    Node(kind: bSet, mark: mark, vset: els)
+    Value(kind: bSet, mark: mark, vset: els)
   else:
     refuse "not a frame"
 
-func canonicalFrame*(kind: Kind, members: sink seq[Value], mark = false): Node {.inline.} =
+func canonicalFrame*(kind: Kind, members: sink seq[Node], mark = false): Value {.inline.} =
   build(kind, members, mark, inOrder = true)
 
-func frame*(kind: Kind, members: sink seq[Value], mark = false): Node =
+func frame*(kind: Kind, members: sink seq[Node], mark = false): Value =
   build(kind, members, mark, inOrder = false)
 
 # ================
 # Reification
 # ================
 
-func isPureData*(a: Value): bool
+func isPure*(a: Node): bool
 
-func isPureData*(n: Node): bool =
-  for each in n.children:
-    if not each.isPureData: return false
+func isPure*(n: Value): bool =
+  for each in n.members:
+    if not each.isPure: return false
   true
 
-func isPureData*(a: Value): bool =
-  a.isNode and a.asNode.isPureData
+func isPure*(a: Node): bool =
+  a.isPlain and a.asValue.isPure
 
-func reifyIn(self: var Value): bool
+proc reifyIn(self: var Node): bool
 
-func reifyIn(self: var Node): bool =
+proc reifyIn(self: var Value): bool =
   case self.kind
   of bList, bRec:
     for i in 0 ..< self.vseq.len:
@@ -705,20 +705,20 @@ func reifyIn(self: var Node): bool =
     if result: self.vdict.normalize
   else: discard
 
-func reifyIn(self: var Value): bool =
-  if self.isLive:
-    self = self.asLive.reify.toValue
-    discard self.asNode.reifyIn
+proc reifyIn(self: var Node): bool =
+  if self.isBound:
+    self = self.asLive.reify.toNode
+    discard self.asValue.reifyIn
     true
   else:
-    self.asNode.reifyIn
+    self.asValue.reifyIn
 
-func reify*(self: sink Node): Node =
+proc reifyDeep*(self: sink Value): Value =
   discard self.reifyIn
   self
 
-func reify*(self: sink Value): Node =
-  self.node.reify
+proc reifyDeep*(self: sink Node): Value =
+  self.reify.reifyDeep
 
 # ================
 # Reading
@@ -728,7 +728,7 @@ type
   OpenFrame = object
     kind: Kind
     mark: bool
-    members: seq[Value]
+    members: seq[Node]
 
   Reader* = object
     ## Holds state for reading CE in pieces. This includes a stack
@@ -791,7 +791,7 @@ proc readAtom(
   pos += got
   if have + got < length:
     return false
-  val = atom(kind, move r.payload, mark).toValue
+  val = atom(kind, move r.payload, mark)
   when nimvm:
     # the VM's move copies, leaving the payload behind
     r.payload.setLen 0
@@ -814,16 +814,16 @@ proc readCE*(r: var Reader, src: openArray[char], pos: var int): bool =
       let
         (kind, mark, _) = headerData(r.head[0])
         room = if r.frameCap > 0: r.frameCap else: DefaultFrameCap
-      r.open.add OpenFrame(kind: kind, mark: mark, members: newSeqOfCap[Value](room))
+      r.open.add OpenFrame(kind: kind, mark: mark, members: newSeqOfCap[Node](room))
       r.headLen = 0
       r.size += 1
       continue
     of pvCloseFrame:
       guard r.open.len > 0, "end at top level"
       var f = r.open.pop
-      v = canonicalFrame(f.kind, move f.members, f.mark).toValue
+      v = canonicalFrame(f.kind, move f.members, f.mark)
     of pvNil:
-      v = null(headerData(r.head[0]).mark).toValue
+      v = null(headerData(r.head[0]).mark)
     of pvAtom:
       if not r.readAtom(src, pos, v, n):
         return false
@@ -834,7 +834,7 @@ proc readCE*(r: var Reader, src: openArray[char], pos: var int): bool =
       r.size = 0
       r.value = move v
       return true
-    r.open[^1].members.add move v
+    r.open[^1].members.add toNode(move v)
 
 iterator readEach*(r: var Reader, src: openArray[char]): Value =
   ## every value src finishes r carrying on from where it stopped
@@ -887,7 +887,7 @@ proc writeOpen*(dst: var string, kind: Kind, mark: bool) =
 proc writeClose*(dst: var string) =
   dst.add char(EndByte)
 
-proc writeReified(n: Node, enc: var Enc) =
+proc writeReified(n: Value, enc: var Enc) =
   mixin writeNull, writeAtom, writeOpen, writeClose
   case n.kind
   of bNil:
@@ -898,12 +898,17 @@ proc writeReified(n: Node, enc: var Enc) =
     enc.writeAtom(n.kind, n.mark, n.vstr)
   else:
     enc.writeOpen(n.kind, n.mark)
-    for each in n.children:
-      each.asNode.writeReified(enc)
+    for each in n.members:
+      each.asValue.writeReified(enc)
     enc.writeClose
 
-proc write*(self: sink Value, enc: var Enc) =
-  self.reify.writeReified(enc)
+proc write*(self: Value, enc: var Enc) =
+  if self.isPure: self.writeReified(enc)
+  else: self.reifyDeep.writeReified(enc)
+
+proc write*(self: Node, enc: var Enc) =
+  if self.isPure: self.asValue.writeReified(enc)
+  else: self.reifyDeep.writeReified(enc)
 
 # ==================================================
 # Sugar
@@ -1180,36 +1185,36 @@ iterator mitems[T](self: var SortedSet[T]): var T =
     yield each
 
 # ================
-# Node Sugar
+# Value Sugar
 # ================
 
-func `!`*(self: sink Node): Node =
+func `!`*(self: sink Value): Value =
   self.mark = true
   self
 
-func `~`*(self: sink Node): Node =
+func `~`*(self: sink Value): Value =
   self.mark = false
   self
 
-func `[]`*(self: Node, idx: int): lent Value =
+func `[]`*(self: Value, idx: int): lent Node =
   guard self.kind in {bList, bRec}, "invalid pos index"
   guard idx < self.vseq.len, "out of bounds"
   return self.vseq[idx]
 
-func `[]=`*(self: var Node, idx: int, val: sink Value) =
+func `[]=`*(self: var Value, idx: int, val: sink Node) =
   guard self.kind in {bList, bRec}, "invalid pos assignment"
   guard idx < self.vseq.len, "out of bounds"
   self.vseq[idx] = val
 
-func `[]`*(self: Node, key: Value): lent Value =
+func `[]`*(self: Value, key: Node): lent Node =
   guard self.kind == bDict, "invalid value index"
   return self.vdict[key]
 
-func `[]=`*(self: var Node, key: Value, val: sink Value) =
+func `[]=`*(self: var Value, key: Node, val: sink Node) =
   guard self.kind == bDict, "invalid value assignment"
   self.vdict[key] = val
 
-func contains*(self: Node, key: Value): bool =
+func contains*(self: Value, key: Node): bool =
   case self.kind
   of bList, bRec:
     key in self.vseq
@@ -1219,60 +1224,60 @@ func contains*(self: Node, key: Value): bool =
     key in self.vset
   else: refuse "not a frame"
 
-func incl*(self: var Node, val: sink Value) =
+func incl*(self: var Value, val: sink Node) =
   guard self.kind == bSet, "invalid incl"
   self.vset.incl val
 
 # ================
-# Value Sugar
+# Node Sugar
 # ================
 
-func `!`*(self: sink Value): Value =
-  self.asNode.mark = true
+func `!`*(self: sink Node): Node =
+  self.asValue.mark = true
   self
 
-func `~`*(self: sink Value): Value =
-  self.asNode.mark = false
+func `~`*(self: sink Node): Node =
+  self.asValue.mark = false
   self
 
-func Num*(n: SomeInteger, mark = false): Value =
-  Data(data: Node(kind: bNum, mark: mark, vnum: initNum(n)))
+func Num*(n: SomeInteger, mark = false): Node =
+  Plain(value: Value(kind: bNum, mark: mark, vnum: initNum(n)))
 
-func Num*(n: BigInt, mark = false): Value =
-  Data(data: Node(kind: bNum, mark: mark, vnum: initNum(n)))
+func Num*(n: BigInt, mark = false): Node =
+  Plain(value: Value(kind: bNum, mark: mark, vnum: initNum(n)))
 
-func Num*(s: sink string, mark = false): Value =
-  Data(data: atom(bNum, s, mark))
+func Num*(s: sink string, mark = false): Node =
+  Plain(value: atom(bNum, s, mark))
 
-func Text*(s: sink string, mark = false): Value =
-  Data(data: atom(bText, s, mark))
+func Text*(s: sink string, mark = false): Node =
+  Plain(value: atom(bText, s, mark))
 
-func Sym*(s: sink string, mark = false): Value =
-  Data(data: atom(bSym, s, mark))
+func Sym*(s: sink string, mark = false): Node =
+  Plain(value: atom(bSym, s, mark))
 
-func Bytes*(s: string, mark = false): Value =
-  Data(data: atom(bBytes, s, mark))
+func Bytes*(s: string, mark = false): Node =
+  Plain(value: atom(bBytes, s, mark))
 
-func List*(els: sink seq[Value], mark = false): Value =
-  Data(data: frame(bList, els, mark))
+func List*(els: sink seq[Node], mark = false): Node =
+  Plain(value: frame(bList, els, mark))
 
-func Rec*(els: sink seq[Value], mark = false): Value =
-  Data(data: frame(bRec, els, mark))
+func Rec*(els: sink seq[Node], mark = false): Node =
+  Plain(value: frame(bRec, els, mark))
 
-func Dict*(els: sink seq[(Value, Value)], mark = false): Value =
-  var ravel = newSeqOfCap[Value](els.len * 2)
+func Dict*(els: sink seq[(Node, Node)], mark = false): Node =
+  var ravel = newSeqOfCap[Node](els.len * 2)
   for each in els.mitems:
     ravel.add(move each[0])
     ravel.add(move each[1])
-  Data(data: frame(bDict, ravel, mark))
+  Plain(value: frame(bDict, ravel, mark))
 
-func Set*(els: sink seq[Value], mark = false): Value =
-  Data(data: frame(bSet, els, mark))
+func Set*(els: sink seq[Node], mark = false): Node =
+  Plain(value: frame(bSet, els, mark))
 
-proc rewriteIn(self: var Value, p: proc(n: var Node): bool, f: proc(n: var Value)): bool =
+proc rewriteIn(self: var Node, p: proc(n: var Value): bool, f: proc(n: var Node)): bool =
   case self
   of Bound: discard
-  of Data(n):
+  of Plain(n):
     if p(n): 
       f(self)
       return true
@@ -1291,64 +1296,5 @@ proc rewriteIn(self: var Value, p: proc(n: var Node): bool, f: proc(n: var Value
       if result: n.vset.normalize
     else: discard
 
-proc rewrite*(self: var Value, p: proc(n: var Node): bool, f: proc(n: var Value)) =
+proc rewrite*(self: var Node, p: proc(n: var Value): bool, f: proc(n: var Node)) =
   discard self.rewriteIn(p, f)
-
-when isMainModule:
-  import std/[monotimes, times]
-
-  let
-    jam = strutils.repeat(readFile("/Users/goose/prg/jordans-bl/jams/jam.blb"), 50)
-    size = jam.len / 1_000_000
-
-  proc decode(label: string) =
-    var best = float.high
-    for _ in 0..<7:
-      var reader = initReader()
-      let t0 = getMonoTime()
-      for _ in reader.readEach(jam):
-        discard
-      best = min(best, (getMonoTime() - t0).inNanoseconds.float / 1e6)
-    echo label, ": ", best, " ms"
-
-  proc encode(label: string) =
-    var
-      best = float.high
-      s = ""
-      r = initReader()
-      values: seq[Value] = @[]
-    for each in r.readEach(jam):
-      values.add each
-    for _ in 0..<7:
-      s.setLen(0)
-      let elements = frame(bList, values).toValue
-      let t0 = getMonoTime()
-      elements.write(s)
-      best = min(best, (getMonoTime() - t0).inNanoseconds.float / 1e6)
-    echo label, ": ", best, " ms"
-
-  let target = Sym"foo"
-
-  type Foo = ref object of Live
-
-  proc p(n: var Node): auto =
-      n == target.node
-  proc f(v: var Value) =
-    v = toValue Foo()
-  proc install(_: type(Foo), val: var Value) =
-    val.rewrite(p, f)
-
-  let foo = new Value
-
-  foo[] = Dict(@{
-    Sym"a": Rec(@[Sym"foo"]),
-    Sym"b": Rec(@[Sym"foo"])
-  })
-
-  Foo.install(foo[])
-
-  echo foo[].node[Sym"a"].node[0].isLive
-  echo foo[].node[Sym"b"].node[0].isLive
-
-  decode("decode value " & $size & "MB")
-  encode("encode value " & $size & "MB")
