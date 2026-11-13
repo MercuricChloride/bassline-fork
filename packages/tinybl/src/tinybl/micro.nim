@@ -227,7 +227,11 @@ proc inDictOrder*[T](ravel: openArray[T]): bool =
 
 proc inSetOrder*[T](members: openArray[T]): bool =
   mixin cmp
-  members.isSorted(cmp)
+  if members.len > 1:
+    for i in 1..<members.len:
+      if cmp(members[i-1], members[i]) >= 0:
+        return false
+  true
 
 # ================
 # Numbers
@@ -443,7 +447,7 @@ proc toSortedTable*[K, V](
   result.data.setLen(self.len)
 
   for i, e in self.mpairs:
-    result.data[i] = initAssoc(e[0], e[1])
+    result.data[i] = initAssoc(move e[0], move e[1])
 
   if not sorted:
     result.data.sort(cmp[Assoc[K, V]])
@@ -483,7 +487,7 @@ proc hash*[T](self: SortedSet[T]): Hash =
   mixin hash
   for each in self.data:
     result = result !& each.hash
-  result = !&result
+  result = !$result
 
 proc incl*[T](self: var SortedSet[T], item: sink T) =
   mixin cmp
@@ -591,6 +595,12 @@ func asValue*(self: var Node): var Value =
   of Plain(n):
     return n
   else: refuse "not data"
+
+func toValue*(self: sink Node): Value =
+  case self
+  of Plain(n):
+    return n
+  else: refuse("not data")
 
 # ================
 # Members
@@ -709,24 +719,33 @@ ordered Node
 func hash*(self: Live): Hash =
   hash cast[pointer](self)
 
-func hash*(self: Node): Hash
-
 func hash*(self: Value): Hash =
+  template finish =
+    return !$result
   var h = self.kind.hash !& self.mark.hash
   case self.kind
-  of bNil: discard
+  of bNil:
+    finish
   of bNum:
     h = h !& self.vnum.hash
+    finish
   of bText, bSym, bBytes:
     h = h !& self.vstr.hash
-  else:
-    for each in self.members:
-      h = h !& each.hash
-  !$h
+    finish
+  of bList, bRec:
+    h = h !& self.vseq.hash
+    finish
+  of bDict:
+    h = h !& self.vdict.hash
+    finish
+  of bSet:
+    h = h !& self.vset.hash
+    finish
 
 func hash*(self: Node): Hash =
-  if self.isBound: self.asLive.hash
-  else: self.asValue.hash
+  case self
+  of Bound(l): l.hash
+  of Plain(v): v.hash
 
 # ================
 # Constructors
@@ -774,42 +793,53 @@ func frame*(kind: Kind, members: sink seq[Node], mark = false): Value =
 # Reification
 # ================
 
+func isPure*(self: Node): bool
+
+func isPure*(self: Value): bool =
+  for each in self.members:
+    if not each.isPure: return false
+  true
+
 func isPure*(self: Node): bool =
   case self
   of Bound: false
-  of Plain(self):
-    for each in self.members:
-      if not each.isPure: return false
-    true
+  of Plain(v): v.isPure
 
-proc reify*(self: var Node): bool {.discardable.} =
+proc reify*(self: var Node, deep = false): bool {.discardable.}
+
+proc reify*(self: var Value, deep = false): bool {.discardable.} =
+  case self.kind
+  of bList, bRec:
+    for each in self.vseq.mitems:
+      if each.reify(deep):
+        result = true
+  of bDict:
+    var keyChanged: bool
+    for each in self.vdict.data.mitems:
+      if each.key.reify(deep):
+        keyChanged = true
+        result = true
+      if each.val.reify(deep):
+        result = true
+    if keyChanged:
+      self.normalize
+  of bSet:
+    for each in self.vset.data.mitems:
+      if each.reify(deep):
+        result = true
+    if result:
+      self.normalize
+  else: return false
+
+proc reify*(self: var Node, deep = false): bool {.discardable.} =
   case self
   of Bound(l):
     self = Plain(value: l.reified)
-    return true
+    if deep: 
+      self.reify
+    true
   of Plain(self):
-    case self.kind
-    of bList, bRec:
-      for each in self.vseq.mitems:
-        if each.reify:
-          result = true
-    of bDict:
-      var keyChanged: bool
-      for each in self.vdict.data.mitems:
-        if each.key.reify:
-          keyChanged = true
-          result = true
-        if each.val.reify:
-          result = true
-      if keyChanged:
-        self.normalize
-    of bSet:
-      for each in self.vset.data.mitems:
-        if each.reify:
-          result = true
-      if result:
-        self.normalize
-    else: return false
+    self.reify
 
 proc reified*(self: sink Node): Node =
   discard self.reify
@@ -942,6 +972,14 @@ proc readOne*(r: var Reader, src: openArray[char]): Value =
     return one
   refuse("failed to read one")
 
+proc readAll*(r: var Reader, src: openArray[char]): seq[Value] =
+  for each in r.readEach(src):
+    result.add each
+
+proc readAll*(src: openArray[char]): seq[Value] =
+  var r = initReader()
+  r.readAll(src)
+
 # ================
 # Writing
 # ================
@@ -982,7 +1020,9 @@ proc writeOpen*(dst: var string, kind: Kind, mark: bool) =
 proc writeClose*(dst: var string) =
   dst.add char(EndByte)
 
-proc writeReified(n: Value, enc: var Enc) =
+proc write*(self: Node, enc: var Enc)
+
+proc write*(n: Value, enc: var Enc) =
   mixin writeNull, writeAtom, writeOpen, writeClose
   case n.kind
   of bNil:
@@ -994,20 +1034,15 @@ proc writeReified(n: Value, enc: var Enc) =
   else:
     enc.writeOpen(n.kind, n.mark)
     for each in n.members:
-      each.asValue.writeReified(enc)
+      each.write(enc)
     enc.writeClose
 
-proc write*(self: Value, enc: var Enc) =
-  if self.isPure:
-    self.writeReified(enc)
-  else:
-    var own = self
-    own.reifyDeep
-    own.writeReified(enc)
-
-proc write*(self: sink Node, enc: var Enc) =
-  if self.isPure: self.asValue.writeReified(enc)
-  else: self.reifiedDeep.writeReified(enc)
+proc write*(self: Node, enc: var Enc) =
+  case self
+  of Bound:
+    refuse "can only write a fully reified node"
+  of Plain(v):
+    v.write(enc)
 
 # ==================================================
 # Sugar
@@ -1340,16 +1375,12 @@ func Rec*(els: sink seq[Node], mark = false): Node =
   Plain(value: frame(bRec, els, mark))
 
 func Dict*(els: sink seq[(Node, Node)], mark = false): Node =
-  var ravel = newSeqOfCap[Node](els.len * 2)
-  for each in els.mitems:
-    ravel.add(move each[0])
-    ravel.add(move each[1])
-  Plain(value: frame(bDict, ravel, mark))
+  Plain(value: Value(kind: bDict, mark: mark, vdict: els.toSortedTable))
 
 func Set*(els: sink seq[Node], mark = false): Node =
-  Plain(value: frame(bSet, els, mark))
+  Plain(value: Value(kind: bSet, mark: mark, vset: els.toSortedSet))
 
-proc rewriteIn(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)): bool =
+proc rewrite*(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)): bool {.discardable.} =
   case self
   of Bound:
     return false
@@ -1360,25 +1391,22 @@ proc rewriteIn(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)): b
     case n.kind
     of bList, bRec:
       for each in n.vseq.mitems:
-        if each.rewriteIn(p, f):
+        if each.rewrite(p, f):
           result = true
     of bDict:
       var keyChanged: bool
       for each in n.vdict.data.mitems:
-        if each.key.rewriteIn(p, f):
+        if each.key.rewrite(p, f):
           keyChanged = true
           result = true
-        if each.val.rewriteIn(p, f):
+        if each.val.rewrite(p, f):
           result = true
       if keyChanged:
         n.normalize
     of bSet:
       for each in n.vset.data.mitems:
-        if each.rewriteIn(p,f):
+        if each.rewrite(p,f):
           result = true
       if result:
         n.normalize
     else: return false
-
-proc rewrite*(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)) =
-  discard self.rewriteIn(p, f)

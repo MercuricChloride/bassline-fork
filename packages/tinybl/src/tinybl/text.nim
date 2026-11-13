@@ -215,7 +215,7 @@ proc writeText(n: Value, dst: var string) =
     dst.add(n.kind.openChar)
     let hi = n.len - 1
     for i in 0 .. hi:
-      n.member(i).asValue.writeText(dst)
+      n.nth(i).asValue.writeText(dst)
       if i != hi:
         dst.add(' ')
     dst.add(n.kind.closeChar)
@@ -224,7 +224,7 @@ proc writeText(n: Value, dst: var string) =
     dst.add(n.kind.openChar)
     let hi = n.len - 1
     for i in 0 .. hi:
-      n.member(i).asValue.writeText(dst)
+      n.nth(i).asValue.writeText(dst)
       if i != hi:
         if i mod 2 == 0:
           dst.add(": ")
@@ -238,13 +238,17 @@ proc toBlText*(self: Value): string =
   if self.isPure:
     self.writeText(result)
   else:
-    self.reifyDeep.writeText(result)
+    var own = self
+    own.reify
+    own.writeText(result)
 
 proc toBlText*(self: Node): string =
   if self.isPure:
     self.asValue.writeText(result)
   else:
-    self.reifyDeep.writeText(result)
+    var own = self
+    own.reify
+    own.asValue.writeText(result)
 
 proc `$`*(self: Value): string =
   self.toBlText

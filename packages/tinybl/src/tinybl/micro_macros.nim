@@ -31,12 +31,12 @@ proc codegen(n: Value): NimNode =
     var els = asSeq n.vseq.mapit(codegen(it))
     newCall(bindSym"Rec", els, m)
   of bDict:
-    var entries = asSeq n.vdict.entries.mapIt(
-      nnkTupleConstr.newTree(it.key.codegen, it.val.codegen))
+    var entries = asSeq n.vdict.take.mapIt(
+      nnkTupleConstr.newTree(it[0].codegen, it[1].codegen))
     newCall(bindSym"Dict", entries, m)
   of bSet:
     var
-      entries = asSeq n.vset.data.mapIt(it.codegen)
+      entries = asSeq n.vset.take.mapIt(it.codegen)
     newCall(bindSym"Set", entries, m)
 
 proc codegen(self: Node): NimNode =
@@ -62,7 +62,7 @@ proc expandValue(src: NimNode): NimNode =
     if not r.isSuccess:
       error(r.message, src)
     var root = r.take
-    proc p(n: var Value): bool =
+    proc p(n: Value): bool =
       case n.kind
       of bSym: n.vstr.startsWith("$") and n.vstr.len > 1
       else: false
