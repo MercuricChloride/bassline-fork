@@ -16,10 +16,10 @@ it, and nothing before it leans on it.
 ]##
 from std/bitops import countTrailingZeroBits
 from std/strutils import parseBiggestInt
-from std/algorithm import sort, lowerBound
+from std/algorithm import sort, lowerBound, upperBound, binarySearch, isSorted
 import std/[options, hashes]
 import bigints
-export options
+export options, hashes
 
 when not defined(js):
   from std/endians import littleEndian64
@@ -212,6 +212,24 @@ func isValidUtf8*(str: string): bool =
   str.toBytes.isValidUtf8
 
 # ================
+# Frame Laws
+# ================
+
+proc inDictOrder*[T](ravel: openArray[T]): bool =
+  mixin cmp
+  if ravel.len mod 2 != 0:
+    return false
+  if ravel.len > 2:
+    for i in countup(2, ravel.high, 2):
+      if cmp(ravel[i-2], ravel[i]) >= 0:
+        return false
+  true
+
+proc inSetOrder*[T](members: openArray[T]): bool =
+  mixin cmp
+  members.isSorted(cmp)
+
+# ================
 # Numbers
 # ================
 
@@ -229,7 +247,7 @@ func initNum*(n: SomeInteger): BNum =
       return Big(big: initBigInt(uint64(n)))
   Small(small: n.int)
 
-func initNum*(n: BigInt): BNum =
+func initNum*(n: sink BigInt): BNum =
   # a number has one holding: Big only when it is past an int
   let fits = toInt[int](n)
   if fits.isSome: Small(small: fits.get)
@@ -305,140 +323,211 @@ func cmpNums*(x, y: BNum): int =
   else:
     cmpShortlex($x, $y)
 
-# ================
-# Sorted table
-# ================
+proc dedup*[T](self: var seq[T]) =
+  mixin cmp
+  if self.len < 2:
+    return
 
-type
-  SortedEntry*[K, V] = object
-    key*: K
-    val*: V
+  var els = newSeqOfCap[T](self.len - 1)
+  els.add move self[0]
 
-  SortedTable*[K, V] = object
-    entries*: seq[SortedEntry[K, V]]
+  for i in 1 ..< self.len:
+    if cmp(self[i], els[^1]) > 0:
+      els.add move self[i]
 
-  SortedSet*[T] {.byref.} = object
-    data*: seq[T]
+  self = els
 
-func cmpKeys*[K, V](a, b: SortedEntry[K, V]): int =
+proc allUnique*[T](self: openArray[T]): bool =
+  ## Returns whether `self` contains distinct values
+  ## This assumes that strictly ascending: `self[i-1] < self[i]`
+  mixin cmp
+  for i in 1 ..< self.len:
+    if cmp(self[i - 1], self[i]) == 0:
+      return false
+  true
+
+type Assoc*[K, V] = object
+  key: K
+  val: V
+
+proc `$`*[K, V](self: Assoc[K, V]): string =
+  $self.key & ": " & $self.val
+
+proc cmp*[K, V](a, b: Assoc[K, V]): int =
   mixin cmp
   cmp(a.key, b.key)
 
-func cmpKeys*[K, V](a: SortedEntry[K, V], b: K): int =
+proc cmp*[K, V](a: Assoc[K, V], k: K): int =
   mixin cmp
-  cmp(a.key, b)
+  cmp(a.key, k)
 
-func toSortedTable*[K, V](
-    entries: sink seq[SortedEntry[K, V]], sorted = false
-): SortedTable[K, V] =
-  mixin cmp
-  if sorted:
-    return SortedTable[K, V](entries: entries)
-  # sorted as pairs, by a comparison that captures nothing, which the VM
-  # can compile when this is instantiated for compile time too
-  entries.sort(cmpKeys)
-  SortedTable[K, V](entries: entries)
+proc `<`*[K, V](a, b: Assoc[K, V]): bool =
+  cmp(a, b) < 0
 
-func fromRavel*[T](ravel: sink seq[T], sorted = false): SortedTable[T, T] =
-  guard ravel.len mod 2 == 0, "ravel len must be even"
-  var entries = newSeqOfCap[SortedEntry[T, T]](ravel.len div 2)
-  for i in countup(1, ravel.high, 2):
-    entries.add SortedEntry[T, T](key: move ravel[i - 1], val: move ravel[i])
-  toSortedTable(entries, sorted)
+proc initAssoc[K, V](key: sink K, val: sink V): Assoc[K, V] =
+  Assoc[K, V](key: key, val: val)
 
-func len*[K, V](self: SortedTable[K, V]): Natural =
-  self.entries.len
+type SortedTable*[K, V] = object
+  data: seq[Assoc[K, V]]
+  count: int
 
-func getRavel*[T](self: SortedTable[T,T], i: int): lent T =
-  if i mod 2 == 0:
-    return self.entries[i div 2].key
-  else:
-    return self.entries[i div 2].val
+proc indexOf[K, V](self: SortedTable[K, V], key: K): int =
+  self.data.binarySearch(key, cmp)
 
-func strictlyAscending*[K, V](self: SortedTable[K, V]): bool =
-  mixin cmp
-  for i in 1 ..< self.entries.len:
-    if cmp(self.entries[i - 1].key, self.entries[i].key) >= 0:
-      return false
-  true
+proc contains*[K, V](self: SortedTable[K, V], key: K): bool =
+  self.indexOf(key) != -1
 
-func lowerIdx[K, V](self: SortedTable[K, V], key: K): int =
-  ## the first index whose key is not below key
-  mixin cmp
-  self.entries.lowerBound(key, cmpKeys)
-
-func indexOf*[K, V](self: SortedTable[K, V], key: K): int =
-  ## key's index, or -1 when it has none
-  mixin cmp
-  let i = self.lowerIdx(key)
-  if i < self.len and cmpKeys(self.entries[i], key) == 0: i else: -1
-
-func put*[K, V](
-    self: var SortedTable[K, V],
-    key: sink K, val: sink V,
-    force = true) =
-  mixin cmp
-  let i = self.lowerIdx(key)
-  if i < self.entries.len and cmpKeys(self.entries[i], key) == 0:
-    if not force:
-      refuse "key already exists"
-    self.entries[i].val = val
-  else:
-    self.entries.insert(SortedEntry[K,V](key: key, val: val), i)
-
-func insert*[K,V](self: var SortedTable[K,V], key: sink K, val: sink V) =
-  ## like put, but throws is this will replace an existing key
-  self.put(key, val, force = false)
-
-func normalize*[K,V](self: var SortedTable[K,V]) =
-  var entries = move self.entries
-  self.entries.setLen 0
-  for e in entries.mitems:
-    self.insert(move e.key, move e.val)
-
-# ================
-# Sorted set
-# ================
-
-func toSortedSet*[T](self: sink seq[T], sorted = false): SortedSet[T] =
-  mixin cmp
-  result.data = self
-  if not sorted:
-    result.data.sort(cmp)
-
-func len*[T](self: SortedSet[T]): Natural =
+proc len*[K, V](self: SortedTable[K, V]): int =
   self.data.len
 
-func strictlyAscending*[T](self: SortedSet[T]): bool =
-  mixin cmp
-  for i in 1 ..< self.data.len:
-    if cmp(self.data[i - 1], self.data[i]) >= 0:
-      return false
-  true
+proc nth*[K, V](self: SortedTable[K, V], i: int): lent V =
+  guard i in 0 ..< self.len*2, "invalid index"
+  if i mod 2 == 0:
+    return self.data[i div 2].key
+  else:
+    return self.data[i div 2].val
 
-func lowerIdx[T](self: SortedSet[T], val: T): int =
-  ## the first index whose member is not below val
-  mixin cmp
-  self.data.lowerBound(val, cmp)
+proc `[]`*[K, V](self: SortedTable[K, V], key: K): lent V =
+  let i = self.indexOf(key)
+  guard i != -1: "key not found"
+  return self.data[i].val
 
-func indexOf*[T](self: SortedSet[T], val: T): int =
-  ## val's index, or -1 when it isn't a member
-  mixin cmp
-  let i = self.lowerIdx(val)
-  if i < self.data.len and cmp(self.data[i], val) == 0: i else: -1
+proc `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
+  let i = self.indexof(key)
+  guard i != -1: "key not found"
+  return self.data[i].val
 
-func incl*[T](self: var SortedSet[T], val: sink T) =
+proc `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
+  let
+    i = self.data.lowerBound(key, cmp)
+    e = initAssoc(key, val)
+  self.data.insert(e, i)
+
+proc delete*[K, V](self: var SortedTable[K, V], key: K) =
+  let i = self.indexOf(key)
+  if i != -1:
+    self.data.delete(i)
+
+iterator items*[K, V](self: SortedTable[K, V]): lent V =
+  for i in 0 ..< self.data.len:
+    yield self.data[i].val
+
+iterator pairs*[K, V](self: SortedTable[K, V]): (lent K, lent V) =
+  for i in 0 ..< self.data.len:
+    yield (self.data[i].key, self.data[i].val)
+
+iterator mpairs*[K, V](self: var SortedTable[K, V]): (lent K, var V) =
+  for i in 0 ..< self.data.len:
+    yield (self.data[i].key, self.data[i].val)
+
+proc hash*[K, V](self: SortedTable[K, V]): Hash =
+  mixin hash
+  for k, v in self:
+    result = result !& k.hash !& v.hash
+  result = !$result
+
+proc take*[K, V](self: sink SortedTable[K, V]): seq[(K, V)] =
+  result = newSeq[(K, V)](self.len)
+  for i in 0 ..< self.len:
+    result[i] = (move self.data[i].key, move self.data[i].val)
+
+proc takeRavel*[T](self: sink SortedTable[T, T]): seq[T] =
+  result = newSeqOfCap[T](self.len * 2)
+  for i in 0 ..< self.len:
+    result.add move self.data[i].key
+    result.add move self.data[i].val
+
+proc toSortedTable*[K, V](
+    self: sink seq[(K, V)], sorted = false, unique = false
+): SortedTable[K, V] =
+  result.data.setLen(self.len)
+
+  for i, e in self.mpairs:
+    result.data[i] = initAssoc(e[0], e[1])
+
+  if not sorted:
+    result.data.sort(cmp[Assoc[K, V]])
+  if not unique:
+    result.data.dedup
+
+proc toSortedTable*[K, V](
+    self: openArray[(K, V)], sorted = false, unique = false
+): SortedTable[K, V] =
+  toSortedTable[K, V](@self, sorted, unique)
+
+proc fromRavel*[T](
+    self: sink seq[T], sorted = false, unique = false
+): SortedTable[T, T] =
+  guard self.len mod 2 == 0, "stranded key"
+  var data = newSeqOfCap[(T, T)](self.len div 2)
+  for i in countup(1, self.high, 2):
+    data.add (move self[i - 1], move self[i])
+  toSortedTable(data, sorted, unique)
+
+proc fromRavel*[T](
+    self: openArray[T], sorted = false, unique = false
+): SortedTable[T, T] =
+  fromRavel(@self, sorted, unique)
+
+type SortedSet[T] = object
+  data: seq[T]
+
+proc indexOf[T](self: SortedSet[T], item: T): int =
   mixin cmp
-  let i = self.lowerIdx(val)
-  if i < self.data.len and cmp(self.data[i], val) == 0:
+  self.data.binarySearch(item, cmp)
+
+proc contains*[T](self: SortedSet[T], item: T): bool =
+  self.indexOf(item) != -1
+
+proc hash*[T](self: SortedSet[T]): Hash =
+  mixin hash
+  for each in self.data:
+    result = result !& each.hash
+  result = !&result
+
+proc incl*[T](self: var SortedSet[T], item: sink T) =
+  mixin cmp
+  let i = self.data.lowerBound(item, cmp)
+
+  if i < self.data.len and self.data[i] == item:
     return
-  self.data.insert(val, i)
 
-func normalize*[T](self: var SortedSet[T]) =
-  var els = move self.data
-  self.data.setLen 0
-  for e in els.mitems:
-    self.incl move e
+  self.data.insert(item, i)
+
+proc incl*[T](self: var SortedSet[T], other: SortedSet[T]) =
+  for each in other:
+    self.incl each
+
+proc excl*[T](self: var SortedSet[T], item: T) =
+  mixin cmp
+  let i = self.indexOf(item)
+  if i != -1:
+    self.data.delete(i)
+
+proc len*[T](self: SortedSet[T]): int =
+  self.data.len
+
+proc nth*[T](self: SortedSet[T], i: int): lent T =
+  guard i in 0 ..< self.data.len, "invalid index"
+  return self.data[i]
+
+iterator items*[T](self: SortedSet[T]): lent T =
+  for i in 0 ..< self.data.len:
+    yield self.data[i]
+
+proc take*[T](self: sink SortedSet[T]): seq[T] =
+  self.data
+
+proc toSortedSet*[T](self: sink seq[T], sorted = false, unique = false): SortedSet[T] =
+  mixin cmp
+  if not sorted:
+    self.sort(cmp)
+  if not unique:
+    self.dedup
+  result.data = self
+
+proc toSortedSet*[T](self: openArray[T], sorted = false, unique = false): SortedSet[T] =
+  toSortedSet[T](@self, sorted, unique)
 
 # ================
 # Values
@@ -475,12 +564,8 @@ func toNode*(self: sink Value): Node {.inline.} =
 func toNode*(self: Live): Node =
   Bound(live: self)
 
-method reify*(self: Live): Value {.base, sideEffect, raises: [BasslineError].} =
-  refuse "reify must be implemented!"
-
-# ================
-# Doors
-# ================
+method reified*(self: Live): Value {.base, sideEffect, raises: [BasslineError].} =
+  refuse "reified must be implemented!"
 
 func isBound*(self: Node): bool =
   case self
@@ -507,14 +592,12 @@ func asValue*(self: var Node): var Value =
     return n
   else: refuse "not data"
 
-proc reify*(self: sink Node): Value =
-  case self
-  of Plain(n): n
-  of Bound(l): l.reify
-
 # ================
 # Members
 # ================
+
+func isAtom*(self: Value): bool =
+  self.kind in {bNil..bBytes}
 
 func isFrame*(self: Value): bool =
   self.kind in {bList..bSet}
@@ -529,29 +612,47 @@ func len*(a: Value): int =
     a.vset.len
   else: 0
 
-func member*(a: Value, i: int): lent Node =
+func nth*(a: seq[Node], i: int): lent Node =
+  guard i in 0..<a.len, "invalid index"
+  return a[i]
+
+func nth*(a: Value, i: int): lent Node =
   case a.kind
   of bList, bRec:
-    return a.vseq[i]
+    return a.vseq.nth(i)
   of bDict:
-    return a.vdict.getRavel(i)
+    return a.vdict.nth(i)
   of bSet:
-    return a.vset.data[i]
+    return a.vset.nth(i)
   else: refuse("not a frame")
 
 iterator members*(a: Value): lent Node =
   # by index: looping over the members through a binding copies them whole
   case a.kind
   of bList, bRec:
-    for i in 0 ..< a.vseq.len:
-      yield a.vseq[i]
+    for v in a.vseq:
+      yield v
   of bDict:
-    for i in 0 ..< a.vdict.entries.len:
-      yield a.vdict.entries[i].key
-      yield a.vdict.entries[i].val
+    for k,v in a.vdict:
+      yield k
+      yield v
   of bSet:
-    for i in 0 ..< a.vset.data.len:
-      yield a.vset.data[i]
+    for v in a.vset:
+      yield v
+  else: discard
+
+func cmp*(a, b: Value): int {.raises: [BasslineError].}
+func cmp*(a, b: Node): int {.raises: [BasslineError].}
+func cmp*(a, b: Live): int
+
+func normalize*(self: var Value) =
+  case self.kind
+  of bDict:
+    self.vdict.data.sort(cmp)
+    guard self.vdict.data.allUnique, "dict normalized with duplicate keys"
+  of bSet:
+    self.vset.data.sort(cmp)
+    guard self.vset.data.allUnique, "set normalized with duplicate elements"
   else: discard
 
 # ================
@@ -560,8 +661,6 @@ iterator members*(a: Value): lent Node =
 
 func cmp*(a, b: Live): int =
   cmp(cast[int](a), cast[int](b))
-
-func cmp*(a, b: Node): int
 
 func cmp*(a, b: Value): int =
   template `??`(x,y) =
@@ -579,7 +678,7 @@ func cmp*(a, b: Value): int =
     cmpShortlex(a.vstr, b.vstr)
   of bList,bRec,bDict,bSet:
     for i in 0 ..< min(a.len, b.len):
-      a.member(i) ?? b.member(i)
+      a.nth(i) ?? b.nth(i)
     cmp(b.len, a.len)
 
 func cmp*(a, b: Node): int =
@@ -655,14 +754,12 @@ func build(kind: Kind, members: sink seq[Node], mark, inOrder: bool): Value =
     Value(kind: kind, mark: mark, vseq: members)
   of bDict:
     guard members.len mod 2 == 0, "dict cannot have stranded keys"
-    let dict = fromRavel(members, sorted = inOrder)
-    guard dict.strictlyAscending,
-      (if inOrder: "dict keys must be strictly ascending" else: "dict key repeated")
+    guard members.inDictOrder, "dict keys must be strictly ascending"
+    let dict = fromRavel(members, sorted = true, unique = true)
     Value(kind: bDict, mark: mark, vdict: dict)
   of bSet:
-    let els = toSortedSet(members, sorted = inOrder)
-    guard els.strictlyAscending,
-      (if inOrder: "set elements must be strictly ascending" else: "set element repeated")
+    guard members.inSetOrder, "set elements must be strictly ascending"
+    let els = toSortedSet(members, sorted = true, unique = true)
     Value(kind: bSet, mark: mark, vset: els)
   else:
     refuse "not a frame"
@@ -677,48 +774,46 @@ func frame*(kind: Kind, members: sink seq[Node], mark = false): Value =
 # Reification
 # ================
 
-func isPure*(a: Node): bool
-
-func isPure*(n: Value): bool =
-  for each in n.members:
-    if not each.isPure: return false
-  true
-
-func isPure*(a: Node): bool =
-  a.isPlain and a.asValue.isPure
-
-proc reifyIn(self: var Node): bool
-
-proc reifyIn(self: var Value): bool =
-  case self.kind
-  of bList, bRec:
-    for i in 0 ..< self.vseq.len:
-      if self.vseq[i].reifyIn: result = true
-  of bSet:
-    for i in 0 ..< self.vset.data.len:
-      if self.vset.data[i].reifyIn: result = true
-    if result: self.vset.normalize
-  of bDict:
-    for i in 0 ..< self.vdict.entries.len:
-      if self.vdict.entries[i].key.reifyIn: result = true
-      if self.vdict.entries[i].val.reifyIn: result = true
-    if result: self.vdict.normalize
-  else: discard
-
-proc reifyIn(self: var Node): bool =
-  if self.isBound:
-    self = self.asLive.reify.toNode
-    discard self.asValue.reifyIn
+func isPure*(self: Node): bool =
+  case self
+  of Bound: false
+  of Plain(self):
+    for each in self.members:
+      if not each.isPure: return false
     true
-  else:
-    self.asValue.reifyIn
 
-proc reifyDeep*(self: sink Value): Value =
-  discard self.reifyIn
+proc reify*(self: var Node): bool {.discardable.} =
+  case self
+  of Bound(l):
+    self = Plain(value: l.reified)
+    return true
+  of Plain(self):
+    case self.kind
+    of bList, bRec:
+      for each in self.vseq.mitems:
+        if each.reify:
+          result = true
+    of bDict:
+      var keyChanged: bool
+      for each in self.vdict.data.mitems:
+        if each.key.reify:
+          keyChanged = true
+          result = true
+        if each.val.reify:
+          result = true
+      if keyChanged:
+        self.normalize
+    of bSet:
+      for each in self.vset.data.mitems:
+        if each.reify:
+          result = true
+      if result:
+        self.normalize
+    else: return false
+
+proc reified*(self: sink Node): Node =
+  discard self.reify
   self
-
-proc reifyDeep*(self: sink Node): Value =
-  self.reify.reifyDeep
 
 # ================
 # Reading
@@ -875,7 +970,7 @@ proc writeHeader(dst: var string, kind: Kind, mark: bool, len: int) =
 proc writeNull*(dst: var string, mark: bool) =
   dst.writeHeader(bNil, mark, 0)
 
-proc writeAtom*(dst: var string, kind: Kind, mark: bool, payload: sink string) =
+proc writeAtom*(dst: var string, kind: Kind, mark: bool, payload: string) =
   guard payload.len <= MaxAtomPayload.int, "payload too large"
   dst.writeHeader(kind, mark, payload.len)
   dst.add payload
@@ -903,12 +998,16 @@ proc writeReified(n: Value, enc: var Enc) =
     enc.writeClose
 
 proc write*(self: Value, enc: var Enc) =
-  if self.isPure: self.writeReified(enc)
-  else: self.reifyDeep.writeReified(enc)
+  if self.isPure:
+    self.writeReified(enc)
+  else:
+    var own = self
+    own.reifyDeep
+    own.writeReified(enc)
 
-proc write*(self: Node, enc: var Enc) =
+proc write*(self: sink Node, enc: var Enc) =
   if self.isPure: self.asValue.writeReified(enc)
-  else: self.reifyDeep.writeReified(enc)
+  else: self.reifiedDeep.writeReified(enc)
 
 # ==================================================
 # Sugar
@@ -952,7 +1051,7 @@ func parseKind*(s: string): Option[Kind] =
 converter toNum*(n: SomeInteger): BNum =
   initNum(n)
 
-converter toNum*(n: BigInt): BNum =
+converter toNum*(n: sink BigInt): BNum =
   initNum(n)
 
 template compare(op, T) =
@@ -1031,7 +1130,7 @@ func pow*(x: BNum, power: Natural): BNum =
   x.asBig.pow(power)
 
 func powmod*(x: BNum, power: int, modulus: Natural): BNum =
-  x.asBig.powmod(power, modulus)
+  x.asBig.powmod(power.initBigInt, modulus.initBigInt)
 
 iterator `..`*(a, b: BNum): BNum =
   ## Counts from `a` up to `b` (inclusive).
@@ -1047,7 +1146,7 @@ iterator `..<`*(a, b: BNum): BNum =
     yield res
     inc res
 
-func abs*(n: BNum): BNum =
+func abs*(n: sink BNum): BNum =
   case n
   of Big(x):
     initNum(x.abs)
@@ -1069,120 +1168,96 @@ func strLen*(n: BNum): int =
 # Table sugar
 # ================
 
-func toSortedTable*[K, V](
-    self: openArray[SortedEntry[K, V]], sorted = false
-): SortedTable[K, V] =
-  toSortedTable(@self, sorted)
+# func getOr*[K, V](self: SortedTable[K, V], key: K, val: V): V =
+#   let i = self.indexOf(key)
+#   if i == -1:
+#     val
+#   else:
+#     self.entries[i].val
 
-func toRavel*[T](self: sink SortedTable[T, T]): seq[T] =
-  var s = newSeqOfCap[T](self.entries.len * 2)
-  for each in self.entries.mitems:
-    s.add move(each.key)
-    s.add move(each.val)
-  s
+# func getOrPut*[K, V](self: var SortedTable[K, V], key: K, val: sink V): lent V =
+#   mixin cmp
+#   let i = self.lowerIdx(key)
+#   if i == self.entries.len or cmpKeys(self.entries[i], key) != 0:
+#     self.entries.insert(SortedEntry[K,V](key: key, val: val), i)
+#   self.entries[i].val
 
-func sort*[K,V](self: var SortedTable[K,V]) =
-  self.entries.sort(cmpKeys)
+# func delete*[K, V](self: var SortedTable[K, V], key: K) =
+#   let i = self.indexOf(key)
+#   if i != -1:
+#     self.entries.delete(i)
 
-func contains*[K, V](self: SortedTable[K, V], key: K): bool =
-  self.indexOf(key) != -1
+# func `[]`*[K, V](self: SortedTable[K, V], key: K): lent V =
+#   self.get(key)
 
-func get*[K, V](self: SortedTable[K, V], key: K): lent V =
-  let i = self.indexOf(key)
-  if i == -1:
-    raise newException(KeyError, "key not found")
-  self.entries[i].val
+# func `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
+#   let i = self.indexOf(key)
+#   if i == -1:
+#     raise newException(KeyError, "key not found")
+#   self.entries[i].val
 
-func getOr*[K, V](self: SortedTable[K, V], key: K, val: V): V =
-  let i = self.indexOf(key)
-  if i == -1:
-    val
-  else:
-    self.entries[i].val
+# func `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
+#   self.put(key, val)
 
-func getOrPut*[K, V](self: var SortedTable[K, V], key: K, val: sink V): lent V =
-  mixin cmp
-  let i = self.lowerIdx(key)
-  if i == self.entries.len or cmpKeys(self.entries[i], key) != 0:
-    self.entries.insert(SortedEntry[K,V](key: key, val: val), i)
-  self.entries[i].val
+# func low*[K, V](self: SortedTable[K, V]): lent K =
+#   self.entries[0].key
 
-func delete*[K, V](self: var SortedTable[K, V], key: K) =
-  let i = self.indexOf(key)
-  if i != -1:
-    self.entries.delete(i)
+# func high*[K, V](self: SortedTable[K, V]): lent K =
+#   self.entries[self.entries.high].key
 
-func `[]`*[K, V](self: SortedTable[K, V], key: K): lent V =
-  self.get(key)
+# iterator items*[K, V](self: SortedTable[K, V]): lent SortedEntry[K,V] =
+#   for i in 0 ..< self.entries.len:
+#     yield self.entries[i]
 
-func `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
-  let i = self.indexOf(key)
-  if i == -1:
-    raise newException(KeyError, "key not found")
-  self.entries[i].val
+# iterator mitems[K,V](self: var SortedTable[K,V]): var SortedEntry[K,V] =
+#   for entry in self.entries.mitems:
+#     yield entry
 
-func `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
-  self.put(key, val)
+# iterator pairs*[K, V](self: SortedTable[K, V]): (lent K, lent V) =
+#   for i in 0 ..< self.entries.len:
+#     yield (self.entries[i].key, self.entries[i].val)
 
-func low*[K, V](self: SortedTable[K, V]): lent K =
-  self.entries[0].key
+# # ================
+# # Set sugar
+# # ================
 
-func high*[K, V](self: SortedTable[K, V]): lent K =
-  self.entries[self.entries.high].key
+# func toSortedSet*[T](self: openArray[T], sorted = false): SortedSet[T] =
+#   toSortedSet(@self, sorted)
 
-iterator items*[K, V](self: SortedTable[K, V]): lent SortedEntry[K,V] =
-  for i in 0 ..< self.entries.len:
-    yield self.entries[i]
+# func contains*[T](self: SortedSet[T], val: T): bool =
+#   self.indexOf(val) != -1
 
-iterator mitems[K,V](self: var SortedTable[K,V]): var SortedEntry[K,V] =
-  for entry in self.entries.mitems:
-    yield entry
+# func excl*[T](self: var SortedSet[T], val: T) =
+#   let i = self.indexOf(val)
+#   if i != -1:
+#     self.data.delete(i)
 
-iterator pairs*[K, V](self: SortedTable[K, V]): (lent K, lent V) =
-  for i in 0 ..< self.entries.len:
-    yield (self.entries[i].key, self.entries[i].val)
+# func getOr*[T](self: SortedSet[T], a, b: T): T =
+#   let i = self.indexOf(a)
+#   if i == -1:
+#     b
+#   else:
+#     self.data[i]
 
-# ================
-# Set sugar
-# ================
+# func `[]=`*[T](self: var SortedSet[T], val: sink T, included: bool) =
+#   if included:
+#     self.incl val
+#   else:
+#     self.excl val
 
-func toSortedSet*[T](self: openArray[T], sorted = false): SortedSet[T] =
-  toSortedSet(@self, sorted)
+# func low*[T](self: SortedSet[T]): lent T =
+#   self.data[0]
 
-func contains*[T](self: SortedSet[T], val: T): bool =
-  self.indexOf(val) != -1
+# func high*[T](self: SortedSet[T]): lent T =
+#   self.data[self.data.len - 1]
 
-func excl*[T](self: var SortedSet[T], val: T) =
-  let i = self.indexOf(val)
-  if i != -1:
-    self.data.delete(i)
+# iterator items*[T](self: SortedSet[T]): lent T =
+#   for i in 0 ..< self.data.len:
+#     yield self.data[i]
 
-func getOr*[T](self: SortedSet[T], a, b: T): T =
-  let i = self.indexOf(a)
-  if i == -1:
-    b
-  else:
-    self.data[i]
-
-func `[]=`*[T](self: var SortedSet[T], val: sink T, included: bool) =
-  if included:
-    self.incl val
-  else:
-    self.excl val
-
-func low*[T](self: SortedSet[T]): lent T =
-  self.data[0]
-
-func high*[T](self: SortedSet[T]): lent T =
-  self.data[self.data.len - 1]
-
-iterator items*[T](self: SortedSet[T]): lent T =
-  for i in 0 ..< self.data.len:
-    yield self.data[i]
-
-iterator mitems[T](self: var SortedSet[T]): var T =
-  for each in self.data.mitems:
-    yield each
+# iterator mitems[T](self: var SortedSet[T]): var T =
+#   for each in self.data.mitems:
+#     yield each
 
 # ================
 # Value Sugar
@@ -1210,7 +1285,7 @@ func `[]`*(self: Value, key: Node): lent Node =
   guard self.kind == bDict, "invalid value index"
   return self.vdict[key]
 
-func `[]=`*(self: var Value, key: Node, val: sink Node) =
+func `[]=`*(self: var Value, key: sink Node, val: sink Node) =
   guard self.kind == bDict, "invalid value assignment"
   self.vdict[key] = val
 
@@ -1243,7 +1318,7 @@ func `~`*(self: sink Node): Node =
 func Num*(n: SomeInteger, mark = false): Node =
   Plain(value: Value(kind: bNum, mark: mark, vnum: initNum(n)))
 
-func Num*(n: BigInt, mark = false): Node =
+func Num*(n: sink BigInt, mark = false): Node =
   Plain(value: Value(kind: bNum, mark: mark, vnum: initNum(n)))
 
 func Num*(s: sink string, mark = false): Node =
@@ -1255,7 +1330,7 @@ func Text*(s: sink string, mark = false): Node =
 func Sym*(s: sink string, mark = false): Node =
   Plain(value: atom(bSym, s, mark))
 
-func Bytes*(s: string, mark = false): Node =
+func Bytes*(s: sink string, mark = false): Node =
   Plain(value: atom(bBytes, s, mark))
 
 func List*(els: sink seq[Node], mark = false): Node =
@@ -1274,27 +1349,36 @@ func Dict*(els: sink seq[(Node, Node)], mark = false): Node =
 func Set*(els: sink seq[Node], mark = false): Node =
   Plain(value: frame(bSet, els, mark))
 
-proc rewriteIn(self: var Node, p: proc(n: var Value): bool, f: proc(n: var Node)): bool =
+proc rewriteIn(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)): bool =
   case self
-  of Bound: discard
+  of Bound:
+    return false
   of Plain(n):
-    if p(n): 
+    if p(n):
       f(self)
       return true
     case n.kind
     of bList, bRec:
       for each in n.vseq.mitems:
-        if each.rewriteIn(p, f): result = true
+        if each.rewriteIn(p, f):
+          result = true
     of bDict:
-      for each in n.vdict.mitems:
-        if each.key.rewriteIn(p, f): result = true
-        if each.val.rewriteIn(p, f): result = true
-      if result: n.vdict.normalize
+      var keyChanged: bool
+      for each in n.vdict.data.mitems:
+        if each.key.rewriteIn(p, f):
+          keyChanged = true
+          result = true
+        if each.val.rewriteIn(p, f):
+          result = true
+      if keyChanged:
+        n.normalize
     of bSet:
-      for each in n.vset.mitems:
-        if each.rewriteIn(p,f): result = true
-      if result: n.vset.normalize
-    else: discard
+      for each in n.vset.data.mitems:
+        if each.rewriteIn(p,f):
+          result = true
+      if result:
+        n.normalize
+    else: return false
 
-proc rewrite*(self: var Node, p: proc(n: var Value): bool, f: proc(n: var Node)) =
+proc rewrite*(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)) =
   discard self.rewriteIn(p, f)
