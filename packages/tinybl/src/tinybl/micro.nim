@@ -421,10 +421,12 @@ proc `[]`*[K, V](self: var SortedTable[K, V], key: K): var V =
   return self.data[i].val
 
 proc `[]=`*[K, V](self: var SortedTable[K, V], key: sink K, val: sink V) =
-  let
-    i = self.data.lowerBound(key, cmp)
-    e = initAssoc(key, val)
-  self.data.insert(e, i)
+  let i = self.indexOf(key)
+  if i == -1:
+    let idx = self.data.lowerBound(key, cmp)
+    self.data.insert(initAssoc(key, val), idx)
+  else:
+    self.data[i].val = val
 
 proc delete*[K, V](self: var SortedTable[K, V], key: K) =
   let i = self.indexOf(key)
@@ -730,7 +732,7 @@ func hash*(self: Live): Hash =
 
 func hash*(self: Value): Hash =
   template finish =
-    return !$result
+    return !$h
   var h = self.kind.hash !& self.mark.hash
   case self.kind
   of bNil:
@@ -845,10 +847,10 @@ proc reify*(self: var Node, deep = false): bool {.discardable.} =
   of Bound(l):
     self = Plain(value: l.reified)
     if deep:
-      self.reify
+      self.reify(true)
     true
   of Plain(self):
-    self.reify
+    self.reify(deep)
 
 proc reified*(self: sink Node, deep = true): Node =
   discard self.reify(true)
