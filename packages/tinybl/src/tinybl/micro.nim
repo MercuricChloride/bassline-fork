@@ -91,6 +91,25 @@ func partialKind*(b: byte): PartialValueKind {.inline.} =
     guard h.inlineLen == 0, "frame lenBits must be 0"
     pvOpenFrame
 
+type Header = object
+  valid: bool
+  partial: PartialValueKind
+  kind: Kind
+  mark: bool
+  inlineLen: int
+
+const headers = block:
+  var all: array[byte, Header]
+  for b in 0 .. 255:
+    try:
+      var h = Header(valid: true, partial: partialKind(byte b))
+      if h.partial != pvCloseFrame:
+        (h.kind, h.mark, h.inlineLen) = headerData(byte b)
+      all[byte b] = h
+    except BasslineError:
+      discard
+  all
+
 # ================
 # Bytes
 # ================
@@ -384,7 +403,7 @@ proc contains*[K, V](self: SortedTable[K, V], key: K): bool =
 proc len*[K, V](self: SortedTable[K, V]): int =
   self.data.len
 
-proc nth*[K, V](self: SortedTable[K, V], i: int): lent V =
+proc nth*[K, V](self: SortedTable[K, V], i: int): lent V {.inline.} =
   guard i in 0 ..< self.len*2, "invalid index"
   if i mod 2 == 0:
     return self.data[i div 2].key
@@ -508,10 +527,10 @@ proc excl*[T](self: var SortedSet[T], item: T) =
   if i != -1:
     self.data.delete(i)
 
-proc len*[T](self: SortedSet[T]): int =
+func len*[T](self: SortedSet[T]): int =
   self.data.len
 
-proc nth*[T](self: SortedSet[T], i: int): lent T =
+func nth*[T](self: SortedSet[T], i: int): lent T {.inline.} =
   guard i in 0 ..< self.data.len, "invalid index"
   return self.data[i]
 
@@ -622,11 +641,11 @@ func len*(a: Value): int =
     a.vset.len
   else: 0
 
-func nth*(a: seq[Node], i: int): lent Node =
+func nth*(a: seq[Node], i: int): lent Node {.inline.} =
   guard i in 0..<a.len, "invalid index"
   return a[i]
 
-func nth*(a: Value, i: int): lent Node =
+func nth*(a: Value, i: int): lent Node {.inline.} =
   case a.kind
   of bList, bRec:
     return a.vseq.nth(i)
@@ -637,19 +656,9 @@ func nth*(a: Value, i: int): lent Node =
   else: refuse("not a frame")
 
 iterator members*(a: Value): lent Node =
-  # by index: looping over the members through a binding copies them whole
-  case a.kind
-  of bList, bRec:
-    for v in a.vseq:
-      yield v
-  of bDict:
-    for k,v in a.vdict:
-      yield k
-      yield v
-  of bSet:
-    for v in a.vset:
-      yield v
-  else: discard
+  if a.isFrame:
+    for i in 0..<a.len:
+      yield a.nth(i)
 
 func cmp*(a, b: Value): int {.raises: [BasslineError].}
 func cmp*(a, b: Node): int {.raises: [BasslineError].}
@@ -835,14 +844,14 @@ proc reify*(self: var Node, deep = false): bool {.discardable.} =
   case self
   of Bound(l):
     self = Plain(value: l.reified)
-    if deep: 
+    if deep:
       self.reify
     true
   of Plain(self):
     self.reify
 
-proc reified*(self: sink Node): Node =
-  discard self.reify
+proc reified*(self: sink Node, deep = true): Node =
+  discard self.reify(true)
   self
 
 # ================
@@ -895,9 +904,9 @@ proc readAtom(
       inc pos
     if r.headLen < upTo:
       return false
-  let (kind, mark, inlineLen) = headerData(r.head[0])
-  var length = inlineLen
-  if inlineLen == 7:
+  let h = headers[r.head[0]]
+  var length = h.inlineLen
+  if length == 7:
     fill 2
     length = r.head[1].int
     guard length >= 7, "non minimal medium length"
@@ -916,7 +925,7 @@ proc readAtom(
   pos += got
   if have + got < length:
     return false
-  val = atom(kind, move r.payload, mark)
+  val = atom(h.kind, move r.payload, h.mark)
   when nimvm:
     # the VM's move copies, leaving the payload behind
     r.payload.setLen 0
@@ -933,13 +942,17 @@ proc readCE*(r: var Reader, src: openArray[char], pos: var int): bool =
     var
       v: Value
       n = 1
-    case partialKind(r.head[0])
+    let h = headers[r.head[0]]
+    if not h.valid:
+      # this will raise with the right error
+      # should probably handle this in a more
+      # direct manner tho
+      discard partialKind(r.head[0])
+    case h.partial
     of pvOpenFrame:
       guard r.open.len < MaxDepth, "frames nested deeper than MaxDepth"
-      let
-        (kind, mark, _) = headerData(r.head[0])
-        room = if r.frameCap > 0: r.frameCap else: DefaultFrameCap
-      r.open.add OpenFrame(kind: kind, mark: mark, members: newSeqOfCap[Node](room))
+      let room = if r.frameCap > 0: r.frameCap else: DefaultFrameCap
+      r.open.add OpenFrame(kind: h.kind, mark: h.mark, members: newSeqOfCap[Node](room))
       r.headLen = 0
       r.size += 1
       continue
@@ -948,7 +961,7 @@ proc readCE*(r: var Reader, src: openArray[char], pos: var int): bool =
       var f = r.open.pop
       v = canonicalFrame(f.kind, move f.members, f.mark)
     of pvNil:
-      v = null(headerData(r.head[0]).mark)
+      v = null(h.mark)
     of pvAtom:
       if not r.readAtom(src, pos, v, n):
         return false
