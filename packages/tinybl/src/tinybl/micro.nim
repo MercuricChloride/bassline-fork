@@ -1262,6 +1262,66 @@ func incl*(self: var Value, val: sink Node) =
 # Node Sugar
 # ================
 
+proc atFlatInto(self: Node, index: var int): lent Node =
+  result = self
+  if index == 0:
+    return
+  case self
+  of Bound:
+    return
+  of Plain(v):
+    for i in 0..<v.len:
+      dec index
+      result = v.nth(i).atFlatInto(index)
+      if index == 0:
+        return
+
+proc atFlat*(self: Node, index: int): lent Node =
+  guard index >= 0, "invalid flat index"
+  var remaining = index
+  result = self.atFlatInto(remaining)
+  guard remaining == 0, "invalid flat index"
+
+proc setFlatInto(self: var Node, index: var int, value: var Node): bool =
+  if index == 0:
+    self = move value
+    return true
+
+  case self
+  of Bound:
+    discard
+  of Plain(n):
+    case n.kind
+    of bList, bRec:
+      for child in n.vseq.mitems:
+        dec index
+        if child.setFlatInto(index, value):
+          return true
+    of bDict:
+      for pair in n.vdict.data.mitems:
+        dec index
+        if pair.key.setFlatInto(index, value):
+          n.normalize
+          return true
+        dec index
+        if pair.val.setFlatInto(index, value):
+          return true
+    of bSet:
+      for child in n.vset.data.mitems:
+        dec index
+        if child.setFlatInto(index, value):
+          n.normalize
+          return true
+    else:
+      discard
+
+proc setFlat*(self: var Node, index: int, value: sink Node) =
+  ## Replaces a node at a zero-based preorder position
+  ## Bound nodes are leaves and aren't reified
+  guard index >= 0, "invalid flat index"
+  var remaining = index
+  guard self.setFlatInto(remaining, value), "invalid flat index"
+
 func `!`*(self: sink Node): Node =
   self.asValue.mark = true
   self
