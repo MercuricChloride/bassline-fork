@@ -362,12 +362,16 @@ proc dedup*[T](self: var seq[T]) =
 
 proc allUnique*[T](self: openArray[T]): bool =
   ## Returns whether `self` contains distinct values
-  ## This assumes that strictly ascending: `self[i-1] < self[i]`
+  ## This assumes `self` is strictly ascending: `self[i-1] < self[i]`
   mixin cmp
   for i in 1 ..< self.len:
     if cmp(self[i - 1], self[i]) == 0:
       return false
   true
+
+# ================
+# Assoc
+# ================
 
 type Assoc*[K, V] = object
   key: K
@@ -389,6 +393,10 @@ proc `<`*[K, V](a, b: Assoc[K, V]): bool =
 
 proc initAssoc[K, V](key: sink K, val: sink V): Assoc[K, V] =
   Assoc[K, V](key: key, val: val)
+
+# ================
+# Sorted Table
+# ================
 
 type SortedTable*[K, V] = object
   data: seq[Assoc[K, V]]
@@ -493,6 +501,10 @@ proc fromRavel*[T](
     self: openArray[T], sorted = false, unique = false
 ): SortedTable[T, T] =
   fromRavel(@self, sorted, unique)
+
+# ================
+# Sorted Set
+# ================
 
 type SortedSet[T] = object
   data: seq[T]
@@ -657,11 +669,6 @@ func nth*(a: Value, i: int): lent Node {.inline.} =
     return a.vset.nth(i)
   else: refuse("not a frame")
 
-iterator members*(a: Value): lent Node =
-  if a.isFrame:
-    for i in 0..<a.len:
-      yield a.nth(i)
-
 func cmp*(a, b: Value): int {.raises: [BasslineError].}
 func cmp*(a, b: Node): int {.raises: [BasslineError].}
 func cmp*(a, b: Live): int
@@ -675,6 +682,33 @@ func normalize*(self: var Value) =
     self.vset.data.sort(cmp)
     guard self.vset.data.allUnique, "set normalized with duplicate elements"
   else: discard
+
+iterator members*(a: Value): lent Node =
+  if a.isFrame:
+    for i in 0..<a.len:
+      yield a.nth(i)
+
+iterator members*(v: var Value, changed: var bool): var Node =
+  case v.kind
+  of bNil..bBytes: discard
+  of bList, bRec:
+    for each in v.vseq.mitems:
+      yield each
+  of bDict:
+    defer:
+      if changed:
+        echo "normalizing dict"
+        v.normalize
+    for each in v.vdict.data.mitems:
+      yield each.key
+      yield each.val
+  of bSet:
+    defer:
+      if changed:
+        echo "normalizing set"
+        v.normalize
+    for each in v.vset.data.mitems:
+      yield each
 
 # ================
 # Order & hash
@@ -777,7 +811,7 @@ func atom*(kind: Kind, payload: sink string, mark = false): Value {.inline.} =
   else:
     refuse "not an atom"
 
-func build(kind: Kind, members: sink seq[Node], mark, inOrder: bool): Value =
+func frame*(kind: Kind, members: sink seq[Node], mark = false): Value =
   case kind
   of bList, bRec:
     guard kind == bList or members.len > 0, "record must have a head"
@@ -793,12 +827,6 @@ func build(kind: Kind, members: sink seq[Node], mark, inOrder: bool): Value =
     Value(kind: bSet, mark: mark, vset: els)
   else:
     refuse "not a frame"
-
-func canonicalFrame*(kind: Kind, members: sink seq[Node], mark = false): Value {.inline.} =
-  build(kind, members, mark, inOrder = true)
-
-func frame*(kind: Kind, members: sink seq[Node], mark = false): Value =
-  build(kind, members, mark, inOrder = false)
 
 # ================
 # Reification
@@ -819,28 +847,9 @@ func isPure*(self: Node): bool =
 proc reify*(self: var Node, deep = false): bool {.discardable.}
 
 proc reify*(self: var Value, deep = false): bool {.discardable.} =
-  case self.kind
-  of bList, bRec:
-    for each in self.vseq.mitems:
-      if each.reify(deep):
-        result = true
-  of bDict:
-    var keyChanged: bool
-    for each in self.vdict.data.mitems:
-      if each.key.reify(deep):
-        keyChanged = true
-        result = true
-      if each.val.reify(deep):
-        result = true
-    if keyChanged:
-      self.normalize
-  of bSet:
-    for each in self.vset.data.mitems:
-      if each.reify(deep):
-        result = true
-    if result:
-      self.normalize
-  else: return false
+  for each in self.members(result):
+    if each.reify(deep):
+      result = true
 
 proc reify*(self: var Node, deep = false): bool {.discardable.} =
   case self
@@ -1286,34 +1295,17 @@ proc setFlatInto(self: var Node, index: var int, value: var Node): bool =
   if index == 0:
     self = move value
     return true
-
   case self
   of Bound:
     discard
   of Plain(n):
     case n.kind
-    of bList, bRec:
-      for child in n.vseq.mitems:
+    of bNil..bBytes: discard
+    of bList..bSet:
+      for each in n.members(result):
         dec index
-        if child.setFlatInto(index, value):
+        if each.setFlatInto(index, value):
           return true
-    of bDict:
-      for pair in n.vdict.data.mitems:
-        dec index
-        if pair.key.setFlatInto(index, value):
-          n.normalize
-          return true
-        dec index
-        if pair.val.setFlatInto(index, value):
-          return true
-    of bSet:
-      for child in n.vset.data.mitems:
-        dec index
-        if child.setFlatInto(index, value):
-          n.normalize
-          return true
-    else:
-      discard
 
 proc setFlat*(self: var Node, index: int, value: sink Node) =
   ## Replaces a node at a zero-based preorder position
@@ -1360,7 +1352,9 @@ func Dict*(els: sink seq[(Node, Node)], mark = false): Node =
 func Set*(els: sink seq[Node], mark = false): Node =
   Plain(value: Value(kind: bSet, mark: mark, vset: els.toSortedSet))
 
-proc rewrite*(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)): bool {.discardable.} =
+proc rewrite*(self: var Node,
+              p: proc(n: Value): bool,
+              f: proc(n: var Node)): bool {.discardable.} =
   case self
   of Bound:
     return false
@@ -1368,25 +1362,6 @@ proc rewrite*(self: var Node, p: proc(n: Value): bool, f: proc(n: var Node)): bo
     if p(n):
       f(self)
       return true
-    case n.kind
-    of bList, bRec:
-      for each in n.vseq.mitems:
-        if each.rewrite(p, f):
-          result = true
-    of bDict:
-      var keyChanged: bool
-      for each in n.vdict.data.mitems:
-        if each.key.rewrite(p, f):
-          keyChanged = true
-          result = true
-        if each.val.rewrite(p, f):
-          result = true
-      if keyChanged:
-        n.normalize
-    of bSet:
-      for each in n.vset.data.mitems:
-        if each.rewrite(p,f):
-          result = true
-      if result:
-        n.normalize
-    else: return false
+    for each in n.members(result):
+      if each.rewrite(p,f):
+        result = true
