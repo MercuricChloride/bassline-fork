@@ -5,70 +5,82 @@ import ./[micro, micro_macros]
 refuseWith BasslineError
 
 type
+  Contribution* {.pure.} = enum
+    Ignored, Staged, Kept
+
+  Monitor* = ref object of Live
+    sourceTrack, targetTrack: Track
+    moving: bool
+
   Entry* = object
     case
-    of Removed: discard
+    of Absent: discard
     of Present:
       n*: Node
 
-  Monitor* = ref object of Live
-    track, target: Track
-    moving: bool
-
-  ResetProc* = proc(kept: var seq[Entry])
-  EditProc* = proc(n: var Node)
-
-  Op = object
-    case
-    of Add:
-      addNode: Node
-    of Update:
-      updateIndex: int
-      updateNode: Node
-    of Delete:
-      deleteIndex: int
-    of Edit:
-      editIndex: int
-      editProc: EditProc
-    of Reset:
-      resetCb: ResetProc
-
   Track* = ref object of Live
     kept: seq[Entry]
+    staged: Deque[Node]
     monitors: seq[Monitor]
-    notifying: bool
-    pending: Deque[Op]
+    notifying, revising: bool
+
+  Swap* = object
+    idx*: int
+    entry*: Entry
+
+  ReviseProc* = proc(draft: var Draft)
+
+  Draft* = object
+    kept: seq[Entry]
+    swaps: seq[Swap]
 
 func `==`*(a, b: Entry): bool =
   case a
-  of Removed:
+  of Absent:
     case b
-    of Removed: true
+    of Absent: true
     of Present: false
   of Present(x):
     case b
-    of Removed: false
+    of Absent: false
     of Present(y): x == y
+
+proc len*(self: Draft): int =
+  self.kept.len
+
+proc `[]`*(self: Draft, i: int): lent Entry =
+  guard i in 0..<self.len, "index out of bounds"
+  for i in 0..<self.swaps.len:
+    if self.swaps[i].idx == i:
+      return self.swaps[i].entry
+  return self.kept[i]
+
+proc stage(self: var Draft, i: int, entry: sink Entry) =
+  guard i in 0..<self.len, "index out of bounds"
+  for s in self.swaps.mitems:
+    if s.idx == i:
+      if s.entry != entry:
+        s.entry = entry
+      return
+  if entry != self.kept[i]:
+    self.swaps.add Swap(idx: i, entry: entry)
+
+proc `[]=`*(self: var Draft, i: int, n: sink Node) =
+  self.stage(i, Present(n: n))
+
+proc delete*(self: var Draft, i: int) =
+  self.stage(i, Absent())
 
 method added*(self: Monitor, i: int, entry: Entry) {.base.} =
   discard
 
-method changed*(self: Monitor, i: int, prev, curr: Entry) {.base.} =
-  discard
-
-method removed*(self: Monitor, i: int, entry: Entry) {.base.} =
+method revised*(self: Monitor, swaps: openArray[Swap]) {.base.} =
   discard
 
 method joined*(self: Monitor) {.base.} =
   discard
 
 method left*(self: Monitor, s: Track) {.base.} =
-  discard
-
-method beforeReset*(self: Monitor) {.base.} =
-  discard
-
-method afterReset*(self: Monitor) {.base.} =
   discard
 
 # ================
@@ -100,193 +112,104 @@ iterator attached(self: Track): Monitor =
     if not h.isNil:
       yield h
 
+# A track hears its own writes through these, before any monitor does, so a
+# subclass can keep what `keeps` and its own queries read.
+
 method keeps*(self: Track, n: Node): bool {.base.} =
   ## Whether the track holds on to `n` when it is added or put in a slot. It
   ## may be asked more than once about the same write.
   true
 
-# A track hears its own writes through these, before any monitor does, so a
-# subclass can keep what `keeps` and its own queries read.
-
 method added*(self: Track, i: int, entry: Entry) {.base.} =
   discard
 
-method changed*(self: Track, i: int, prev, curr: Entry) {.base.} =
+method revised*(self: Track, swaps: openArray[Swap]) {.base.} =
   discard
 
-method removed*(self: Track, i: int, entry: Entry) {.base.} =
-  discard
+proc rollback(self: var Draft, entries: var seq[Entry]) =
+  entries = move self.kept
 
-method beforeReset*(self: Track) {.base.} =
-  discard
+proc commit(self: var Draft, entries: var seq[Entry]) =
+  entries = move self.kept
+  for s in self.swaps.mitems:
+    entries[s.idx].swap(s.entry)
 
-method afterReset*(self: Track) {.base.} =
-  discard
+proc add*(self: Track, n: sink Node): Contribution {.discardable.}
 
-func holds(self: Track, i: int, n: Node): bool =
-  case self.kept[i]
-  of Present(m): m == n
-  of Removed: false
-
-func namesSlot(op: Op): bool =
-  case op
-  of Update, Delete, Edit: true
-  of Add, Reset: false
-
-proc expected(self: Track, op: Op): bool =
-  ## What `op` would answer if it were applied now.
-  case op
-  of Add(n): self.keeps(n)
-  of Update(i, n): self.holds(i, n) or self.keeps(n)
-  of Delete, Edit, Reset: true
-
-proc apply(self: Track, op: sink Op, failure: var ref CatchableError): bool =
-  ## Answers whether what the op put is on the track afterwards.
-  template attempt(body: untyped) =
-    try:
-      body
-    except CatchableError as e:
-      if failure.isNil:
-        failure = e
-
-  template notify(call: untyped) =
-    block:
-      let h {.inject.} = self
-      attempt:
-        call
-    for h {.inject.} in self.attached:
-      attempt:
-        call
-
-  template asks(n: Node): bool =
-    var kept = false
-    attempt:
-      kept = self.keeps(n)
-    kept
-
-  template replace(at, node: untyped) =
-    if self.holds(at, node):
-      result = true
-    elif asks(node):
-      let prev = move self.kept[at]
-      self.kept[at] = Present(n: move node)
-      notify h.changed(at, prev, self.kept[at])
-      result = true
-
-  case op
-  of Add(n):
-    if asks(n):
-      self.kept.add Present(n: move n)
-      let i = self.kept.high
-      notify h.added(i, self.kept[i])
-      result = true
-  of Update(i, n):
-    replace(i, n)
-  of Delete(i):
-    if self.kept[i] != Removed():
-      let entry = move self.kept[i]
-      self.kept[i] = Removed()
-      notify h.removed(i, entry)
-  of Edit(i, edit):
-    case self.kept[i]
-    of Removed: discard
-    of Present(current):
-      var draft = current
-      let run = edit
-      attempt:
-        run(draft)
-        replace(i, draft)
-  of Reset(cb):
-    notify h.beforeReset
-    let run = cb
-    attempt:
-      run(self.kept)
-    var rest = initDeque[Op]()
-    while self.pending.len > 0:
-      var waiting = self.pending.popFirst
-      if not waiting.namesSlot:
-        rest.addLast waiting
-    self.pending = rest
-    notify h.afterReset
-  self.monitors.keepItIf(not it.isNil)
-
-proc write(self: Track, op: sink Op): bool =
-  ## A write made from inside a monitor callback is queued and applied after
-  ## the current change has been notified to every monitor. A monitor that
-  ## raises doesn't stop the others or the pending writes. The first failure
-  ## is raised to the writer once everything has been applied.
-  ##
-  ## Answers whether what the op put is on the track. A write applied now
-  ## answers exactly. A queued one answers what `keeps` says now, and `keeps`
-  ## decides again when it is applied.
-  if self.notifying:
-    result = self.expected(op)
-    self.pending.addLast op
-    return
-  self.notifying = true
-  var failure: ref CatchableError
+proc revise*(self: Track, cb: ReviseProc): bool {.discardable.} =
+  guard not isNil(cb), "cb cannot be nil"
+  guard not self.revising, "cannot revise mid-revision"
+  guard not self.notifying, "cannot revise mid-notification"
+  self.revising = true
+  var
+    err: ref CatchableError
+    draft = Draft(kept: move self.kept)
   try:
-    result = self.apply(op, failure)
-    while self.pending.len > 0:
-      discard self.apply(self.pending.popFirst, failure)
-  finally:
-    self.pending.clear
-    self.notifying = false
-  if not failure.isNil:
-    raise failure
+    cb(draft)
+  except CatchableError as e:
+    err = e
+  draft.swaps.keepItIf(draft.kept[it.idx] != it.entry)
+  if err.isNil:
+    # draft.commit swaps the new & old entries on the draft
+    draft.commit(self.kept)
+    if draft.swaps.len == 0:
+      return
+    # so from here draft.swaps contains the old entries
+    try:
+      self.revised(draft.swaps)
+    except CatchableError:
+      discard
+    for m in self.attached:
+      try:
+        m.revised(draft.swaps)
+      except CatchableError:
+        # NOTE: This probably isn't correct to discard this error
+        # but I also don't want to rollback here?
+        # tsk tsk
+        discard
+    self.revising = false
+    while self.staged.len > 0:
+      self.add self.staged.popFirst
+  else:
+    draft.rollback(self.kept)
+    # NOTE for now we are going to discard staged additions
+    # if we hit an error during the revision cb
+    self.staged.clear
+    self.revising = false
+    raise err
 
-proc add*(self: Track, n: sink Node): bool {.discardable.} =
+template reviseIt*(self: Track, body: untyped): untyped =
+  self.revise(proc(it {.inject.}: var Draft) = body)
+
+proc add*(self: Track, n: sink Node): Contribution {.discardable.} =
   ## Whether the track kept `n`.
-  self.write Add(addNode: n)
+  if not self.keeps(n):
+    return Contribution.Ignored
 
-proc update*(self: Track, i: int, n: sink Node): bool {.discardable.} =
-  ## Replaces whatever slot `i` holds with `n`, so the last replace wins. A
-  ## change that depends on what the slot holds, such as binding part of the
-  ## node, belongs in the edit form.
-  ##
-  ## Whether slot `i` now holds `n`.
-  guard i in self, "index out of bounds"
-  self.write Update(updateIndex: i, updateNode: n)
+  if self.revising:
+    self.staged.addLast n
+    return Contribution.Staged
 
-proc update*(self: Track, i: int, edit: EditProc) =
-  ## Edits a copy of the node in slot `i`, at this write's turn, so `edit`
-  ## sees the node as earlier writes left it, then puts the copy in the slot
-  ## as the replace form would. If `edit` raises, or `keeps` refuses what it
-  ## made, the slot is untouched. An edit that changes nothing notifies no
-  ## one. A removed slot is left alone.
-  ##
-  ## Only the node's structure is copied. A live object already in the node
-  ## is shared with the copy, so `edit` should put a new one in place and
-  ## not change one that is there.
-  guard i in self, "index out of bounds"
-  guard not edit.isNil, "edit cannot be nil"
-  discard self.write Edit(editIndex: i, editProc: edit)
-
-proc `[]=`*(self: Track, i: int, n: sink Node) =
-  discard self.update(i, n)
-
-proc delete*(self: Track, i: int) =
-  if i in self:
-    discard self.write Delete(deleteIndex: i)
-
-proc reset*(self: Track, cb: ResetProc) =
-  ## Replaces what is kept in one step: `cb` changes the slots in place, to
-  ## compact, truncate or replace them, and what it puts there is not asked
-  ## of `keeps`. Monitors are notified before it runs, with everything as it
-  ## was, and after, with everything as it now is. A write to a slot that was
-  ## pending when the reset ran is dropped, since its index may now name
-  ## something else.
-  ##
-  ## `cb` should not raise partway through an edit. If it does, monitors are
-  ## still notified after, with whatever it left, and the failure is raised
-  ## to the writer.
-  guard not cb.isNil, "cb cannot be nil"
-  discard self.write Reset(resetCb: cb)
-
-proc reset*(self: Track, entries: sink seq[Entry]) =
-  self.reset(
-    proc(e: var seq[Entry]) =
-      e = move entries)
+  self.notifying = true
+  result = Contribution.Kept
+  self.kept.add Present(n: n)
+  let i = self.kept.high
+  var err: ref CatchableError
+  try:
+    self.added(i, self.kept[i])
+  except CatchableError as e:
+    if err.isNil:
+      err = e
+  for m in self.attached:
+    try:
+      m.added(i, self.kept[i])
+    except CatchableError as e:
+      if err.isNil:
+        err = e
+  self.notifying = false
+  self.monitors.keepItIf(not it.isNil)
+  if not err.isNil:
+    raise err
 
 method reified*(self: Track): Value =
   var
@@ -296,8 +219,8 @@ method reified*(self: Track): Value =
     case each
     of Present(n):
       kept.add bl"(present $n)"
-    of Removed:
-      kept.add bl"(removed)"
+    of Absent:
+      kept.add bl"Absent"
 
   let snapshot = self.monitors
   for each in snapshot:
@@ -317,48 +240,41 @@ method reified*(self: Track): Value =
 # ================
 
 proc track*(self: Monitor): Track =
-  self.track
+  self.sourceTrack
 
 proc detach(self: Monitor) =
   let
-    s = self.track
+    s = self.sourceTrack
     j = s.monitors.find self
   if s.notifying:
     s.monitors[j] = nil
   else:
     s.monitors.delete j
-  self.track = nil
+  self.sourceTrack = nil
 
 # Setting the track from inside left or joined only records the target. The
 # move in progress finishes first, then the loop moves again. A monitor whose
 # joined raises is detached again, so setting the track later calls joined
 # afresh.
 proc `track=`*(self: Monitor, s: Track) =
-  self.target = s
+  self.targetTrack = s
   if self.moving:
     return
   self.moving = true
   try:
-    while self.track != self.target:
-      let (old, next) = (self.track, self.target)
+    while self.sourceTrack != self.targetTrack:
+      let (old, next) = (self.sourceTrack, self.targetTrack)
       if not old.isNil:
         self.detach
         self.left old
-      self.track = next
+      self.sourceTrack = next
       if not next.isNil:
         next.monitors.add self
         try:
           self.joined
         except CatchableError:
           self.detach
-          self.target = nil
+          self.targetTrack = nil
           raise
   finally:
     self.moving = false
-
-proc clear*(self: Track) =
-  let snapshot = self.monitors
-  for each in snapshot:
-    if not each.isNil and each.track == self:
-      `track=`(each, nil)
-  self.reset @[]
