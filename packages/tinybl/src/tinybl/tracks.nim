@@ -12,11 +12,11 @@ type
       n*: Node
 
   Monitor* = ref object of Live
-    track: Track
-    target: Track
+    track, target: Track
     moving: bool
 
   ResetProc* = proc(kept: var seq[Entry])
+  EditProc* = proc(n: var Node)
 
   Op = object
     case
@@ -27,6 +27,9 @@ type
       updateNode: Node
     of Delete:
       deleteIndex: int
+    of Edit:
+      editIndex: int
+      editProc: EditProc
     of Reset:
       resetCb: ResetProc
 
@@ -102,6 +105,24 @@ method keeps*(self: Track, n: Node): bool {.base.} =
   ## may be asked more than once about the same write.
   true
 
+# A track hears its own writes through these, before any monitor does, so a
+# subclass can keep what `keeps` and its own queries read.
+
+method added*(self: Track, i: int, entry: Entry) {.base.} =
+  discard
+
+method changed*(self: Track, i: int, prev, curr: Entry) {.base.} =
+  discard
+
+method removed*(self: Track, i: int, entry: Entry) {.base.} =
+  discard
+
+method beforeReset*(self: Track) {.base.} =
+  discard
+
+method afterReset*(self: Track) {.base.} =
+  discard
+
 func holds(self: Track, i: int, n: Node): bool =
   case self.kept[i]
   of Present(m): m == n
@@ -109,7 +130,7 @@ func holds(self: Track, i: int, n: Node): bool =
 
 func namesSlot(op: Op): bool =
   case op
-  of Update, Delete: true
+  of Update, Delete, Edit: true
   of Add, Reset: false
 
 proc expected(self: Track, op: Op): bool =
@@ -117,7 +138,7 @@ proc expected(self: Track, op: Op): bool =
   case op
   of Add(n): self.keeps(n)
   of Update(i, n): self.holds(i, n) or self.keeps(n)
-  of Delete, Reset: true
+  of Delete, Edit, Reset: true
 
 proc apply(self: Track, op: sink Op, failure: var ref CatchableError): bool =
   ## Answers whether what the op put is on the track afterwards.
@@ -129,6 +150,10 @@ proc apply(self: Track, op: sink Op, failure: var ref CatchableError): bool =
         failure = e
 
   template notify(call: untyped) =
+    block:
+      let h {.inject.} = self
+      attempt:
+        call
     for h {.inject.} in self.attached:
       attempt:
         call
@@ -139,6 +164,15 @@ proc apply(self: Track, op: sink Op, failure: var ref CatchableError): bool =
       kept = self.keeps(n)
     kept
 
+  template replace(at, node: untyped) =
+    if self.holds(at, node):
+      result = true
+    elif asks(node):
+      let prev = move self.kept[at]
+      self.kept[at] = Present(n: move node)
+      notify h.changed(at, prev, self.kept[at])
+      result = true
+
   case op
   of Add(n):
     if asks(n):
@@ -147,18 +181,21 @@ proc apply(self: Track, op: sink Op, failure: var ref CatchableError): bool =
       notify h.added(i, self.kept[i])
       result = true
   of Update(i, n):
-    if self.holds(i, n):
-      result = true
-    elif asks(n):
-      let prev = move self.kept[i]
-      self.kept[i] = Present(n: move n)
-      notify h.changed(i, prev, self.kept[i])
-      result = true
+    replace(i, n)
   of Delete(i):
     if self.kept[i] != Removed():
       let entry = move self.kept[i]
       self.kept[i] = Removed()
       notify h.removed(i, entry)
+  of Edit(i, edit):
+    case self.kept[i]
+    of Removed: discard
+    of Present(current):
+      var draft = current
+      let run = edit
+      attempt:
+        run(draft)
+        replace(i, draft)
   of Reset(cb):
     notify h.beforeReset
     let run = cb
@@ -203,9 +240,27 @@ proc add*(self: Track, n: sink Node): bool {.discardable.} =
   self.write Add(addNode: n)
 
 proc update*(self: Track, i: int, n: sink Node): bool {.discardable.} =
+  ## Replaces whatever slot `i` holds with `n`, so the last replace wins. A
+  ## change that depends on what the slot holds, such as binding part of the
+  ## node, belongs in the edit form.
+  ##
   ## Whether slot `i` now holds `n`.
   guard i in self, "index out of bounds"
   self.write Update(updateIndex: i, updateNode: n)
+
+proc update*(self: Track, i: int, edit: EditProc) =
+  ## Edits a copy of the node in slot `i`, at this write's turn, so `edit`
+  ## sees the node as earlier writes left it, then puts the copy in the slot
+  ## as the replace form would. If `edit` raises, or `keeps` refuses what it
+  ## made, the slot is untouched. An edit that changes nothing notifies no
+  ## one. A removed slot is left alone.
+  ##
+  ## Only the node's structure is copied. A live object already in the node
+  ## is shared with the copy, so `edit` should put a new one in place and
+  ## not change one that is there.
+  guard i in self, "index out of bounds"
+  guard not edit.isNil, "edit cannot be nil"
+  discard self.write Edit(editIndex: i, editProc: edit)
 
 proc `[]=`*(self: Track, i: int, n: sink Node) =
   discard self.update(i, n)
@@ -237,27 +292,25 @@ method reified*(self: Track): Value =
   var
     kept = newSeq[Node]()
     monitors = newSeq[Node]()
-  for i, each in self.kept:
-    let i = Num(i)
+  for each in self.kept:
     case each
     of Present(n):
-      kept.add bl"($i present $n)"
+      kept.add bl"(present $n)"
     of Removed:
-      kept.add bl"($i removed)"
+      kept.add bl"(removed)"
 
   let snapshot = self.monitors
   for each in snapshot:
     if each.isNil:
       continue
     try:
-      let h = toNode each.reified
-      monitors.add bl"(monitor $h)"
+      monitors.add toNode each.reified
     except CatchableError:
       continue
 
-  let (k, h) = (Set(kept), Set(monitors))
+  let (k, h) = (List(kept), List(monitors))
 
-  toValue bl"(track $k $h)"
+  toValue bl"!(track $k $h)"
 
 # ================
 # Monitor
