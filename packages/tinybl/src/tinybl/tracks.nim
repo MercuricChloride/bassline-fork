@@ -1,4 +1,5 @@
 from std/sequtils import keepItIf
+import std/deques
 import ./[micro, micro_macros]
 
 refuseWith BasslineError
@@ -15,18 +16,25 @@ type
     target: Track
     moving: bool
 
-  ResetProc* = proc(kept: var seq[Entry]) {.raises: [].}
+  ResetProc* = proc(kept: var seq[Entry])
+
+  Op = object
+    case
+    of Add:
+      addNode: Node
+    of Update:
+      updateIndex: int
+      updateNode: Node
+    of Delete:
+      deleteIndex: int
+    of Reset:
+      resetCb: ResetProc
 
   Track* = ref object of Live
     kept: seq[Entry]
     monitors: seq[Monitor]
     notifying: bool
-    pending: seq[(int, Entry, ResetProc)]
-
-const
-  AppendIndex = -1
-  ResetIndex = -2
-  SkipIndex = -3
+    pending: Deque[Op]
 
 func `==`*(a, b: Entry): bool =
   case a
@@ -39,13 +47,13 @@ func `==`*(a, b: Entry): bool =
     of Removed: false
     of Present(y): x == y
 
-method added*(self: Monitor, i: int) {.base.} =
+method added*(self: Monitor, i: int, entry: Entry) {.base.} =
   discard
 
-method changed*(self: Monitor, i: int, old: Entry) {.base.} =
+method changed*(self: Monitor, i: int, prev, curr: Entry) {.base.} =
   discard
 
-method removed*(self: Monitor, i: int, old: Entry) {.base.} =
+method removed*(self: Monitor, i: int, entry: Entry) {.base.} =
   discard
 
 method joined*(self: Monitor) {.base.} =
@@ -73,6 +81,9 @@ proc contains*(self: Track, i: int): bool =
 proc `[]`*(self: Track, i: int): lent Entry =
   return self.kept[i]
 
+proc `[]`*(self: Track, i: BackwardsIndex): lent Entry =
+  return self.kept[i]
+
 iterator attached(self: Track): Monitor =
   ## The monitors attached when the loop starts, minus any detached since. A
   ## monitor detached during a notification has its slot set to nil, and one
@@ -88,9 +99,25 @@ method keeps*(self: Track, n: Node): bool {.base.} =
   ## may be asked more than once about the same write.
   true
 
-proc apply(self: Track, i: int, entry: sink Entry, cb: ResetProc,
-           failure: var ref CatchableError): bool =
-  ## Answers whether the entry is on the track afterwards.
+func holds(self: Track, i: int, n: Node): bool =
+  case self.kept[i]
+  of Present(m): m == n
+  of Removed: false
+
+func namesSlot(op: Op): bool =
+  case op
+  of Update, Delete: true
+  of Add, Reset: false
+
+proc expected(self: Track, op: Op): bool =
+  ## What `op` would answer if it were applied now.
+  case op
+  of Add(n): self.keeps(n)
+  of Update(i, n): self.holds(i, n) or self.keeps(n)
+  of Delete, Reset: true
+
+proc apply(self: Track, op: sink Op, failure: var ref CatchableError): bool =
+  ## Answers whether what the op put is on the track afterwards.
   template attempt(body: untyped) =
     try:
       body
@@ -103,90 +130,86 @@ proc apply(self: Track, i: int, entry: sink Entry, cb: ResetProc,
       attempt:
         call
 
-  let same = i in self and self.kept[i] == entry
-  var held = true
-  if not same:
-    case entry
-    of Present(n):
-      held = false
-      attempt:
-        held = self.keeps(n)
-    of Removed: discard
+  template asks(n: Node): bool =
+    var kept = false
+    attempt:
+      kept = self.keeps(n)
+    kept
 
-  if i == ResetIndex:
+  case op
+  of Add(n):
+    if asks(n):
+      self.kept.add Present(n: move n)
+      let i = self.kept.high
+      notify h.added(i, self.kept[i])
+      result = true
+  of Update(i, n):
+    if self.holds(i, n):
+      result = true
+    elif asks(n):
+      let prev = move self.kept[i]
+      self.kept[i] = Present(n: move n)
+      notify h.changed(i, prev, self.kept[i])
+      result = true
+  of Delete(i):
+    if self.kept[i] != Removed():
+      let entry = move self.kept[i]
+      self.kept[i] = Removed()
+      notify h.removed(i, entry)
+  of Reset(cb):
     notify h.beforeReset
-    cb(self.kept)
-    for w in self.pending.mitems:
-      if w[0] >= 0:
-        w[0] = SkipIndex
+    let run = cb
+    attempt:
+      run(self.kept)
+    var rest = initDeque[Op]()
+    while self.pending.len > 0:
+      var waiting = self.pending.popFirst
+      if not waiting.namesSlot:
+        rest.addLast waiting
+    self.pending = rest
     notify h.afterReset
-  elif same or not held:
-    discard
-  elif i == AppendIndex:
-    self.kept.add entry
-    let i = self.kept.high
-    notify h.added(i)
-  elif i notin self:
-    held = false
-  else:
-    let old = move self.kept[i]
-    self.kept[i] = entry
-    case self.kept[i]
-    of Present:
-      notify h.changed(i, old)
-    of Removed:
-      notify h.removed(i, old)
   self.monitors.keepItIf(not it.isNil)
-  held
 
-proc write(self: Track, i: int, entry: sink Entry, cb: ResetProc = nil): bool =
+proc write(self: Track, op: sink Op): bool =
   ## A write made from inside a monitor callback is queued and applied after
   ## the current change has been notified to every monitor. A monitor that
   ## raises doesn't stop the others or the pending writes. The first failure
   ## is raised to the writer once everything has been applied.
   ##
-  ## Answers whether the entry is on the track. A write applied now answers
-  ## exactly. A queued one answers what `keeps` says now, and `keeps` decides
-  ## again when it is applied.
+  ## Answers whether what the op put is on the track. A write applied now
+  ## answers exactly. A queued one answers what `keeps` says now, and `keeps`
+  ## decides again when it is applied.
   if self.notifying:
-    result = true
-    if i notin self or self.kept[i] != entry:
-      case entry
-      of Present(n):
-        result = self.keeps(n)
-      of Removed: discard
-    self.pending.add (i, entry, cb)
+    result = self.expected(op)
+    self.pending.addLast op
     return
   self.notifying = true
   var failure: ref CatchableError
   try:
-    result = self.apply(i, entry, cb, failure)
-    var j = 0
-    while j < self.pending.len:
-      var w = move self.pending[j]
-      inc j
-      discard self.apply(w[0], move w[1], w[2], failure)
+    result = self.apply(op, failure)
+    while self.pending.len > 0:
+      discard self.apply(self.pending.popFirst, failure)
   finally:
-    self.pending.setLen 0
+    self.pending.clear
     self.notifying = false
   if not failure.isNil:
     raise failure
 
 proc add*(self: Track, n: sink Node): bool {.discardable.} =
   ## Whether the track kept `n`.
-  self.write(AppendIndex, Present(n: n))
+  self.write Add(addNode: n)
 
 proc update*(self: Track, i: int, n: sink Node): bool {.discardable.} =
   ## Whether slot `i` now holds `n`.
   guard i in self, "index out of bounds"
-  self.write(i, Present(n: n))
+  self.write Update(updateIndex: i, updateNode: n)
 
 proc `[]=`*(self: Track, i: int, n: sink Node) =
   discard self.update(i, n)
 
 proc delete*(self: Track, i: int) =
   if i in self:
-    discard self.write(i, Removed())
+    discard self.write Delete(deleteIndex: i)
 
 proc reset*(self: Track, cb: ResetProc) =
   ## Replaces what is kept in one step: `cb` changes the slots in place, to
@@ -195,8 +218,12 @@ proc reset*(self: Track, cb: ResetProc) =
   ## was, and after, with everything as it now is. A write to a slot that was
   ## pending when the reset ran is dropped, since its index may now name
   ## something else.
+  ##
+  ## `cb` should not raise partway through an edit. If it does, monitors are
+  ## still notified after, with whatever it left, and the failure is raised
+  ## to the writer.
   guard not cb.isNil, "cb cannot be nil"
-  discard self.write(ResetIndex, Removed(), cb)
+  discard self.write Reset(resetCb: cb)
 
 method reified*(self: Track): Value =
   var
