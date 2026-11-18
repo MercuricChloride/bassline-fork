@@ -12,11 +12,17 @@ method removed(self: Logger, i: int, entry: Entry) =
 method changed(self: Logger, i: int, prev, curr: Entry) =
   echo "changed: ", prev, " to ", curr
 
+method beforeReset*(self: Logger) =
+  echo "before reset: ", self.track[0..<self.track.len]
+
+method afterReset*(self: Logger) =
+  echo "after reset: ", self.track[0..<self.track.len]
+
 method joined(self: Logger) =
-  echo "joined"
+  echo "joined:"
 
 method left(self: Logger, t: Track) =
-  echo "left"
+  echo "left: "
 
 proc main =
   let
@@ -28,4 +34,11 @@ proc main =
   track.add bl"hello"
   track.add bl"world"
 
-main()
+  track.delete 0
+
+  track.update 1, bl"[hello world]"
+
+  track.clear
+
+when isMainModule:
+  main()

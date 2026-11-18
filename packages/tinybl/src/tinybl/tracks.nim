@@ -84,6 +84,9 @@ proc `[]`*(self: Track, i: int): lent Entry =
 proc `[]`*(self: Track, i: BackwardsIndex): lent Entry =
   return self.kept[i]
 
+proc `[]`*(self: Track, i: Slice[int]): seq[Entry] =
+  return self.kept[i]
+
 iterator attached(self: Track): Monitor =
   ## The monitors attached when the loop starts, minus any detached since. A
   ## monitor detached during a notification has its slot set to nil, and one
@@ -225,6 +228,11 @@ proc reset*(self: Track, cb: ResetProc) =
   guard not cb.isNil, "cb cannot be nil"
   discard self.write Reset(resetCb: cb)
 
+proc reset*(self: Track, entries: sink seq[Entry]) =
+  self.reset(
+    proc(e: var seq[Entry]) =
+      e = move entries)
+
 method reified*(self: Track): Value =
   var
     kept = newSeq[Node]()
@@ -294,3 +302,10 @@ proc `track=`*(self: Monitor, s: Track) =
           raise
   finally:
     self.moving = false
+
+proc clear*(self: Track) =
+  let snapshot = self.monitors
+  for each in snapshot:
+    if not each.isNil and each.track == self:
+      `track=`(each, nil)
+  self.reset @[]
