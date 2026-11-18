@@ -62,7 +62,6 @@ type
     bNil,
     bNum, bText, bSym, bBytes,
     bList, bRec, bDict, bSet
-
   PartialValueKind* = enum
     pvNil, pvAtom, pvOpenFrame, pvCloseFrame
 
@@ -689,26 +688,30 @@ iterator members*(a: Value): lent Node =
       yield a.nth(i)
 
 iterator members*(v: var Value, changed: var bool): var Node =
+  template normalized(body) =
+    var refused: bool
+    try:
+      body
+    except CatchableError:
+      refused = true
+      raise
+    finally:
+      if changed and not refused:
+        v.normalize
   case v.kind
   of bNil..bBytes: discard
   of bList, bRec:
     for each in v.vseq.mitems:
       yield each
   of bDict:
-    defer:
-      if changed:
-        echo "normalizing dict"
-        v.normalize
-    for each in v.vdict.data.mitems:
-      yield each.key
-      yield each.val
+    normalized:
+      for each in v.vdict.data.mitems:
+        yield each.key
+        yield each.val
   of bSet:
-    defer:
-      if changed:
-        echo "normalizing set"
-        v.normalize
-    for each in v.vset.data.mitems:
-      yield each
+    normalized:
+      for each in v.vset.data.mitems:
+        yield each
 
 # ================
 # Order & hash
@@ -861,7 +864,7 @@ proc reify*(self: var Node, deep = false): bool {.discardable.} =
   of Plain(self):
     self.reify(deep)
 
-proc reified*(self: sink Node, deep = true): Node =
+proc reified*(self: sink Node): Node =
   discard self.reify(true)
   self
 
@@ -970,7 +973,7 @@ proc readCE*(r: var Reader, src: openArray[char], pos: var int): bool =
     of pvCloseFrame:
       guard r.open.len > 0, "end at top level"
       var f = r.open.pop
-      v = canonicalFrame(f.kind, move f.members, f.mark)
+      v = frame(f.kind, move f.members, f.mark)
     of pvNil:
       v = null(h.mark)
     of pvAtom:
@@ -1227,6 +1230,7 @@ func strLen*(n: BNum): int =
 # Value Sugar
 # ================
 
+
 func `!`*(self: sink Value): Value =
   self.mark = true
   self
@@ -1313,6 +1317,31 @@ proc setFlat*(self: var Node, index: int, value: sink Node) =
   guard index >= 0, "invalid flat index"
   var remaining = index
   guard self.setFlatInto(remaining, value), "invalid flat index"
+
+func contains*(self: Node, i: int): bool =
+  case self
+  of Bound: false
+  of Plain(v):
+    v.kind in {bList, bRec} and i < v.len
+
+func contains*(self: Node, key: Node): bool =
+  case self
+  of Bound: false
+  of Plain(v):
+    case v.kind
+    of bDict:
+      key in v.vdict
+    of bSet:
+      key in v.vset
+    else: false
+
+func `[]`*(self: Node, i: int): lent Node =
+  guard i in self, "invalid slot access"
+  return self.asValue[i]
+
+func `[]`*(self: Node, key: Node): lent Node =
+  guard key in self, "inavlid key access"
+  return self.asValue[key]
 
 func `!`*(self: sink Node): Node =
   self.asValue.mark = true
