@@ -58,16 +58,13 @@ method added*(self: PingPong, i: int, e: Entry) =
       self.track.add bl"pong"
   else: discard
 
-proc main =
-  let
-    track = Track()
-    log = Logger()
-    pp = PingPong()
-    f = ToFile(path: "/tmp/writer-thang.blb")
+method reified*(self: PingPong): Value =
+  toValue bl"ping-pong!"
 
-  log.track = track
-  f.track = track
-  pp.track = track
+proc main =
+  let track = Track()
+
+  track.up(Logger(), PingPong(), ToFile(path: "/tmp/writer-thang.blb"))
 
   track.add bl"hello"
   track.add bl"world"
@@ -89,7 +86,15 @@ proc main =
 
   echo "first after raising: ", track[0]
 
-  echo track.reified
+  echo "reified: \n", track.reified
+
+  let other = Track()
+  for m in track.attached:
+    other.up(m)
+
+  echo "reified after down: \n", track.reified
+
+  echo "other reified: \n", other.reified
 
 when isMainModule:
   main()

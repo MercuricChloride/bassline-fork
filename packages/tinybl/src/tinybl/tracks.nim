@@ -22,7 +22,7 @@ type
     kept: seq[Entry]
     staged: Deque[Node]
     monitors: seq[Monitor]
-    notifying, revising: bool
+    writing: bool
 
   Swap* = object
     idx*: int
@@ -31,7 +31,7 @@ type
   ReviseProc* = proc(draft: var Draft)
 
   Draft* = object
-    kept: seq[Entry]
+    source: Track
     swaps: seq[Swap]
 
 func `==`*(a, b: Entry): bool =
@@ -46,23 +46,22 @@ func `==`*(a, b: Entry): bool =
     of Present(y): x == y
 
 proc len*(self: Draft): int =
-  self.kept.len
+  if self.source.isNil: 0 else: self.source.kept.len
 
 proc `[]`*(self: Draft, i: int): lent Entry =
   guard i in 0..<self.len, "index out of bounds"
-  for i in 0..<self.swaps.len:
-    if self.swaps[i].idx == i:
-      return self.swaps[i].entry
-  return self.kept[i]
+  for s in self.swaps:
+    if s.idx == i:
+      return s.entry
+  return self.source.kept[i]
 
 proc stage(self: var Draft, i: int, entry: sink Entry) =
   guard i in 0..<self.len, "index out of bounds"
   for s in self.swaps.mitems:
     if s.idx == i:
-      if s.entry != entry:
-        s.entry = entry
+      s.entry = entry
       return
-  if entry != self.kept[i]:
+  if entry != self.source.kept[i]:
     self.swaps.add Swap(idx: i, entry: entry)
 
 proc `[]=`*(self: var Draft, i: int, n: sink Node) =
@@ -102,22 +101,17 @@ proc `[]`*(self: Track, i: BackwardsIndex): lent Entry =
 proc `[]`*(self: Track, i: Slice[int]): seq[Entry] =
   return self.kept[i]
 
-iterator attached(self: Track): Monitor =
-  ## The monitors attached when the loop starts, minus any detached since. A
-  ## monitor detached during a notification has its slot set to nil, and one
-  ## attached during it is past the end, so neither is called for that change.
-  let n = self.monitors.len
-  for j in 0 ..< n:
-    let h = self.monitors[j]
-    if not h.isNil:
-      yield h
+iterator attached*(self: Track): Monitor =
+  let ms = self.monitors
+  for m in ms:
+    if not isNil(m):
+      yield m
 
 # A track hears its own writes through these, before any monitor does, so a
 # subclass can keep what `keeps` and its own queries read.
 
 method keeps*(self: Track, n: Node): bool {.base.} =
-  ## Whether the track holds on to `n` when it is added or put in a slot. It
-  ## may be asked more than once about the same write.
+  ## Called when an addition reaches the front of this track's queue.
   true
 
 method added*(self: Track, i: int, entry: Entry) {.base.} =
@@ -126,90 +120,76 @@ method added*(self: Track, i: int, entry: Entry) {.base.} =
 method revised*(self: Track, swaps: openArray[Swap]) {.base.} =
   discard
 
-proc rollback(self: var Draft, entries: var seq[Entry]) =
-  entries = move self.kept
-
-proc commit(self: var Draft, entries: var seq[Entry]) =
-  entries = move self.kept
-  for s in self.swaps.mitems:
-    entries[s.idx].swap(s.entry)
-
-proc add*(self: Track, n: sink Node): Contribution {.discardable.}
-
-proc revise*(self: Track, cb: ReviseProc): bool {.discardable.} =
-  guard not isNil(cb), "cb cannot be nil"
-  guard not self.revising, "cannot revise mid-revision"
-  guard not self.notifying, "cannot revise mid-notification"
-  self.revising = true
-  var
-    err: ref CatchableError
-    draft = Draft(kept: move self.kept)
+template capture(err: var ref CatchableError, body: untyped) =
   try:
-    cb(draft)
+    body
   except CatchableError as e:
-    err = e
-  draft.swaps.keepItIf(draft.kept[it.idx] != it.entry)
-  if err.isNil:
-    # draft.commit swaps the new & old entries on the draft
-    draft.commit(self.kept)
-    if draft.swaps.len == 0:
-      return
-    # so from here draft.swaps contains the old entries
-    try:
-      self.revised(draft.swaps)
-    except CatchableError:
-      discard
-    for m in self.attached:
-      try:
-        m.revised(draft.swaps)
-      except CatchableError:
-        # NOTE: This probably isn't correct to discard this error
-        # but I also don't want to rollback here?
-        # tsk tsk
-        discard
-    self.revising = false
+    if err.isNil: err = e
+
+template notify(self: Track, err: var ref CatchableError,
+                hook: untyped, args: varargs[untyped]) =
+  capture(err):
+    hook(self, args)
+  # A monitor can detach during delivery. Its slot stays vacant until the
+  # turn ends, and monitors attached by another monitor wait for the next change.
+  let count = self.monitors.len
+  for i in 0..<count:
+    let monitor = self.monitors[i]
+    if not monitor.isNil:
+      capture(err):
+        hook(monitor, args)
+
+proc admit(self: Track, n: sink Node, err: var ref CatchableError): Contribution =
+  var keep = false
+  capture(err):
+    keep = self.keeps(n)
+  if not keep:
+    return Contribution.Ignored
+
+  self.kept.add Present(n: move n)
+  let i = self.kept.high
+  self.notify(err, added, i, self.kept[i])
+  Contribution.Kept
+
+template writeTurn(self: Track, err, body: untyped) =
+  var err: ref CatchableError
+  self.writing = true
+  try:
+    body
     while self.staged.len > 0:
-      self.add self.staged.popFirst
+      discard self.admit(self.staged.popFirst(), err)
+  finally:
+    self.writing = false
+    self.staged.clear()
+    self.monitors.keepItIf(not it.isNil)
+  if not err.isNil: raise err
+
+proc add*(self: Track, n: sink Node): Contribution {.discardable.} =
+  ## Adds a node to the track, or stages the node for writing
+  ## if this is called while we are writing
+  if self.writing:
+    self.staged.addLast n
+    return Contribution.Staged
   else:
-    draft.rollback(self.kept)
-    # NOTE for now we are going to discard staged additions
-    # if we hit an error during the revision cb
-    self.staged.clear
-    self.revising = false
-    raise err
+    self.writeTurn(err):
+      result = self.admit(n, err)
+
+proc revise*(self: Track, cb: ReviseProc) =
+  ## The callback edits a draft over the committed slots. If it raises, its
+  ## edits not applied and the staged adds are discarded.
+  guard not cb.isNil, "cb cannot be nil"
+  guard not self.writing, "cannot revise during another write"
+  self.writeTurn(err):
+    var draft = Draft(source: self)
+    cb(draft)
+    draft.swaps.keepItIf(self.kept[it.idx] != it.entry)
+    for s in draft.swaps.mitems:
+      swap(self.kept[s.idx], s.entry)
+    if draft.swaps.len > 0:
+      self.notify(err, revised, draft.swaps)
 
 template reviseIt*(self: Track, body: untyped): untyped =
   self.revise(proc(it {.inject.}: var Draft) = body)
-
-proc add*(self: Track, n: sink Node): Contribution {.discardable.} =
-  ## Whether the track kept `n`.
-  if not self.keeps(n):
-    return Contribution.Ignored
-
-  if self.revising:
-    self.staged.addLast n
-    return Contribution.Staged
-
-  self.notifying = true
-  result = Contribution.Kept
-  self.kept.add Present(n: n)
-  let i = self.kept.high
-  var err: ref CatchableError
-  try:
-    self.added(i, self.kept[i])
-  except CatchableError as e:
-    if err.isNil:
-      err = e
-  for m in self.attached:
-    try:
-      m.added(i, self.kept[i])
-    except CatchableError as e:
-      if err.isNil:
-        err = e
-  self.notifying = false
-  self.monitors.keepItIf(not it.isNil)
-  if not err.isNil:
-    raise err
 
 method reified*(self: Track): Value =
   var
@@ -246,7 +226,7 @@ proc detach(self: Monitor) =
   let
     s = self.sourceTrack
     j = s.monitors.find self
-  if s.notifying:
+  if s.writing:
     s.monitors[j] = nil
   else:
     s.monitors.delete j
@@ -278,3 +258,12 @@ proc `track=`*(self: Monitor, s: Track) =
           raise
   finally:
     self.moving = false
+
+proc up*(self: Track, monitors: varargs[Monitor]) =
+  for m in monitors:
+    m.track = self
+
+proc down*(self: Track, monitors: varargs[Monitor]) =
+  for m in monitors:
+    if m.track == self:
+      m.track = nil
