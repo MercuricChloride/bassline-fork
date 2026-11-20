@@ -193,23 +193,8 @@ macro blet*(text: string, exported: static bool = true): untyped =
 # Matching
 # ================
 
-type MarkTest = enum
-  unmarked, marked, eitherMark
-
 template valueOf(x: Node | Value): untyped =
   when x is Node: x.asValue else: x
-
-func isKind(v: Value, kind: Kind, test: MarkTest): bool =
-  v.kind == kind and (test == eitherMark or v.mark == (test == marked))
-
-func isKind(n: Node, kind: Kind, test: MarkTest): bool =
-  n.isPlain and n.asValue.isKind(kind, test)
-
-func isMarked(v: Value): bool =
-  v.mark
-
-func isMarked(n: Node): bool =
-  n.isPlain and n.asValue.mark
 
 func slotOf(dict: Value, key: Node): int =
   var (lo, hi) = (0, dict.len div 2)
@@ -238,14 +223,14 @@ proc bindTo(f: var Fitting, s: Sigil, read: NimNode) =
     guard bound != name, s.spelling & " is bound twice"
   f.binds.add (name, read)
 
-proc fit(f: var Fitting, pattern: Node, at: NimNode, anyMark: bool) =
+proc fit(f: var Fitting, pattern: Node, at: NimNode, ignoreMark: bool) =
   case pattern
   of Bound(l):
     let s = Sigil(l)
     case s.kind
     of Splice:
       if s.mark:
-        f.checks.add newCall(bindSym"isMarked", at)
+        f.checks.add newCall(bindSym"isKind", at, newLit({bNil .. bSet}), bindSym"marked")
       f.bindTo(s, at)
     of Spread:
       refuse s.spelling & " spreads, and a pattern takes a rest, &" & s.name
@@ -255,7 +240,7 @@ proc fit(f: var Fitting, pattern: Node, at: NimNode, anyMark: bool) =
     let
       held = newCall(bindSym"valueOf", at)
       test =
-        if anyMark: bindSym"eitherMark"
+        if ignoreMark: bindSym"anyMark"
         elif v.mark: bindSym"marked"
         else: bindSym"unmarked"
     f.checks.add newCall(bindSym"isKind", at, newLit(v.kind), test)
@@ -328,8 +313,8 @@ macro matchValue*(subject: untyped, branches: varargs[untyped]): untyped =
         continue
       var f: Fitting
       try:
-        let (read, anyMark) = pattern.strVal.readPattern
-        f.fit(read, subjectSym, anyMark)
+        let (read, ignoreMark) = pattern.strVal.readPattern
+        f.fit(read, subjectSym, ignoreMark)
       except BasslineError as e:
         error(e.msg, pattern)
       for slot in f.slots:

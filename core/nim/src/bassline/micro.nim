@@ -1345,6 +1345,29 @@ type
   BSet* = SortedSet[Node]
   BDict* = SortedTable[Node, Node]
 
+const
+  marked* = some true
+  unmarked* = some false
+  anyMark* = none bool
+
+proc isKind*(self: Value, kinds: set[Kind], marked = anyMark): bool =
+  if marked.isSome:
+    let m = marked.get
+    self.kind in kinds and self.mark == m
+  else:
+    self.kind in kinds
+
+proc isKind*(self: Value, kind: Kind, marked = anyMark): bool =
+  self.isKind({kind}, marked)
+
+proc isKind*(self: Node, kinds: set[Kind], marked = anyMark): bool =
+  case self
+  of Plain(v): v.isKind(kinds, marked)
+  of Bound: false
+
+proc isKind*(self: Node, kind: Kind, marked = anyMark): bool =
+  self.isKind({kind}, marked)
+
 proc rewrite*(self: var Node,
               p: proc(n: Value): bool,
               f: proc(n: var Node)): bool {.discardable.} =
