@@ -9,7 +9,6 @@ srcDir = "src"
 # Dependencies
 
 requires "nim >= 2.4.0"
-requires "benchy >= 0.1.0"
 requires "https://github.com/nim-lang/bigints"
 requires "https://github.com/Bassline-Org/petit-parser-nim"
 

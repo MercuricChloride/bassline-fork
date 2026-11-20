@@ -98,6 +98,8 @@ proc basslineValue*(
     colon = ch(':').trim(ws)
     entries = ((form & colon).pick(0) & form).star
     members = form.star
+    repeatedKey = failure[string, Node]("keys that do not repeat")
+    repeatedMember = failure[string, Node]("members that do not repeat")
     # the first member, read once, decides between a dict and a set
     braced = (form & (colon & form).pick(1).optional).callCC(
       proc(next: TextParser[(Node, Option[Node])], ctx: Context[string]): Result[Node] =
@@ -111,14 +113,24 @@ proc basslineValue*(
             return failedAs(Node, r)
           var es = r.take
           es.insert((move k, move v.get), 0)
-          succeed(Dict(es), r.pos)
+          let
+            written = es.len
+            dict = Dict(es)
+          if dict.asValue.vdict.len < written:
+            return judged[string, Node](repeatedKey, ctx.at(r.pos))
+          succeed(dict, r.pos)
         else:
           var r = members.parseOn(ctx.at(f.pos))
           if not r.isSuccess:
             return failedAs(Node, r)
           var items = r.take
           items.insert(move k, 0)
-          succeed(Set(items), r.pos)
+          let
+            written = items.len
+            set = Set(items)
+          if set.asValue.len < written:
+            return judged[string, Node](repeatedMember, ctx.at(r.pos))
+          succeed(set, r.pos)
     )
     emptyDict = colon.map(_ => Dict(@[], false))
     emptySet = epsilon[string, Node](Set(@[], false))
