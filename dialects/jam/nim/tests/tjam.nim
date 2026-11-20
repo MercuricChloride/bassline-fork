@@ -1,4 +1,4 @@
-import std/[os, sequtils, unittest]
+import std/[sequtils, unittest]
 import bassline, bassline_crypto, bassline_jam
 
 let
@@ -10,10 +10,9 @@ type Recorder = ref object of Conn
   told: seq[Node]
   closed: bool
 
-method send(r: Recorder, ce: sink string) =
+method write(r: Recorder, n: Node) =
   if not r.closed:
-    var reader = initReader()
-    r.told.add reader.readOne(ce).toNode
+    r.told.add n
 
 method close(r: Recorder) =
   r.closed = true
@@ -63,10 +62,6 @@ proc nodes(t: Track): seq[Node] =
     case t[i]
     of Present(n): result.add n
     of Absent: discard
-
-proc scratch(name: string): string =
-  result = getTempDir() / name
-  removeFile(result)
 
 suite "a jam":
   test "what is put is told to whoever asks, what it has and then as it comes":
@@ -205,115 +200,117 @@ suite "a jam":
     check early.says(alice.ask(jamQ))
     check early.told.len == 1
 
-suite "kept in a log":
-  test "opened again it holds what it held, ranks going on, and is the same jam":
-    let path = scratch("tjam-log.blb")
-    defer: removeFile(path)
-    let first = alice.put(bl"general", Text"first")
-    block:
-      check newJam(bl"jam", jamKey, path).lines.accept.says(first)
-    let again = newJam(bl"jam", newKeypair(EddsaBlake2b), path)
-    let line = again.lines.accept
-    let second = alice.put(bl"general", Text"second")
-    check line.says(first)                       # kept already
-    check line.says(second)
-    check line.says(alice.ask(bl"general"))
-    check line.told == @[told(bl"general", 1, first), told(bl"general", 2, second)]
-    let kept = readAll(readFile(path)).mapIt(it.toNode)
-    check kept.len == 3 and kept[0][0] == jamQ and kept[0][1] == Num(0)
-    check kept[1 .. ^1] == @[told(bl"general", 1, first), told(bl"general", 2, second)]
-    let which = again.lines.accept
-    check which.says(alice.ask(jamQ))
-    check which.told == @[kept[0]]
-
-  test "a jam opened on a log says whoever it held as here is gone":
-    let path = scratch("tjam-presence.blb")
-    defer: removeFile(path)
-    block:
-      check newJam(bl"jam", jamKey, path).lines.accept.says(bob.put(hereQ, bl"!{(by bob) (at 1)}"))
-    let again = newJam(bl"jam", jamKey, path)
-    check again.who.len == 0
-    let records = readAll(readFile(path)).mapIt(it.toNode)
-    check records.len == 3 and records[2].by == @[bl"bob"]
-    check records[2][0] == goneQ
-
-  test "a log cut short partway through a record is cut back to the last whole one":
-    let path = scratch("tjam-torn.blb")
-    defer: removeFile(path)
-    block:
-      discard newJam(bl"jam", jamKey, path)
-    let whole = readFile(path)
-    var torn: string
-    told(bl"general", 1, alice.put(bl"general", Text"torn")).write(torn)
-    writeFile(path, whole & torn[0 .. 5])
-    let again = newJam(bl"jam", jamKey, path)
-    check again.len == 1 and readFile(path) == whole
-
-  test "a log holding what isn't signed is refused, and left as it was":
-    let path = scratch("tjam-unsigned.blb")
-    defer: removeFile(path)
-    var bytes: string
-    bl"(jam 0 !{(identity jam)})".write(bytes)
-    writeFile(path, bytes)
-    expect BasslineError:
-      discard newJam(bl"jam", jamKey, path)
-    check readFile(path) == bytes
-
-  test "a log that doesn't begin by saying which jam it is is refused":
-    let path = scratch("tjam-headless.blb")
-    defer: removeFile(path)
-    var bytes: string
-    told(bl"general", 0, alice.put(bl"general", Text"first")).write(bytes)
-    writeFile(path, bytes)
-    expect BasslineError:
-      discard newJam(bl"jam", jamKey, path)
-
-  test "what the log can't take isn't kept, and spends no rank":
-    let path = scratch("tjam-readonly.blb")
-    defer:
-      setFilePermissions(path, {fpUserRead, fpUserWrite})
-      removeFile(path)
-    let jam = newJam(bl"jam", jamKey, path)
+  test "a revision of the jam is followed by what it tells whoever asks next":
+    let jam = memoryJam()
     let line = jam.lines.accept
-    check line.says(alice.ask(bl"general"))
-    setFilePermissions(path, {fpUserRead})
-    discard line.says(alice.put(bl"general", Text"lost"))
-    check jam.len == 1 and line.told.len == 0
-    setFilePermissions(path, {fpUserRead, fpUserWrite})
-    let kept = alice.put(bl"general", Text"kept")
-    check line.says(kept)
-    check line.told == @[told(bl"general", 1, kept)]
-    check newJam(bl"jam", jamKey, path).len == 2
+    check line.says(alice.put(bl"q", bl"a"))
+    jam.reviseIt:
+      it.delete(1)
+    check line.says(alice.ask(bl"q"))
+    check line.told.len == 0
 
-  test "a jam can't begin on a log it can't write":
+suite "kept and begun again":
+  test "a jam reifies to what it keeps, and begun again on that is the same jam":
+    let jam = memoryJam()
+    let line = jam.lines.accept
+    let hi = alice.put(bl"general", Text"hi")
+    check line.says(bob.put(hereQ, bl"!{(by bob) (at 1)}"))
+    check line.says(hi)
+    var kept = jam.reified.toNode
+    check kept[1].asValue.len == 3
+    kept.bindJam(newKeypair(EddsaBlake2b))
+    check kept.isBound and kept.asLive of Jam
+    let again = Jam(kept.asLive)
+    check again.len == 4 and again[1] == jam[1] and again[2] == Present(n: hi)
+    check again[0] == jam[0]                                      # the same jam
+    check again.who.len == 0                                      # bob is gone
+    let watcher = again.lines.accept
+    check watcher.says(alice.ask(bl"general"))
+    check watcher.told == @[told(bl"general", 2, hi)]
+
+  test "what isn't a jam as it reifies isn't begun again":
+    let first = memoryJam()[0]
+    case first
+    of Present(n):
+      let (jamPut, hi) = (n, alice.put(bl"general", Text"hi"))
+      var unmarked = bl"(jam [$jamPut])"
+      expect BasslineError:
+        unmarked.bindJam(jamKey)
+      var headless = bl"!(jam [$hi $jamPut])"
+      expect BasslineError:
+        headless.bindJam(jamKey)                                  # not begun by its (jam)
+      var unsigned = bl"""!(jam [$jamPut (general "unsigned")])"""
+      expect BasslineError:
+        unsigned.bindJam(jamKey)
+      var kept = bl"!(jam [$jamPut $hi])"
+      kept.bindJam(jamKey)
+      check Jam(kept.asLive).len == 2
+    of Absent:
+      fail()
+
+  test "a jam with a vacated slot doesn't reify":
+    let jam = memoryJam()
+    check jam.lines.accept.says(alice.put(bl"q", bl"a"))
+    jam.reviseIt:
+      it.delete(1)
     expect BasslineError:
-      discard newJam(bl"jam", jamKey, getTempDir() / "tjam-no-such-dir" / "tjam.blb")
+      discard jam.reified
+
+suite "a client":
+  test "it keeps what a jam told, each rank once, refusing what doesn't hold":
+    let client = Client(conflicts: Track())
+    let a = alice.put(bl"general", Text"hi")
+    check client.add(told(bl"general", 3, a)) == Contribution.Kept
+    check client.add(told(bl"general", 3, a)) == Contribution.Ignored   # told again
+    check client.add(told(bl"random", 4, a)) == Contribution.Ignored    # put to another question
+    check client.add(told(bl"general", -1, a)) == Contribution.Ignored
+    var forged = alice.put(bl"general", Text"signed hi")
+    forged.asValue[1] = bl"""(general "changed")"""
+    check client.add(told(bl"general", 5, forged)) == Contribution.Ignored
+    check client.len == 1 and client.conflicts.len == 0
+
+  test "another answer told at a rank it holds is a conflict, kept apart":
+    let client = Client(conflicts: Track())
+    let (first, other) = (told(bl"q", 1, alice.put(bl"q", bl"a")), told(bl"q", 1, bob.put(bl"q", bl"b")))
+    check client.add(first) == Contribution.Kept
+    check client.add(other) == Contribution.Ignored
+    check client.len == 1 and client.conflicts.nodes == @[bl"(conflict $first $other)"]
+
+  test "who is here reads what a client was told as it reads a jam":
+    let client = Client()
+    check client.add(told(hereQ, 1, bob.put(hereQ, bl"!{(by bob) (at 1)}"))) == Contribution.Kept
+    check client.add(told(hereQ, 2, alice.put(hereQ, bl"!{(by alice) (at 2)}"))) == Contribution.Kept
+    check client.add(told(goneQ, 3, alice.put(goneQ, bl"!{(by alice) (at 3)}"))) == Contribution.Kept
+    check client.who == @[bl"bob"]
 
 suite "over tcp":
-  test "a jam served on a port keeps what lines put and tells what they ask":
+  test "a jam served on a port keeps what lines put, and a client keeps what it tells once":
     let jam = memoryJam()
     let listener = newListener("127.0.0.1", Port(0))
     listener.up Lines(jam: jam)
     asyncCheck listener.serve
     let port = listener.port
-    let seen = Track()
-    let watcher = waitFor connect("127.0.0.1", port)
-    watcher.into = seen
-    asyncCheck watcher.read
-    watcher.write alice.ask(bl"general")
-    watcher.write alice.ask(goneQ)
-    let speaker = waitFor connect("127.0.0.1", port)
-    speaker.write bob.put(hereQ, bl"!{(by bob) (at 1)}")
-    let hi = bob.put(bl"general", Text"hi over tcp")
-    speaker.write hi
-    waitFor speaker.flush
-    speaker.close
-    for _ in 0 ..< 100:
-      if seen.len >= 2: break
-      poll(10)
-    let heardOver = seen.nodes
-    check heardOver.len == 2
-    check heardOver[0] == told(bl"general", 2, hi)
-    check heardOver[1][0] == goneQ and heardOver[1].by == @[bl"bob"]
-    watcher.close
+    let client = Client(conflicts: Track())
+    var watchers: seq[TcpConn]
+    for _ in 0 ..< 2:                            # dialled again, it is told all again
+      let watcher = waitFor connect("127.0.0.1", port)
+      watcher.into = client
+      asyncCheck watcher.read
+      watcher.write alice.ask(bl"general")
+      watcher.write alice.ask(goneQ)
+      watchers.add watcher
+      if watchers.len == 1:
+        let speaker = waitFor connect("127.0.0.1", port)
+        speaker.write bob.put(hereQ, bl"!{(by bob) (at 1)}")
+        speaker.write bob.put(bl"general", Text"hi over tcp")
+        waitFor speaker.flush
+        speaker.close
+      for _ in 0 ..< 50:
+        poll(10)
+    let held = client.nodes
+    check held.len == 2 and client.conflicts.len == 0
+    check held[0] == told(bl"general", 2, bob.put(bl"general", Text"hi over tcp"))
+    check held[1][0] == goneQ and held[1].by == @[bl"bob"]
+    for watcher in watchers:
+      watcher.close
     listener.close

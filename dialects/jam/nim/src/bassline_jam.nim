@@ -1,2 +1,2 @@
-import ./bassline_jam/[edge, jam, readers]
-export edge, jam, readers
+import ./bassline_jam/[client, edge, jam, readers]
+export client, edge, jam, readers

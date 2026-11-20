@@ -30,7 +30,7 @@ type
   Listener* = ref object of Track
     socket: AsyncSocket
 
-method send*(c: Conn, ce: sink string) {.base.} =
+method write*(c: Conn, n: Node) {.base.} =
   discard
 
 method close*(c: Conn) {.base.} =
@@ -83,16 +83,13 @@ proc transmit(c: TcpConn, ce: string) {.async.} =
       c.why = "failed: " & e.msg
       c.close
 
-method send*(c: TcpConn, ce: sink string) =
-  # sends on one connection go out whole and in order, since the dispatcher
+method write*(c: TcpConn, n: Node) =
+  # writes on one connection go out whole and in order, since the dispatcher
   # runs a socket's sends in turn
   if not c.isClosed:
+    var ce: string
+    n.write(ce)
     c.lastWrite = c.transmit(ce)
-
-proc write*(c: Conn, n: Node) =
-  var ce: string
-  n.write(ce)
-  c.send ce
 
 proc flush*(c: TcpConn) {.async.} =
   if not c.lastWrite.isNil:

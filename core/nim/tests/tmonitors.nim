@@ -29,7 +29,7 @@ suite "monitors":
       source.add n
     check into.nodes == @[bl"1", bl"2"]
 
-  test "a printer writes each change as a value, one a line":
+  test "a printer writes each change after it joins as a value, one a line":
     let path = getTempDir() / "tmonitors-printed.bl"
     defer: removeFile(path)
     let to = open(path, fmWrite)
@@ -39,9 +39,10 @@ suite "monitors":
     t.add bl"(said hi)"
     t.reviseIt:
       it.delete(0)
+      it[1] = bl"(said bye)"
     to.close
     let printed = Value.parseMany(readFile(path))
     check printed.len == 3
-    check printed[0].toNode == bl"(added 0 held)"
-    check printed[1].toNode == bl"(added 1 (said hi))"
-    check printed[2].toNode == bl"(revised 0 held Absent)"
+    check printed[0].toNode == bl"(added 1 (said hi))"
+    check printed[1].toNode == bl"(revised 0 (present held) Absent)"
+    check printed[2].toNode == bl"(revised 1 (present (said hi)) (present (said bye)))"

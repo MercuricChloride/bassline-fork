@@ -1047,9 +1047,9 @@ proc writeOpen*(dst: var string, kind: Kind, mark: bool) =
 proc writeClose*(dst: var string) =
   dst.add char(EndByte)
 
-proc write*(self: Node, enc: var Enc)
+proc write*(self: Node, enc: var Enc) {.gcsafe.}
 
-proc write*(n: Value, enc: var Enc) =
+proc write*(n: Value, enc: var Enc) {.gcsafe.} =
   mixin writeNull, writeAtom, writeOpen, writeClose
   case n.kind
   of bNil:

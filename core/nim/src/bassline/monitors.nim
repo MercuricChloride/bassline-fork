@@ -9,18 +9,18 @@ type
 
 proc toNode(entry: Entry): Node =
   case entry
-  of Present(n): n
+  of Present(n): bl"(present $n)"
   of Absent: bl"Absent"
 
 method added*(self: Printer, i: int, entry: Entry) =
-  let
-    to = if self.to.isNil: stdout else: self.to
-    (at, n) = (Num(i), entry.toNode)
-  to.writeLine $bl"(added $at $n)"
-
-method joined*(self: Printer) =
-  for i in 0 ..< self.track.len:
-    self.added(i, self.track[i])
+  # what a track held before it joined isn't a change, so isn't printed
+  let to = if self.to.isNil: stdout else: self.to
+  case entry
+  of Present(n):
+    let at = Num(i)
+    to.writeLine $bl"(added $at $n)"
+  of Absent:
+    discard
 
 method revised*(self: Printer, swaps: openArray[Swap]) =
   let to = if self.to.isNil: stdout else: self.to
