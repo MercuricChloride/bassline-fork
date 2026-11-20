@@ -505,7 +505,7 @@ proc fromRavel*[T](
 # Sorted Set
 # ================
 
-type SortedSet[T] = object
+type SortedSet*[T] = object
   data: seq[T]
 
 proc indexOf[T](self: SortedSet[T], item: T): int =
@@ -1351,6 +1351,9 @@ func `~`*(self: sink Node): Node =
   self.asValue.mark = false
   self
 
+func Null*(mark = false): Node =
+  Plain(value: null(mark))
+
 func Num*(n: SomeInteger, mark = false): Node =
   Plain(value: Value(kind: bNum, mark: mark, vnum: initNum(n)))
 
@@ -1380,6 +1383,10 @@ func Dict*(els: sink seq[(Node, Node)], mark = false): Node =
 
 func Set*(els: sink seq[Node], mark = false): Node =
   Plain(value: Value(kind: bSet, mark: mark, vset: els.toSortedSet))
+
+type
+  BSet* = SortedSet[Node]
+  BDict* = SortedTable[Node, Node]
 
 proc rewrite*(self: var Node,
               p: proc(n: Value): bool,
