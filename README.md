@@ -1,12 +1,20 @@
 # Bassline
 
-Bassline programs can share **values** before they agree on what those values mean. A **track** is a program’s local working memory. Add a value to a track and, if the track accepts it, that occurrence is there for later readers. This works even if nobody was listening when it arrived.
+Bassline is a way for programs, people and agents to work together without first agreeing on what they mean.
 
-To ask a question, read the entries the track still holds. A track can offer its own queries for the questions its readers ask often. Attach a **monitor** to follow changes, interpret a form of value it recognises (a **dialect**), or contribute an entry to another track.
+Most ways of connecting programs begin with an agreement: a schema, an API, a message format, a topic name, who is on the other end. Whoever wasn't there when it was made can't join without changing it, and the meaning is settled before anyone knows what will turn out to be useful.
 
-For example, a room might keep `(build 433 failed)` before a task board knows what to do with it. If the board later learns that build target 433 names task `fix-433`, it can show the earlier failure under that task. A builder that adopts the convention can report its next failure as `(build fix-433 failed)`.
+Bassline asks for one agreement only, on the bytes. Programs exchange values from one small grammar: nil, integers, text, symbols, bytes, lists, records, dicts and sets, any of them marked as something to do. Each value has exactly one spelling in bytes, and that spelling is its identity. What a value means is left to each reader.
 
-The [value specification](data-model.org) defines what implementations exchange. Start with the [Nim implementation](core/nim/README.md), where tracks and monitors are worked out.
+A **dialect** is a way of arranging values that means something to the programs that recognise it, and it binds no one else. A program can say something before anyone knows what to do with it, a reader that learns a dialect later can make sense of what was said before, and two readers can read the same value in two dialects.
+
+Nothing that takes part in a conversation has to understand all of it. Each program reads the dialects it cares about and lets the rest pass, keeping it or not as it chooses. So a new dialect can be spoken without anyone else changing, and a program supports exactly as much as it needs: an order others can cite, signatures, proof that something was said, parts of a value kept hidden, each taken up only where someone wants it.
+
+For example, a build server might say `(build 433 failed)`. A program that knows builds acts on it, a log keeps it without knowing what it means, and a tool written next year reads what the log kept. If the server signs it, as `(signed (build 433 failed) SIG)`, a reader that cares who said it checks the signature, and one that doesn't reads the build inside it.
+
+Inside a program, the construct for working with all this is the **track**, local working memory that keeps what the program hears. **Monitors** follow a track and read the dialects they recognise, and the program builds its understanding from what it holds.
+
+The [value specification](data-model.org) defines what programs exchange. Start with the [Nim implementation](core/nim/README.md), where tracks and monitors are worked out.
 
 ## The repository
 

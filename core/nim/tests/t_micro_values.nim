@@ -57,6 +57,11 @@ suite "live nodes":
     check deep.isPure
     check deep == folder.reified
 
+  test "a node prints as what it stands for, all the way down":
+    let folder = Folder(files: @[a, b]).toNode
+    check $folder == $folder.reified
+    check Value.parse($folder).toNode == folder.reified
+
   test "a node is written once it is reified, and reads back the same":
     let folder = Folder(files: @[a, b]).toNode
     var refused: string

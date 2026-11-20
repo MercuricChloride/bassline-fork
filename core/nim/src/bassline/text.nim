@@ -251,7 +251,7 @@ proc toBlText*(self: Value): string =
     self.writeText(result)
   else:
     var own = self
-    own.reify
+    own.reify(deep = true)
     own.writeText(result)
 
 proc toBlText*(self: Node): string =
@@ -259,7 +259,7 @@ proc toBlText*(self: Node): string =
     self.asValue.writeText(result)
   else:
     var own = self
-    own.reify
+    own.reify(deep = true)
     own.asValue.writeText(result)
 
 proc `$`*(self: Value): string =
