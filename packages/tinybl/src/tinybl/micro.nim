@@ -1275,49 +1275,6 @@ func incl*(self: var Value, val: sink Node) =
 # Node Sugar
 # ================
 
-proc atFlatInto(self: Node, index: var int): lent Node =
-  result = self
-  if index == 0:
-    return
-  case self
-  of Bound:
-    return
-  of Plain(v):
-    for i in 0..<v.len:
-      dec index
-      result = v.nth(i).atFlatInto(index)
-      if index == 0:
-        return
-
-proc atFlat*(self: Node, index: int): lent Node =
-  guard index >= 0, "invalid flat index"
-  var remaining = index
-  result = self.atFlatInto(remaining)
-  guard remaining == 0, "invalid flat index"
-
-proc setFlatInto(self: var Node, index: var int, value: var Node): bool =
-  if index == 0:
-    self = move value
-    return true
-  case self
-  of Bound:
-    discard
-  of Plain(n):
-    case n.kind
-    of bNil..bBytes: discard
-    of bList..bSet:
-      for each in n.members(result):
-        dec index
-        if each.setFlatInto(index, value):
-          return true
-
-proc setFlat*(self: var Node, index: int, value: sink Node) =
-  ## Replaces a node at a zero-based preorder position
-  ## Bound nodes are leaves and aren't reified
-  guard index >= 0, "invalid flat index"
-  var remaining = index
-  guard self.setFlatInto(remaining, value), "invalid flat index"
-
 func contains*(self: Node, i: int): bool =
   case self
   of Bound: false
