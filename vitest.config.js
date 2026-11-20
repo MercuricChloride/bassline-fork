@@ -4,13 +4,18 @@ export default defineConfig({
   test: {
     globals: true,
     coverage: {
-      provider: 'v8'
+      provider: 'v8',
     },
     environment: 'node',
     // Test organization by type
     // Run all: pnpm test
     // Run specific: pnpm test:unit, pnpm test:property, pnpm test:integration
-    include: ['packages/*/test/**/*.test.js', 'packages/*/test/**/*.property.test.js', 'test/**/*.test.js', 'apps/*/src/**/*.test.js'],
+    include: [
+      '{core,legacy,tools}/*/test/**/*.test.js',
+      '{core,legacy,tools}/*/test/**/*.property.test.js',
+      'test/**/*.test.js',
+      'apps/*/src/**/*.test.js',
+    ],
   },
 })
 
@@ -19,7 +24,7 @@ export const unitConfig = defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['packages/*/test/**/*.test.js'],
+    include: ['{core,legacy,tools}/*/test/**/*.test.js'],
     exclude: ['**/*.property.test.js', '**/*.integration.test.js'],
   },
 })

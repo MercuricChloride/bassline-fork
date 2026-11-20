@@ -2,11 +2,11 @@
 # one environment at the root, shared by blpy and jam-plugin.
 #
 #   uv sync
-#   uv run python -m unittest discover -s packages/blpy/tests
-#   uv run python -m unittest discover -s packages/jam-plugin/tests
+#   uv run python -m unittest discover -s core/py/tests
+#   uv run python -m unittest discover -s dialects/jam/plugin/tests
 
 [tool.uv.workspace]
-members = ["packages/blpy", "packages/jam-plugin"]
+members = ["core/py", "dialects/jam/plugin"]
 
 # PyYAML is optional for blpy. It is here so the YAML door's tests run.
 [dependency-groups]

@@ -1,0 +1,34 @@
+{
+  "name": "@bassline/blts",
+  "version": "0.0.0",
+  "description": "The bassline data model in TypeScript",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./micro": {
+      "types": "./dist/micro.d.ts",
+      "default": "./dist/micro.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "clean": "rm -rf dist"
+  },
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@noble/hashes": "^2.4.0"
+  }
+}

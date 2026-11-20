@@ -14,7 +14,7 @@ dev = [{ name = "pyyaml", specifier = ">=6" }]
 [[package]]
 name = "bassline"
 version = "0.1.0"
-source = { editable = "packages/blpy" }
+source = { editable = "core/py" }
 
 [package.optional-dependencies]
 yaml = [
@@ -28,7 +28,7 @@ provides-extras = ["yaml"]
 [[package]]
 name = "jam-plugin"
 version = "0.1.0"
-source = { virtual = "packages/jam-plugin" }
+source = { virtual = "dialects/jam/plugin" }
 dependencies = [
     { name = "bassline" },
     { name = "websockets" },
@@ -36,7 +36,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bassline", editable = "packages/blpy" },
+    { name = "bassline", editable = "core/py" },
     { name = "websockets", specifier = ">=17,<18" },
 ]
 

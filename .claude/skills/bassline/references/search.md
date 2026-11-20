@@ -1,6 +1,6 @@
 # Search: worked examples
 
-Worked examples of the model in SKILL.md.
+These examples document the explicit search and stream APIs used in earlier implementations. For new application designs, see the [track interface](../SKILL.md).
 
 ## Contents
 
@@ -130,7 +130,7 @@ def experts(value):
 answers = alt_from(search(value) for search in experts(value))
 ```
 
-`alt_from` pulls the next search from `experts(value)` on its turn, so a search learned a moment ago can join, and an endless supply of experts doesn't hold up the first answers. Across programs, see Negotiation in SKILL.md.
+`alt_from` pulls the next search from `experts(value)` on its turn, so a search learned a moment ago can join, and an endless supply of experts doesn't hold up the first answers. Across programs, exchange values that each side can read locally.
 
 ## Interfaces: views, actions, search
 
@@ -191,8 +191,8 @@ Streams combine:
 
 ## In the code today
 
-- Nim: `packages/blnim/src/bl/queries/search.nim` has `Search[Q, A]`, a ref object closing over its context, and denoted spaces (below); `stream.nim` has `Stream[A] = proc(): Option[A]` and the combinators; `rewrite.nim` fills shapes as a search for compatible bindings.
-- Swift: `packages/blswift/Sources/Bassline/Search.swift` has the `Search` protocol and `Answers` for the stream; `ShapeSearch.swift` does shape matching as a search.
+- Nim: `legacy/blnim/src/bl/queries/search.nim` has `Search[Q, A]`, a ref object closing over its context, and denoted spaces (below); `stream.nim` has `Stream[A] = proc(): Option[A]` and the combinators; `rewrite.nim` fills shapes as a search for compatible bindings.
+- Swift: `core/swift/Sources/Bassline/Search.swift` has the `Search` protocol and `Answers` for the stream; `ShapeSearch.swift` does shape matching as a search.
 - `Oracle` is the old name. Say search for what you ask and stream for what it hands back.
 
 ## Denoted search spaces

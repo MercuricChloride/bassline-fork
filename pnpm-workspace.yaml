@@ -1,6 +1,6 @@
 packages:
-  - packages/core
-  - packages/blts
-  - packages/bassline-text-vscode
+  - legacy/js
+  - core/ts
+  - tools/vscode
 allowBuilds:
   esbuild: true

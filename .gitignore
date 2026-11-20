@@ -27,14 +27,14 @@ __pycache__/
 .env.production.local
 
 .mcp.json
-!packages/jam-plugin/.mcp.json
+!dialects/jam/plugin/.mcp.json
 
 bin/
-!packages/blpy/bin/
-!packages/jam-plugin/bin/
+!core/py/bin/
+!dialects/jam/plugin/bin/
 bench-data/
 # generated type declarations
-packages/*/types/
+legacy/*/types/
 
 # keys, and the private homes tests make with keys in them. A key is never
 # kept in the repository: a test makes its own when it runs

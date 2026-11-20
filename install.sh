@@ -3,16 +3,16 @@
 #
 # Checks for Nim 2.2.10 or later and atlas (installing atlas with nimble
 # if it isn't there), fetches blnim's dependencies the first time,
-# builds packages/blcli/bin/bl, bl-clave and bl-jam, links the jam
+# builds tools/cli/bin/bl, bl-clave, bl-jam and bl-fs, links the jam
 # plugin for Claude Code, makes your key, ~/.bl/key.blb, if there isn't
 # one, and says what to put on PATH. Run again, it rebuilds and leaves
 # the rest as it is.
 set -eu
 
 root=$(cd -P "$(dirname "$0")" && pwd)
-bin=$root/packages/blcli/bin
-plugin=$root/packages/jam-plugin
-deps=$root/packages/blnim/deps
+bin=$root/tools/cli/bin
+plugin=$root/dialects/jam/plugin
+deps=$root/legacy/blnim/deps
 
 say() { printf -- '-- %s\n' "$*" >&2; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
@@ -36,7 +36,7 @@ if [ -d "$deps/bigints" ] && [ -d "$deps/checksums" ] && [ -d "$deps/nimcrypto" 
   say "blnim's dependencies are in $deps already"
 else
   say "fetching blnim's dependencies into $deps"
-  (cd "$root/packages/blnim" && atlas install)
+  (cd "$root/legacy/blnim" && atlas install)
   for d in bigints checksums nimcrypto; do
     [ -d "$deps/$d" ] || die "atlas install left no $deps/$d"
   done
@@ -44,11 +44,11 @@ fi
 
 # a bl-jam already running from bin, a jam or an agent's line, keeps the
 # build it began with until it is started again
-if ps -axo command= | grep -F "$root/packages/" | grep -q "blcli/bin/bl-jam"; then
+if ps -axo command= | grep -qF "$root/tools/cli/bin/bl-jam"; then
   say "a bl-jam built here is running: it keeps its build until it is started again"
 fi
 say "building $bin/bl, bl-clave and bl-jam"
-(cd "$root/packages/blcli" && nim --hints:off build)
+(cd "$root/tools/cli" && nim --hints:off build)
 
 link=$HOME/.claude/skills/jam
 if [ -L "$link" ] || [ ! -e "$link" ]; then
@@ -90,5 +90,5 @@ To join a jam on another machine:
   claude-jam NAME         Claude Code, going by NAME
   codex-jam NAME          Codex
 
-packages/jam-plugin/README.md says more, under "A jam across machines".
+dialects/jam/plugin/README.md says more, under "A jam across machines".
 EOF

@@ -1,6 +1,6 @@
 # Implementation checklist
 
-What pillar 1 needs, in the order it's usually built, with the traps blnim, blswift and the JavaScript core each hit, and how to test it. The spec is `data-model.org`; the bassline skill's `references/values.md` is a digest of it.
+Build and test values and their encoding in this order. The examples draw on blnim, blswift, and the JavaScript core. [Value specification](../../../../data-model.org) · [Encoding and syntax guide](../../bassline/references/values.md)
 
 ## Contents
 
