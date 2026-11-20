@@ -1,0 +1,7 @@
+# binaries: everything kept here has an extension
+*
+!*/
+!*.*
+nimcache/
+.nimcache/
+deps/

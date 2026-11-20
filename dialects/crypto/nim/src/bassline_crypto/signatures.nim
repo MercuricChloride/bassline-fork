@@ -55,8 +55,9 @@ proc sign*(kp: Keypair, n: Node): Signature =
     sig = kp.scheme.hashOf.sign(kp.secret, bytes.toBytes)
   Signature(scheme: kp.scheme, sig: sig.toString, pubkey: kp.pubkey)
 
-proc signed*(kp: Keypair, n: Node): Signed =
-  Signed(value: n, sig: kp.sign(n))
+proc signed*(kp: Keypair, n: sink Node): Signed =
+  let sig = kp.sign(n)
+  Signed(value: n, sig: sig)
 
 proc holds*(s: Signature, n: Node): bool =
   if not s.scheme.canCheck or s.sig.len != 64 or s.pubkey.len != 32:
@@ -78,19 +79,19 @@ func publicKey*(kp: Keypair): PublicKey =
 func publicKey*(s: Signature): PublicKey =
   PublicKey(scheme: s.scheme, key: s.pubkey)
 
-proc toNode*(k: PublicKey): Node =
+proc toNode*(k: sink PublicKey): Node =
   let (scheme, key) = (Sym(k.scheme), Bytes(k.key))
   bl"(key $scheme $key)"
 
-proc toNode*(s: Signature): Node =
+proc toNode*(s: sink Signature): Node =
   let (scheme, sig, pubkey) = (Sym(s.scheme), Bytes(s.sig), Bytes(s.pubkey))
   bl"(signature $scheme $sig $pubkey)"
 
-proc toNode*(s: Signed): Node =
-  let (value, sig) = (s.value, s.sig.toNode)
-  bl"(signed $value $sig)"
+proc toNode*(s: sink Signed): Node =
+  let sig = s.sig.toNode
+  bl"(signed $s.value $sig)"
 
-proc toNode*(kp: Keypair): Node =
+proc toNode*(kp: sink Keypair): Node =
   let (scheme, seed, pubkey) = (Sym(kp.scheme), Bytes(kp.seed), Bytes(kp.pubkey))
   bl"(keypair $scheme $seed $pubkey)"
 

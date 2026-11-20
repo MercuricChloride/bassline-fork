@@ -211,3 +211,86 @@ suite "keys":
     check newKeypair().scheme == Ed25519
     check keypairFromSeed(seed).scheme == Ed25519
     refuses newKeypair("rsa")
+
+suite "checked values":
+  let
+    said = kp.signed(v)
+    plain = said.toNode
+
+  test "a signed value that holds is checked, and reifies to what was said":
+    let c = plain.checked
+    check not c.isNil
+    check c.value == v and c.key == kp.publicKey and c.signature == said.sig
+    check c.reified == plain.asValue
+    check c.toNode.checked == c
+    check c.toNode != plain and c.toNode.reified == plain
+
+  test "what isn't a signed value, or doesn't hold, isn't checked":
+    var tampered = plain
+    tampered.asValue[1] = bl"changed"
+    check tampered.checked.isNil
+    check v.checked.isNil
+    check bl"(signed)".checked.isNil
+    check said.sig.toNode.checked.isNil
+
+  test "a signed track keeps only signed values that hold":
+    var tampered = plain
+    tampered.asValue[1] = bl"changed"
+    let t = SignedTrack()
+    check t.add(plain) == Contribution.Kept
+    check t.add(plain.checked.toNode) == Contribution.Kept
+    check t.add(newKeypair().signed(bl"(q a)").toNode) == Contribution.Kept
+    check t.add(v) == Contribution.Ignored
+    check t.add(tampered) == Contribution.Ignored
+    check t.len == 3
+
+  test "a checker offers what holds on its track, as checked values, to a track of its own":
+    var tampered = plain
+    tampered.asValue[1] = bl"changed"
+    let
+      heard = Track()
+      kept = Track()
+    discard heard.add(plain)
+    discard heard.add(v)
+    heard.up Checker(into: kept)
+    check kept.len == 1
+    discard heard.add(tampered)
+    let other = newKeypair().signed(bl"(q a)").toNode
+    discard heard.add(other)
+    check kept.len == 2
+    heard.reviseIt:
+      it[1] = plain
+    check kept.len == 3
+    var
+      reads: seq[Node]
+      printed: seq[string]
+    for i in 0 ..< kept.len:
+      case kept[i]
+      of Present(n):
+        check n.isBound and not n.checked.isNil
+        reads.add n.reified
+        printed.add $n
+      of Absent:
+        discard
+    check reads == @[plain, other, plain]
+    check printed[0] == $plain
+
+  test "a signed value with live parts is checked by what it stands for":
+    let inner = kp.signed(bl"(q a)")
+    var n = kp.signed(inner.toNode).toNode
+    n.asValue[1] = inner.toNode.checked.toNode
+    check n.isPlain and not n.isPure
+    check not n.checked.isNil
+
+  test "a checker doesn't offer again a slot made live in place":
+    let
+      heard = Track()
+      kept = Track()
+    discard heard.add(plain)
+    heard.up Checker(into: kept)
+    heard.reviseIt:
+      it[0] = plain.checked.toNode
+    check kept.len == 1
+    heard.reviseIt:
+      it[0] = kp.signed(bl"(q other)").toNode
+    check kept.len == 2

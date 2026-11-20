@@ -26,9 +26,9 @@ Code here is one of a few things: a kind of track, a monitor, a kind of live obj
   - [`core/ts`](core/ts/README.md), [`core/py`](core/py/README.md) and [`core/swift`](core/swift/README.md), which agree with it on values and their bytes and are still catching up on tracks
 - `dialects/` holds one directory per dialect, with everything that speaks it in any language.
   - [`dialects/crypto`](dialects/crypto/README.md): digests and signatures over values, which is how identity is spoken
-  - [`dialects/jam`](dialects/jam/plugin/README.md): rooms where people, agents and programs talk, and the plugin that puts Claude Code and Codex sessions on one
+  - [`dialects/jam`](dialects/jam/README.md): rooms where people, agents and programs talk, a jam on tracks that takes only signed values, and the [plugin](dialects/jam/plugin/README.md) that puts Claude Code and Codex sessions on one
 - `tools/` holds the [`bl` command line](tools/cli) and [editor support](tools/vscode/README.md) for `.bl` files.
-- `legacy/` holds what the track model replaces, kept building while something still runs on it: [`legacy/blnim`](legacy/blnim), the earlier Nim implementation the jam and the `bl` tools run on today, and [`legacy/js`](legacy/js), the earlier JavaScript one.
+- `legacy/` holds what the track model replaces, kept building while something still runs on it: [`legacy/blnim`](legacy/blnim), the earlier Nim implementation the `bl` tools run on today, and [`legacy/js`](legacy/js), the earlier JavaScript one.
 
 [`AGENTS.md`](AGENTS.md) is the guide for working in the repository, for people and agents alike.
 

@@ -8,6 +8,7 @@ This is the Nim implementation of Bassline, and the one the model is worked out 
 - [`text.nim`](src/bassline/text.nim) is the textual syntax: `Value.parse` for one value, `Value.parseMany` for a document, and `$` to print. The parsers it builds from (`basslineValue`, `basslineParser`, `basslineDocument`) take extensions tried before a symbol, for a dialect with words of its own.
 - [`micro_macros.nim`](src/bassline/micro_macros.nim) is values written in Nim: `bl`, `blet` and `matchValue`.
 - [`tracks.nim`](src/bassline/tracks.nim) is local working memory and the monitors that follow it.
+- [`monitors.nim`](src/bassline/monitors.nim) is monitors most programs want. `Printer(to: FILE)` writes each change to a track as a value on a line of its own, `(added I N)` or `(revised I WAS NOW)`, `Absent` for a vacant slot. `Relay(into: TRACK)` offers to TRACK what the track it watches holds when it joins, then each addition, and no revision, since a revision is the holder's own. Relaying into a track whose `keeps` takes less filters what is relayed.
 
 ## Keeping and reading
 
@@ -83,6 +84,7 @@ nim c -r tests/tcorpus.nim          # the shared corpus, every case head
 nim c -r tests/t_micro_macros.nim   # bl, blet, matchValue
 nim c -r tests/t_micro_values.nim   # live nodes, reify, writing
 nim c -r tests/ttracks.nim          # tracks and monitors
+nim c -r tests/tmonitors.nim        # printing and relaying
 nim c -r -d:release bench/codec.nim [FILE.blb]   # round trips checked, then decode, encode and print timed
 ```
 

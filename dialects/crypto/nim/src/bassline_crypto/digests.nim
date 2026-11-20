@@ -57,7 +57,7 @@ proc verifies*(d: Digest, n: Node): bool =
   let bytes = n.ce
   d.verifies(bytes.toBytes)
 
-proc toNode*(d: Digest): Node =
+proc toNode*(d: sink Digest): Node =
   let (algo, h) = (Sym(d.algo), Bytes(d.hash))
   bl"(digest $algo $h)"
 
